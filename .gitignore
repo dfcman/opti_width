@@ -1,0 +1,8 @@
+# Configuration files
+config.ini
+
+# Python cache
+__pycache__/
+
+# Spyder project files
+.spyproject/
