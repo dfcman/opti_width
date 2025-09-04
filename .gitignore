@@ -6,3 +6,6 @@ __pycache__/
 
 # Spyder project files
 .spyproject/
+
+# CSV 결과 파일 제외
+.csv
