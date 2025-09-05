@@ -31,7 +31,7 @@ class Database:
         try:
             connection = self.pool.acquire()
             cursor = connection.cursor()
-            # ë°ëª¬ìš© ì¿¼ë¦¬ ë³µì› (ì‚¬ìš©ìž ì¶”ê°€ í•„ë“œ ìœ ì§€)
+            # µ¥¸ó¿ë Äõ¸® º¹¿ø (»ç¿ëÀÚ Ãß°¡ ÇÊµå À¯Áö)
             # query = """ 
             #     SELECT 
             #         plant, pm_no, schedule_unit, lot_no, version, min_width, roll_max_width as max_width, max_re_count as max_pieces,
@@ -57,7 +57,7 @@ class Database:
             """
             cursor.execute(query)
             result = cursor.fetchone()
-            # ë°˜í™˜ ê°’ ê°œìˆ˜ë¥¼ 10ê°œë¡œ ë§žì¶¤
+            # ¹ÝÈ¯ °ª °³¼ö¸¦ 10°³·Î ¸ÂÃã
             return result if result else (None, None, None, None, None, None, None, None, None, None)
         except oracledb.Error as error:
             print(f"Error while fetching target lot: {error}")
@@ -71,7 +71,7 @@ class Database:
         try:
             connection = self.pool.acquire()
             cursor = connection.cursor()
-            # ë°ëª¬ìš© ì¿¼ë¦¬ ë³µì›
+            # µ¥¸ó¿ë Äõ¸® º¹¿ø
             query = "UPDATE th_versions_manager SET calc_successful = :status WHERE lot_no = :lot_no and version = :version"
             cursor.execute(query, status=status, lot_no=lot_no, version=version)
             connection.commit()
@@ -106,16 +106,16 @@ class Database:
             raw_orders = []
             for row in rows:
                 width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no = row
-                export_type = 'ìˆ˜ì¶œ' if export_yn == 'Y' else 'ë‚´ìˆ˜'
+                export_type = '¼öÃâ' if export_yn == 'Y' else '³»¼ö'
                 raw_orders.append({
-                    'ì˜¤ë”ë²ˆí˜¸': order_no,
-                    'ì§€í­': int(width),
-                    'ê°€ë¡œ': int(length),
-                    'ì£¼ë¬¸ìˆ˜ëŸ‰': int(order_roll_cnt),
-                    'ì£¼ë¬¸í†¤': float(order_ton_cnt),
-                    'ë¡¤ê¸¸ì´': int(roll_length),
-                    'ë“±ê¸‰': quality_grade,
-                    'ìˆ˜ì¶œë‚´ìˆ˜': export_type
+                    '¿À´õ¹øÈ£': order_no,
+                    'ÁöÆø': int(width),
+                    '°¡·Î': int(length),
+                    'ÁÖ¹®¼ö·®': int(order_roll_cnt),
+                    'ÁÖ¹®Åæ': float(order_ton_cnt),
+                    '·Ñ±æÀÌ': int(roll_length),
+                    'µî±Þ': quality_grade,
+                    '¼öÃâ³»¼ö': export_type
                 })
             print(f"Successfully fetched {len(raw_orders)} roll orders for lot {paper_prod_seq}")
             return raw_orders
@@ -145,14 +145,14 @@ class Database:
             raw_orders = []
             for row in rows:
                 width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
-                export_type = 'ìˆ˜ì¶œ' if export_yn == 'Y' else 'ë‚´ìˆ˜'
+                export_type = '¼öÃâ' if export_yn == 'Y' else '³»¼ö'
                 raw_orders.append({
-                    'ì˜¤ë”ë²ˆí˜¸': order_no,
-                    'ê°€ë¡œ': int(width),
-                    'ì„¸ë¡œ': int(length),
-                    'ì£¼ë¬¸í†¤': float(order_ton_cnt),
-                    'ë“±ê¸‰': quality_grade,
-                    'ìˆ˜ì¶œë‚´ìˆ˜': export_type
+                    '¿À´õ¹øÈ£': order_no,
+                    '°¡·Î': int(width),
+                    '¼¼·Î': int(length),
+                    'ÁÖ¹®Åæ': float(order_ton_cnt),
+                    'µî±Þ': quality_grade,
+                    '¼öÃâ³»¼ö': export_type
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders
@@ -173,7 +173,7 @@ class Database:
             cursor.execute("DELETE FROM th_pattern_sequence WHERE lot_no = :lot_no AND version = :version", lot_no=lot_no, version=version)
             print(f"Deleted existing patterns for lot {lot_no}, version {version}")
 
-            # pok_cnt ì»¬ëŸ¼ ì¶”ê°€
+            # pok_cnt ÄÃ·³ Ãß°¡
             insert_query = """
                 INSERT INTO th_pattern_sequence (
                     module, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt,
@@ -191,38 +191,37 @@ class Database:
             """
             
             total_seq = 0
-            all_bind_vars = []
+            # print(f"Number of pattern details: {len(pattern_details)}")
             for pattern in pattern_details:
-                total_seq += 1
-                
-                # Pythonì—ì„œ pok_cnt ê³„ì‚°
-                pok_cnt_value = len([w for w in pattern['widths'] if w > 0])
+                # print(f"Number of pattern details: {pattern['Count']}")
+                for _ in range(pattern['Count']):
+                    total_seq += 1
+                    
+                    # Python¿¡¼­ pok_cnt °è»ê
+                    pok_cnt_value = len([w for w in pattern['widths'] if w > 0])
 
-                bind_vars = {
-                    'plant': plant,
-                    'pm_no': pm_no,
-                    'schedule_unit': schedule_unit,
-                    'max_width': max_width,
-                    'paper_type': paper_type,
-                    'b_wgt': b_wgt,
-                    'lot_no': lot_no,
-                    'version': version,
-                    'prod_seq': total_seq,
-                    'unit_no': total_seq,
-                    'pok_cnt': pok_cnt_value,
-                    'w1': pattern['widths'][0], 'w2': pattern['widths'][1],
-                    'w3': pattern['widths'][2], 'w4': pattern['widths'][3],
-                    'w5': pattern['widths'][4], 'w6': pattern['widths'][5],
-                    'w7': pattern['widths'][6], 'w8': pattern['widths'][7],
-                    'g1': pattern['group_nos'][0][:15], 'g2': pattern['group_nos'][1][:15],
-                    'g3': pattern['group_nos'][2][:15], 'g4': pattern['group_nos'][3][:15],
-                    'g5': pattern['group_nos'][4][:15], 'g6': pattern['group_nos'][5][:15],
-                    'g7': pattern['group_nos'][6][:15], 'g8': pattern['group_nos'][7][:15],
-                }
-                all_bind_vars.append(bind_vars)
-            
-            if all_bind_vars:
-                cursor.executemany(insert_query, all_bind_vars)
+                    bind_vars = {
+                        'plant': plant,
+                        'pm_no': pm_no,
+                        'schedule_unit': schedule_unit,
+                        'max_width': max_width,
+                        'paper_type': paper_type,
+                        'b_wgt': b_wgt,
+                        'lot_no': lot_no,
+                        'version': version,
+                        'prod_seq': total_seq,
+                        'unit_no': total_seq,
+                        'pok_cnt': pok_cnt_value, # °è»êµÈ °ª ¹ÙÀÎµù
+                        'w1': pattern['widths'][0], 'w2': pattern['widths'][1],
+                        'w3': pattern['widths'][2], 'w4': pattern['widths'][3],
+                        'w5': pattern['widths'][4], 'w6': pattern['widths'][5],
+                        'w7': pattern['widths'][6], 'w8': pattern['widths'][7],
+                        'g1': pattern['group_nos'][0][:15], 'g2': pattern['group_nos'][1][:15],
+                        'g3': pattern['group_nos'][2][:15], 'g4': pattern['group_nos'][3][:15],
+                        'g5': pattern['group_nos'][4][:15], 'g6': pattern['group_nos'][5][:15],
+                        'g7': pattern['group_nos'][6][:15], 'g8': pattern['group_nos'][7][:15],
+                    }
+                    cursor.execute(insert_query, bind_vars)
 
             connection.commit()
             print(f"Successfully inserted {total_seq} new pattern sequences.")
