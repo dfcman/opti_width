@@ -191,38 +191,37 @@ class Database:
             """
             
             total_seq = 0
-            all_bind_vars = []
+            # print(f"Number of pattern details: {len(pattern_details)}")
             for pattern in pattern_details:
-                total_seq += 1
-                
-                # Python에서 pok_cnt 계산
-                pok_cnt_value = len([w for w in pattern['widths'] if w > 0])
+                # print(f"Number of pattern details: {pattern['Count']}")
+                for _ in range(pattern['Count']):
+                    total_seq += 1
+                    
+                    # Python에서 pok_cnt 계산
+                    pok_cnt_value = len([w for w in pattern['widths'] if w > 0])
 
-                bind_vars = {
-                    'plant': plant,
-                    'pm_no': pm_no,
-                    'schedule_unit': schedule_unit,
-                    'max_width': max_width,
-                    'paper_type': paper_type,
-                    'b_wgt': b_wgt,
-                    'lot_no': lot_no,
-                    'version': version,
-                    'prod_seq': total_seq,
-                    'unit_no': total_seq,
-                    'pok_cnt': pok_cnt_value,
-                    'w1': pattern['widths'][0], 'w2': pattern['widths'][1],
-                    'w3': pattern['widths'][2], 'w4': pattern['widths'][3],
-                    'w5': pattern['widths'][4], 'w6': pattern['widths'][5],
-                    'w7': pattern['widths'][6], 'w8': pattern['widths'][7],
-                    'g1': pattern['group_nos'][0][:15], 'g2': pattern['group_nos'][1][:15],
-                    'g3': pattern['group_nos'][2][:15], 'g4': pattern['group_nos'][3][:15],
-                    'g5': pattern['group_nos'][4][:15], 'g6': pattern['group_nos'][5][:15],
-                    'g7': pattern['group_nos'][6][:15], 'g8': pattern['group_nos'][7][:15],
-                }
-                all_bind_vars.append(bind_vars)
-            
-            if all_bind_vars:
-                cursor.executemany(insert_query, all_bind_vars)
+                    bind_vars = {
+                        'plant': plant,
+                        'pm_no': pm_no,
+                        'schedule_unit': schedule_unit,
+                        'max_width': max_width,
+                        'paper_type': paper_type,
+                        'b_wgt': b_wgt,
+                        'lot_no': lot_no,
+                        'version': version,
+                        'prod_seq': total_seq,
+                        'unit_no': total_seq,
+                        'pok_cnt': pok_cnt_value, # 계산된 값 바인딩
+                        'w1': pattern['widths'][0], 'w2': pattern['widths'][1],
+                        'w3': pattern['widths'][2], 'w4': pattern['widths'][3],
+                        'w5': pattern['widths'][4], 'w6': pattern['widths'][5],
+                        'w7': pattern['widths'][6], 'w8': pattern['widths'][7],
+                        'g1': pattern['group_nos'][0][:15], 'g2': pattern['group_nos'][1][:15],
+                        'g3': pattern['group_nos'][2][:15], 'g4': pattern['group_nos'][3][:15],
+                        'g5': pattern['group_nos'][4][:15], 'g6': pattern['group_nos'][5][:15],
+                        'g7': pattern['group_nos'][6][:15], 'g8': pattern['group_nos'][7][:15],
+                    }
+                    cursor.execute(insert_query, bind_vars)
 
             connection.commit()
             print(f"Successfully inserted {total_seq} new pattern sequences.")
