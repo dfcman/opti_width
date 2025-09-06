@@ -3,7 +3,7 @@ import sys
 import time
 import configparser
 import os
-from optimize import Optimize
+from roll_optimize import RollOptimize
 from sheet_optimize import SheetOptimize
 from db_connector import Database
 import argparse
@@ -38,24 +38,54 @@ def process_roll_lot(db, plant, pm_no, schedule_unit, lot_no, version, min_width
     print(df_orders.to_string())
     print("\n")
 
-    # 최적화 실행
-    print("--- 롤지 최적화 시작 ---")
-    optimizer = Optimize(
-        df_spec_pre=df_orders,
-        max_width=int(max_width),
-        min_width=int(min_width),
-        max_pieces=int(max_pieces)
-    )
-    results = optimizer.run_optimize()
+    # --- 롤길이별 최적화 실행 ---
+    all_results = {
+        "pattern_result": [],
+        "pattern_details_for_db": [],
+        "fulfillment_summary": []
+    }
+    
+    unique_roll_lengths = df_orders['롤길이'].unique()
 
-    if "error" in results:
-        print(f"[에러] Lot {lot_no} 최적화 실패: {results['error']}. 상태를 99(에러)로 변경합니다.")
+    for roll_length in unique_roll_lengths:
+        print(f"\n--- 롤길이 그룹 {roll_length}에 대한 최적화 시작 ---")
+        df_subset = df_orders[df_orders['롤길이'] == roll_length].copy()
+
+        if df_subset.empty:
+            continue
+
+        optimizer = RollOptimize(
+            df_spec_pre=df_subset,
+            max_width=int(max_width),
+            min_width=int(min_width),
+            max_pieces=int(max_pieces)
+        )
+        results = optimizer.run_optimize()
+
+        if "error" in results:
+            print(f"[에러] Lot {lot_no}, 롤길이 {roll_length} 최적화 실패: {results['error']}")
+            # Optionally, handle this case, maybe skip this group or stop the whole process
+            continue
+        
+        print(f"--- 롤길이 그룹 {roll_length} 최적화 성공 ---")
+        all_results["pattern_result"].append(results["pattern_result"])
+        all_results["pattern_details_for_db"].extend(results["pattern_details_for_db"])
+        all_results["fulfillment_summary"].append(results["fulfillment_summary"])
+
+    if not all_results["pattern_details_for_db"]:
+        print(f"[에러] Lot {lot_no}에 대한 최적화 결과가 없습니다. 상태를 99(에러)로 변경합니다.")
         db.update_lot_status(lot_no=lot_no, version=version, status=99)
         return
 
-    print("최적화 성공. 결과를 처리합니다.")
-    # ... (결과 처리 및 저장 로직은 롤지와 쉬트지가 유사하므로 일단 생략) ...
-    save_results(db, lot_no, version, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt, results)
+    # 모든 롤길이 그룹의 결과 취합
+    final_results = {
+        "pattern_result": pd.concat(all_results["pattern_result"], ignore_index=True),
+        "pattern_details_for_db": all_results["pattern_details_for_db"],
+        "fulfillment_summary": pd.concat(all_results["fulfillment_summary"], ignore_index=True)
+    }
+
+    print("\n--- 전체 최적화 성공. 최종 결과를 처리합니다. ---")
+    save_results(db, lot_no, version, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt, final_results)
 
 def process_sheet_lot(db, plant, pm_no, schedule_unit, lot_no, version, min_width, max_width, max_pieces, paper_type, b_wgt):
     """쉬트지 lot에 대한 전체 최적화 프로세스를 처리합니다."""
@@ -98,7 +128,7 @@ def process_sheet_lot(db, plant, pm_no, schedule_unit, lot_no, version, min_widt
         min_width=int(min_width),
         max_pieces=int(max_pieces),
         b_wgt=float(b_wgt),
-        sheet_roll_length=6330, # 하드코딩
+        sheet_roll_length=14740, # 하드코딩6330
         sheet_trim=20 # 하드코딩
     )
     results = optimizer.run_optimize()

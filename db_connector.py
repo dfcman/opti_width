@@ -45,7 +45,7 @@ class Database:
             #         plant, pm_no, schedule_unit, lot_no, '05' as version, min_width, roll_max_width as max_width, max_re_count as max_pieces,
             #         paper_type, b_wgt
             #     from th_versions_manager 
-            #     where lot_no = '3241100322' and version = '01'
+            #     where lot_no = '3241100322' and version = '01'   -- 3250900073, 3250900429
             # """
 
             query = """ 
@@ -53,15 +53,15 @@ class Database:
                     plant, pm_no, schedule_unit, lot_no, '05' as version, min_width, roll_max_width, sheet_max_width, max_re_count as max_pieces,
                     paper_type, b_wgt
                 from th_versions_manager 
-                where lot_no = '3250900073' and version = '01'
+                where lot_no = '3250900429' and version = '01'
             """
             cursor.execute(query)
             result = cursor.fetchone()
-            # 반환 값 개수를 10개로 맞춤
-            return result if result else (None, None, None, None, None, None, None, None, None, None)
+            # 반환 값 개수를 11개로 맞춤
+            return result if result else (None, None, None, None, None, None, None, None, None, None, None)
         except oracledb.Error as error:
             print(f"Error while fetching target lot: {error}")
-            return None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None
         finally:
             if connection:
                 self.pool.release(connection)

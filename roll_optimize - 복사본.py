@@ -2,7 +2,7 @@ import pandas as pd
 from ortools.linear_solver import pywraplp
 import time
 
-class Optimize:
+class RollOptimize:
     
     def __init__(self, df_spec_pre, max_width=1000, min_width=0, max_pieces=8):
         self.df_spec_pre = df_spec_pre
@@ -23,7 +23,7 @@ class Optimize:
             self.patterns.append({item: 1})
 
         # Create some greedy patterns
-        for _ in range(30): # Generate 30 greedy patterns
+        for _ in range(100): # Generate 30 greedy patterns
             new_pattern = {}
             current_width = 0
             current_pieces = 0

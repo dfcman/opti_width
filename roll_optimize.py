@@ -2,7 +2,7 @@ import pandas as pd
 from ortools.linear_solver import pywraplp
 import time
 
-class Optimize:
+class RollOptimize:
     
     def __init__(self, df_spec_pre, max_width=1000, min_width=0, max_pieces=8):
         self.df_spec_pre = df_spec_pre
@@ -56,10 +56,24 @@ class Optimize:
             production_exprs[item] = production_expr
             constraints[item] = solver.Add(production_expr >= demand, f'demand_{item}')
 
-        total_rolls = solver.Sum(x[j] for j in range(len(self.patterns)))
-        total_over_production = solver.Sum(production_exprs[item] - demand for item, demand in self.demands.items())
-        penalty_weight = 100.0
-        solver.Minimize(total_rolls + penalty_weight * total_over_production)
+        # 목표 함수 변경: 총 폐기물(waste) 최소화
+        # 폐기물 = (롤 폐기물) + (초과 생산 폐기물)
+
+        # 1. 롤 폐기물 (Trim Loss): 각 패턴 사용 시 남는 롤의 폭
+        total_trim_loss = solver.Sum(
+            (self.max_width - sum(self.item_info[item] * count for item, count in p.items())) * x[j]
+            for j, p in enumerate(self.patterns)
+        )
+
+        # 2. 초과 생산 폐기물 (Over-production Waste): 주문량을 초과하여 생산된 제품의 총 폭
+        total_over_production_width = solver.Sum(
+            (production_exprs[item] - demand) * self.item_info[item]
+            for item, demand in self.demands.items()
+        )
+        over_production_penalty_weight = 1000000
+
+        # 새로운 목표 함수: 총 폐기물 최소화 + (초과 생산에 대한 막대한 페널티)
+        solver.Minimize(total_trim_loss + over_production_penalty_weight * total_over_production_width)
 
         status = solver.Solve()
         if status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
@@ -130,46 +144,94 @@ class Optimize:
             new_pattern[item] = new_pattern.get(item, 0) + 1
         return new_pattern, max_value
 
-    def run_optimize(self):
-        self._generate_initial_patterns()
-        if not self.patterns:
-            return {"error": "초기 패턴을 생성할 수 없습니다."}
+    def _generate_all_patterns(self):
+        """
+        Generates all feasible cutting patterns using a recursive approach.
+        This is for the direct MIP model for small-scale problems.
+        """
+        all_patterns = []
+        seen_patterns = set()
         
-        for iteration in range(200):
-            master_solution = self._solve_master_problem()
-            if not master_solution or 'duals' not in master_solution:
-                break
+        item_list = list(self.items)
 
-            # --- HYBRID PATTERN GENERATION ---
-            new_pattern_1, val1 = self._solve_subproblem_old(master_solution['duals'])
-            new_pattern_2, val2 = self._solve_subproblem_new(master_solution['duals'])
+        def find_combinations_recursive(start_index, current_pattern, current_width, current_pieces):
+            if current_pattern:
+                pattern_key = frozenset(current_pattern.items())
+                if pattern_key not in seen_patterns:
+                    all_patterns.append(current_pattern.copy())
+                    seen_patterns.add(pattern_key)
+
+            if current_pieces >= self.max_pieces:
+                return
+
+            for i in range(start_index, len(item_list)):
+                item = item_list[i]
+                item_width = self.item_info[item]
+
+                if current_width + item_width <= self.max_width:
+                    current_pattern[item] = current_pattern.get(item, 0) + 1
+                    find_combinations_recursive(i, current_pattern, current_width + item_width, current_pieces + 1)
+                    current_pattern[item] -= 1
+                    if current_pattern[item] == 0:
+                        del current_pattern[item]
+        
+        find_combinations_recursive(0, {}, 0, 0)
+        self.patterns = all_patterns
+
+    def run_optimize(self):
+        # Step 1: Pattern Generation
+        # If the number of order types is small (<=10), generate all feasible patterns for a direct MIP solve.
+        if len(self.items) <= 10:
+            self._generate_all_patterns()
+        # Otherwise, use column generation for larger problems.
+        else:
+            self._generate_initial_patterns()
+            if not self.patterns:
+                return {"error": "초기 패턴을 생성할 수 없습니다."}
             
-            added_pattern = False
-            # Add pattern from old algorithm if it's good and new
-            if new_pattern_1 and val1 > 1.0 and new_pattern_1 not in self.patterns:
-                self.patterns.append(new_pattern_1)
-                added_pattern = True
+            for iteration in range(200):
+                master_solution = self._solve_master_problem()
+                if not master_solution or 'duals' not in master_solution:
+                    break
 
-            # Add pattern from new algorithm if it's good and new
-            if new_pattern_2 and val2 > 1.0 and new_pattern_2 not in self.patterns:
-                self.patterns.append(new_pattern_2)
-                added_pattern = True
+                # --- HYBRID PATTERN GENERATION ---
+                new_pattern_1, val1 = self._solve_subproblem_old(master_solution['duals'])
+                new_pattern_2, val2 = self._solve_subproblem_new(master_solution['duals'])
+                
+                added_pattern = False
+                # Add pattern from old algorithm if it's good and new
+                if new_pattern_1 and val1 > 1.0 and new_pattern_1 not in self.patterns:
+                    self.patterns.append(new_pattern_1)
+                    added_pattern = True
 
-            # If neither algorithm found a new useful pattern, stop iterating.
-            if not added_pattern:
-                break
+                # Add pattern from new algorithm if it's good and new
+                if new_pattern_2 and val2 > 1.0 and new_pattern_2 not in self.patterns:
+                    self.patterns.append(new_pattern_2)
+                    added_pattern = True
+
+                # If neither algorithm found a new useful pattern, stop iterating.
+                if not added_pattern:
+                    break
+
+        # Step 2: Final MIP Solve
+        if not self.patterns:
+             return {"error": "유효한 패턴을 생성할 수 없습니다."}
 
         # Filter for patterns that meet the min_width requirement
         good_patterns = [
             p for p in self.patterns
             if sum(self.item_info[item] * count for item, count in p.items()) >= self.min_width
         ]
-        
         self.patterns = good_patterns
+        
+        if not self.patterns:
+             return {"error": f"{self.min_width}mm 이상으로 조합할 수 있는 패턴이 없습니다."}
 
         final_solution = self._solve_master_problem(is_final_mip=True)
         if not final_solution:
             return {"error": f"최종 해를 찾을 수 없습니다. {self.min_width}mm 이상의 폭으로 조합할 수 없는 주문이 포함되었을 수 있습니다."}
+        
+        # Step 3: Format and return results
         return self._format_results(final_solution)
 
     def _format_results(self, final_solution):
