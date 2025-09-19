@@ -1,0 +1,32 @@
+{
+  "engine_a": {
+    "file": "sheet_optimize.py",
+    "ok": false,
+    "error": "RuntimeError: Failed to construct engine with any known signature: SheetOptimize.__init__() missing 5 required positional arguments: 'b_wgt', 'sheet_roll_length', 'sheet_trim', 'min_sc_width', and 'max_sc_width'",
+    "patterns_rows": null
+  },
+  "engine_b": {
+    "file": "sheet_optimize_250903.py",
+    "ok": false,
+    "error": "RuntimeError: Failed to construct engine with any known signature: SheetOptimize.__init__() missing 3 required positional arguments: 'b_wgt', 'sheet_roll_length', and 'sheet_trim'",
+    "patterns_rows": null
+  },
+  "comparison": {
+    "patterns_count_a": 0,
+    "patterns_count_b": 0,
+    "total_rolls_a": null,
+    "total_rolls_b": null,
+    "fulfillment_a": {
+      "over_rolls": null,
+      "under_rolls": null,
+      "over_tons": null,
+      "under_tons": null
+    },
+    "fulfillment_b": {
+      "over_rolls": null,
+      "under_rolls": null,
+      "over_tons": null,
+      "under_tons": null
+    }
+  }
+}

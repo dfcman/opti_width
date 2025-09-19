@@ -18,7 +18,7 @@ CG_MAX_ITERATIONS = 100000         # 열 생성(Column Generation) 최대 반복
 CG_NO_IMPROVEMENT_LIMIT = 100    # 개선 없는 경우, 열 생성 조기 종료 조건
 CG_SUBPROBLEM_TOP_N = 10         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
 
-class SheetOptimize:
+class SheetOptimizeVar:
     def __init__(
             self,
             df_spec_pre,
@@ -26,7 +26,8 @@ class SheetOptimize:
             min_width,
             max_pieces,
             b_wgt,
-            sheet_roll_length,
+            min_sheet_roll_length,
+            max_sheet_roll_length,
             sheet_trim,
             min_sc_width,
             max_sc_width,
@@ -37,7 +38,8 @@ class SheetOptimize:
         df_spec_pre['지폭'] = df_spec_pre['가로']
 
         self.b_wgt = b_wgt
-        self.sheet_roll_length = sheet_roll_length
+        self.min_sheet_roll_length = min_sheet_roll_length
+        self.max_sheet_roll_length = max_sheet_roll_length
         self.sheet_trim = sheet_trim
         self.original_max_width = max_width
         self.df_orders = df_spec_pre.copy()
@@ -91,7 +93,9 @@ class SheetOptimize:
     def _calculate_demand_rolls(self, df_orders):
         """주문량을 바탕으로 지폭별 필요 롤 수를 계산합니다."""
         df_copy = df_orders.copy()
-        sheet_roll_length_mm = self.sheet_roll_length * 1000
+        # min/max 범위 내에서 롤당 시트 생산량을 극대화하기 위해 최대 길이를 사용합니다.
+        # 이는 필요한 총 롤 수를 최소화하는 가장 직접적인 방법입니다.
+        sheet_roll_length_mm = self.max_sheet_roll_length * 1000
 
         def calculate_rolls(row):
             width_mm = row['가로']

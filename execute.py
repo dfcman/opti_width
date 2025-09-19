@@ -8,12 +8,14 @@ from sheet_optimize import SheetOptimize
 from db_connector import Database
 import argparse
 
-def process_roll_lot(db, plant, pm_no, schedule_unit, lot_no, version, min_width, max_width, max_pieces, paper_type, b_wgt):
+def process_roll_lot(
+        db, plant, pm_no, schedule_unit, lot_no, version, re_min_width, re_max_width, re_max_pieces, paper_type, b_wgt
+):
     """롤지 lot에 대한 전체 최적화 프로세스를 처리합니다."""
     print(f"\n{'='*60}")
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Roll Lot: {lot_no} (Version: {version}) 처리 시작")
-    print(f"적용 파라미터: min_width={min_width}, max_width={max_width}, max_pieces={max_pieces}")
-    print(f"{ '='*60}")
+    print(f"적용 파라미터: min_width={re_min_width}, max_width={re_max_width}, max_pieces={re_max_pieces}")
+    print(f"{'='*60}")
 
     db.update_lot_status(lot_no=lot_no, version=version, status=1)
     raw_orders = db.get_roll_orders_from_db(paper_prod_seq=lot_no)
@@ -56,9 +58,9 @@ def process_roll_lot(db, plant, pm_no, schedule_unit, lot_no, version, min_width
 
         optimizer = RollOptimize(
             df_spec_pre=df_subset,
-            max_width=int(max_width),
-            min_width=int(min_width),
-            max_pieces=int(max_pieces)
+            max_width=int(re_max_width),
+            min_width=int(re_min_width),
+            max_pieces=int(re_max_pieces)
         )
         results = optimizer.run_optimize()
 
@@ -85,22 +87,27 @@ def process_roll_lot(db, plant, pm_no, schedule_unit, lot_no, version, min_width
     }
 
     print("\n--- 전체 최적화 성공. 최종 결과를 처리합니다. ---")
-    save_results(db, lot_no, version, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt, final_results)
+    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, final_results)
 
-def process_sheet_lot(db, plant, pm_no, schedule_unit, lot_no, version, min_width, max_width, max_pieces, paper_type, b_wgt):
+def process_sheet_lot(
+        db, plant, pm_no, schedule_unit, lot_no, version, 
+        re_min_width, re_max_width, re_max_pieces, 
+        paper_type, b_wgt,
+        min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re
+):
     """쉬트지 lot에 대한 전체 최적화 프로세스를 처리합니다."""
     print(f"\n{'='*60}")
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sheet Lot: {lot_no} (Version: {version}) 처리 시작")
-    print(f"적용 파라미터: min_width={min_width}, max_width={max_width}, max_pieces={max_pieces}")
-    print(f"{ '='*60}")
+    print(f"적용 파라미터: min_width={re_min_width}, max_width={re_max_width}, max_pieces={re_max_pieces}, min_sc_width={min_sc_width}, max_sc_width={max_sc_width}, sheet_length_re={sheet_length_re}")
+    print(f"{'='*60}")
 
     db.update_lot_status(lot_no=lot_no, version=version, status=1)
     raw_orders = db.get_sheet_orders_from_db(paper_prod_seq=lot_no)
     print(f"--- Lot {lot_no} 원본 주문 정보 ---")
-    # raw_orders가 리스트 안에 딕셔너리 형태로 되어 있다고 가정
-    for order in raw_orders:
-        print(order)
-    print("\n")
+    # # raw_orders가 리스트 안에 딕셔너리 형태로 되어 있다고 가정
+    # for order in raw_orders:
+    #     print(order)
+    # print("\n")
 
 
     if not raw_orders:
@@ -124,24 +131,34 @@ def process_sheet_lot(db, plant, pm_no, schedule_unit, lot_no, version, min_widt
     # b_wgt, 롤길이(6330), 트림(20) 등 쉬트지 사양 전달
     optimizer = SheetOptimize(
         df_spec_pre=df_orders,
-        max_width=int(max_width),
-        min_width=int(min_width),
-        max_pieces=int(max_pieces),
+        max_width=int(re_max_width),
+        min_width=int(re_min_width),
+        max_pieces=int(re_max_pieces),
         b_wgt=float(b_wgt),
-        sheet_roll_length=14740, # 하드코딩6330
-        sheet_trim=20 # 하드코딩
+        sheet_roll_length=sheet_length_re, # 하드코딩 6330, 14740
+        sheet_trim=sheet_trim_size,
+        min_sc_width=min_sc_width,
+        max_sc_width=max_sc_width
     )
-    results = optimizer.run_optimize()
+    try:
+        results = optimizer.run_optimize()
+        print("--- Optimizer results ---")
+        print(results)
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        raise e
 
-    if "error" in results:
-        print(f"[에러] Lot {lot_no} 최적화 실패: {results['error']}. 상태를 99(에러)로 변경합니다.")
+    if not results or "error" in results:
+        error_msg = results['error'] if results and 'error' in results else "No solution found"
+        print(f"[에러] Lot {lot_no} 최적화 실패: {error_msg}. 상태를 99(에러)로 변경합니다.")
         db.update_lot_status(lot_no=lot_no, version=version, status=99)
         return
     
     print("최적화 성공. 결과를 처리합니다.")
-    save_results(db, lot_no, version, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt, results)
+    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results)
 
-def save_results(db, lot_no, version, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt, results):
+def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results):
     """최적화 결과를 DB에 저장하고 CSV파일로 출력합니다."""
     print("최적화 결과 (패턴별 생산량):")
     print(results["pattern_result"].to_string())
@@ -151,7 +168,10 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, max_width, pa
     print("최적화 성공. 이제 결과를 DB에 저장합니다.")
 
     # DB에 패턴 저장
-    success_db = db.insert_pattern_sequence(lot_no, version, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt, results['pattern_details_for_db'])
+    success_db = db.insert_pattern_sequence(
+        lot_no, version, plant, pm_no, schedule_unit, re_max_width, 
+        paper_type, b_wgt, results['pattern_details_for_db']
+    )
 
     if not success_db:
         print(f"[에러] Lot {lot_no}의 패턴을 DB에 저장하지 못했습니다. 상태를 99(에러)로 변경합니다.")
@@ -173,7 +193,7 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, max_width, pa
 
     print(f"\n{'='*60}")
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Lot: {lot_no} 처리 완료")
-    print(f"{ '='*60}")
+    print(f"{'='*60}")
 
 def main():
     """메인 실행 함수"""
@@ -193,16 +213,28 @@ def main():
         db = Database(user=db_config['user'], password=db_config['password'], dsn=db_config['dsn'])
 
         # 데몬 방식 대신, get_target_lot()을 한 번만 호출하여 테스트합니다.
-        plant, pm_no, schedule_unit, lot_no, version, min_width, max_width, sheet_max_width, max_pieces, paper_type, b_wgt = db.get_target_lot()
+        ( 
+            plant, pm_no, schedule_unit, lot_no, version, min_width, 
+            max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
+            paper_type, b_wgt,
+            min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re
+        ) = db.get_target_lot()
 
         if not lot_no:
             print("처리할 Lot이 없습니다.")
             return
 
         if args.order_type == 'roll':
-            process_roll_lot(db, plant, pm_no, schedule_unit, lot_no, version, min_width, max_width, max_pieces, paper_type, b_wgt)
+            process_roll_lot(
+                db, plant, pm_no, schedule_unit, lot_no, version, 
+                min_width, max_width, max_pieces, paper_type, b_wgt
+            )
         elif args.order_type == 'sheet':
-            process_sheet_lot(db, plant, pm_no, schedule_unit, lot_no, version, min_width, sheet_max_width, max_pieces, paper_type, b_wgt)
+            process_sheet_lot(
+                db, plant, pm_no, schedule_unit, lot_no, version, 
+                min_width, sheet_max_width, sheet_max_pieces, paper_type, b_wgt,
+                min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re
+            )
 
     except FileNotFoundError as e:
         print(f"[치명적 에러] 설정 파일을 찾을 수 없습니다: {e}")

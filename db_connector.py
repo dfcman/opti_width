@@ -1,5 +1,7 @@
 import oracledb
 import sys
+import csv
+import os
 
 class Database:
     def __init__(self, user, password, dsn, min_pool=1, max_pool=1, increment=1):
@@ -50,18 +52,23 @@ class Database:
 
             query = """ 
                 select 
-                    plant, pm_no, schedule_unit, lot_no, '05' as version, min_width, roll_max_width, sheet_max_width, max_re_count as max_pieces,
-                    paper_type, b_wgt
-                from th_versions_manager 
-                where lot_no = '3250900429' and version = '01'
+                    a.plant, pm_no, a.schedule_unit, a.lot_no, '05' as version, a.min_width, a.roll_max_width, 
+                    a.sheet_max_width, a.max_re_count as max_pieces, 4 as sheet_max_pieces,
+                    a.paper_type, a.b_wgt,
+                    a.min_sc_width, a.max_sc_width, a.sheet_trim_size, sheet_length_re
+                from th_versions_manager a, th_tar_std_length b
+                where a.plant = b.plant
+                and a.paper_type = b.paper_type
+                and a.b_wgt = b.b_wgt 
+                and lot_no = '3250900071' and version = '01'
             """
             cursor.execute(query)
             result = cursor.fetchone()
-            # 반환 값 개수를 11개로 맞춤
-            return result if result else (None, None, None, None, None, None, None, None, None, None, None)
+            # 반환 값 개수를 16개로 맞춤
+            return result if result else (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
         except oracledb.Error as error:
             print(f"Error while fetching target lot: {error}")
-            return None, None, None, None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
         finally:
             if connection:
                 self.pool.release(connection)
@@ -235,3 +242,89 @@ class Database:
         finally:
             if connection:
                 self.pool.release(connection)
+
+    def get_patterns_from_db(self, lot_no, version):
+        """지정된 lot_no와 version에 대해 th_pattern_sequence에서 기존 패턴을 가져옵니다."""
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+            # rollwidth 대신 groupno 필드를 사용하여 패턴을 가져옵니다.
+            # groupno가 복합폭 아이템의 고유 이름이므로 더 정확합니다.
+            query = """
+                SELECT 
+                    groupno1, groupno2, groupno3, groupno4, 
+                    groupno5, groupno6, groupno7, groupno8
+                FROM th_pattern_sequence 
+                WHERE lot_no = :lot_no AND version = :version
+            """
+            cursor.execute(query, lot_no=lot_no, version=version)
+            rows = cursor.fetchall()
+            
+            db_patterns = []
+            for row in rows:
+                # None이나 빈 문자열이 아닌 유효한 groupno만 필터링합니다.
+                pattern_items = [item for item in row if item]
+                if pattern_items:
+                    db_patterns.append(pattern_items)
+            
+            print(f"Successfully fetched {len(db_patterns)} existing patterns from DB for lot {lot_no} version {version}")
+            return db_patterns
+        except oracledb.Error as error:
+            print(f"Error while fetching existing patterns from DB: {error}")
+            return []
+        finally:
+            if connection:
+                self.pool.release(connection)
+
+    def get_target_lot_csv(self, file_path='target_lot.csv'):
+        try:
+            with open(file_path, mode='r', encoding='utf-8') as infile:
+                reader = csv.reader(infile)
+                header = next(reader)
+                data = next(reader, None)
+                if data:
+                    # Convert numeric strings to appropriate types
+                    converted_data = []
+                    for item in data:
+                        try:
+                            converted_data.append(int(item))
+                        except ValueError:
+                            try:
+                                converted_data.append(float(item))
+                            except ValueError:
+                                converted_data.append(item)
+                    return tuple(converted_data)
+            return (None,) * 16
+        except FileNotFoundError:
+            print(f"Error: The file {file_path} was not found.")
+            return (None,) * 16
+        except Exception as e:
+            print(f"An error occurred while reading the CSV file: {e}")
+            return (None,) * 16
+
+    def get_roll_orders_from_db_csv(self, file_path='roll_orders.csv'):
+        raw_orders = []
+        try:
+            with open(file_path, mode='r', encoding='utf-8') as infile:
+                reader = csv.DictReader(infile)
+                for row in reader:
+                    export_type = '수출' if row['export_yn'] == 'Y' else '내수'
+                    raw_orders.append({
+                        '오더번호': row['order_no'],
+                        '지폭': int(row['width']),
+                        '가로': int(row['length']),
+                        '주문수량': int(row['order_roll_cnt']),
+                        '주문톤': float(row['order_ton_cnt']),
+                        '롤길이': int(row['roll_length']),
+                        '등급': row['quality_grade'],
+                        '수출내수': export_type
+                    })
+            print(f"Successfully fetched {len(raw_orders)} roll orders from {file_path}")
+            return raw_orders
+        except FileNotFoundError:
+            print(f"Error: The file {file_path} was not found.")
+            return None
+        except Exception as e:
+            print(f"An error occurred while reading the CSV file: {e}")
+            return None
