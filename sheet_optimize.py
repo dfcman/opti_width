@@ -13,10 +13,10 @@ PATTERN_COMPLEXITY_PENALTY = 0.01  # 패턴 복잡성에 대한 페널티
 # 알고리즘 파라미터
 MIN_PIECES_PER_PATTERN = 2      # 패턴에 포함될 수 있는 최소 폭(piece)의 수
 SMALL_PROBLEM_THRESHOLD = 8     # 전체 탐색을 수행할 최대 주문 지폭 종류 수
-SOLVER_TIME_LIMIT_MS = 300000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
-CG_MAX_ITERATIONS = 100000         # 열 생성(Column Generation) 최대 반복 횟수
+SOLVER_TIME_LIMIT_MS = 60000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
+CG_MAX_ITERATIONS = 100         # 열 생성(Column Generation) 최대 반복 횟수
 CG_NO_IMPROVEMENT_LIMIT = 100    # 개선 없는 경우, 열 생성 조기 종료 조건
-CG_SUBPROBLEM_TOP_N = 10         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
+CG_SUBPROBLEM_TOP_N = 1         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
 
 class SheetOptimize:
     def __init__(
@@ -448,49 +448,82 @@ class SheetOptimize:
         return None
 
     def _solve_subproblem_dp(self, duals):
-        """서브문제(Sub-problem)를 동적 프로그래밍으로 해결하여 새로운 패턴을 찾습니다."""
-        dp = [[(0, []) for _ in range(self.max_width + 1)] for _ in range(self.max_pieces + 1)]
+        """서브 문제(Sub-problem)를 무한 배낭 방식으로 풀어 새로운 패턴 후보를 찾는다."""
+        width_limit = self.max_width
+        piece_limit = self.max_pieces
 
         item_details = []
         for item_name in self.items:
             item_width = self.item_info[item_name]
             item_value = sum(count * duals.get(width, 0) for width, count in self.item_composition[item_name].items())
-            if item_value > 0:
-                item_details.append((item_name, item_width, item_value))
+            if item_value <= 0:
+                continue
+            item_details.append((item_name, item_width, item_value))
 
-        for k in range(1, self.max_pieces + 1):
-            for w in range(1, self.max_width + 1):
-                dp[k][w] = dp[k-1][w]
-                for name, i_width, i_value in item_details:
-                    if w >= i_width:
-                        prev_value, prev_items = dp[k-1][w - i_width]
-                        new_value = prev_value + i_value
-                        if new_value > dp[k][w][0]:
-                            dp[k][w] = (new_value, prev_items + [name])
+        if not item_details:
+            return []
+
+        dp_value = [[float('-inf')] * (width_limit + 1) for _ in range(piece_limit + 1)]
+        dp_parent = [[None] * (width_limit + 1) for _ in range(piece_limit + 1)]
+        dp_value[0][0] = 0.0
+
+        for pieces in range(piece_limit + 1):
+            for width in range(width_limit + 1):
+                current_value = dp_value[pieces][width]
+                if current_value == float('-inf'):
+                    continue
+                for item_name, item_width, item_value in item_details:
+                    next_pieces = pieces + 1
+                    next_width = width + item_width
+                    if next_pieces > piece_limit or next_width > width_limit:
+                        continue
+                    new_value = current_value + item_value
+                    if new_value > dp_value[next_pieces][next_width] + 1e-9:
+                        dp_value[next_pieces][next_width] = new_value
+                        dp_parent[next_pieces][next_width] = (pieces, width, item_name)
 
         candidate_patterns = []
-        for k in range(self.min_pieces, self.max_pieces + 1):
-            for w in range(self.min_width, self.max_width + 1):
-                reduced_cost = dp[k][w][0]
-                if reduced_cost > 1.0:
-                    pattern_dict = {}
-                    for item in dp[k][w][1]:
-                        pattern_dict[item] = pattern_dict.get(item, 0) + 1
-                    candidate_patterns.append({'pattern': pattern_dict, 'cost': reduced_cost})
+        seen_patterns = set()
+
+        for pieces in range(self.min_pieces, piece_limit + 1):
+            for width in range(self.min_width, width_limit + 1):
+                value = dp_value[pieces][width]
+                if value <= 1.0 + 1e-6:
+                    continue
+                parent = dp_parent[pieces][width]
+                if not parent:
+                    continue
+
+                pattern = {}
+                cur_pieces, cur_width = pieces, width
+                while cur_pieces > 0:
+                    parent_info = dp_parent[cur_pieces][cur_width]
+                    if not parent_info:
+                        pattern = None
+                        break
+                    prev_pieces, prev_width, item_name = parent_info
+                    pattern[item_name] = pattern.get(item_name, 0) + 1
+                    cur_pieces, cur_width = prev_pieces, prev_width
+
+                if not pattern or cur_pieces != 0 or cur_width != 0:
+                    continue
+
+                pattern_key = frozenset(pattern.items())
+                if pattern_key in seen_patterns:
+                    continue
+
+                total_width = sum(self.item_info[name] * count for name, count in pattern.items())
+                if total_width < self.min_width or total_width > self.max_width:
+                    continue
+
+                seen_patterns.add(pattern_key)
+                candidate_patterns.append({'pattern': pattern, 'value': value, 'width': total_width, 'pieces': pieces})
 
         if not candidate_patterns:
             return []
 
-        # 중복 제거 및 상위 N개 선택
-        seen_patterns = set()
-        unique_candidates = []
-        for cand in sorted(candidate_patterns, key=lambda x: x['cost'], reverse=True):
-            pattern_key = frozenset(cand['pattern'].items())
-            if pattern_key not in seen_patterns:
-                seen_patterns.add(pattern_key)
-                unique_candidates.append(cand['pattern'])
-        
-        return unique_candidates[:CG_SUBPROBLEM_TOP_N]
+        candidate_patterns.sort(key=lambda x: x['value'], reverse=True)
+        return [cand['pattern'] for cand in candidate_patterns[:CG_SUBPROBLEM_TOP_N]]
 
     def _generate_all_patterns(self):
         """작은 문제에 대해 모든 가능한 패턴을 생성합니다 (Brute-force)."""

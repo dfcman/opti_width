@@ -1,1 +1,4 @@
-"gemini.additionalPrompt": "모든 설명과 답변은 한국어로 해주세요."
+{
+    // 다른 설정들...
+    "gemini.additionalPrompt": "모든 설명과 답변은 한국어로 해주세요."
+}

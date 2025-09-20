@@ -3,6 +3,7 @@ from ortools.linear_solver import pywraplp
 from collections import Counter
 import math
 import random
+import time
 
 # --- 최적화 설정 상수 ---
 # 페널티 값
@@ -43,16 +44,17 @@ class SheetOptimizeVar:
         self.sheet_trim = sheet_trim
         self.original_max_width = max_width
         self.df_orders = df_spec_pre.copy()
-        
-        self.demands_in_rolls = self._calculate_demand_rolls(self.df_orders)
-        self.order_widths = list(self.demands_in_rolls.keys()) 
+
+        # 수요 단위를 '롤'에서 '미터'로 변경
+        self.demands_in_meters, self.order_sheet_lengths = self._calculate_demand_meters(self.df_orders)
+        self.order_widths = list(self.demands_in_meters.keys())
 
         width_summary = {}
         tons_per_width = self.df_orders.groupby('지폭')['주문톤'].sum()
-        for width, required_rolls in self.demands_in_rolls.items():
+        for width, required_meters in self.demands_in_meters.items():
             order_tons = tons_per_width.get(width, 0)
             width_summary[width] = {'order_tons': order_tons}
-        self.width_summary = width_summary 
+        self.width_summary = width_summary
 
         self.items, self.item_info, self.item_composition = self._prepare_items(min_sc_width, max_sc_width)
 
@@ -68,6 +70,7 @@ class SheetOptimizeVar:
         print(f"\n--- 패턴 제약조건: 최소 {self.min_pieces}폭, 최대 {self.max_pieces}폭 ---")
 
         self.patterns = []
+        self.pattern_lengths = [] # 각 패턴의 최적 길이를 저장할 리스트
 
     def _prepare_items(self, min_sc_width, max_sc_width):
         """복합폭 아이템(패턴의 구성요소)을 생성합니다."""
@@ -90,42 +93,37 @@ class SheetOptimizeVar:
                         item_composition[item_name] = {width: i}
         return items, item_info, item_composition
 
-    def _calculate_demand_rolls(self, df_orders):
-        """주문량을 바탕으로 지폭별 필요 롤 수를 계산합니다."""
+    def _calculate_demand_meters(self, df_orders):
+        """주문량을 바탕으로 지폭별 필요 총 길이(미터)를 계산합니다."""
         df_copy = df_orders.copy()
-        # min/max 범위 내에서 롤당 시트 생산량을 극대화하기 위해 최대 길이를 사용합니다.
-        # 이는 필요한 총 롤 수를 최소화하는 가장 직접적인 방법입니다.
-        sheet_roll_length_mm = self.max_sheet_roll_length * 1000
 
-        def calculate_rolls(row):
+        def calculate_meters(row):
             width_mm = row['가로']
             length_mm = row['세로']
             order_ton = row['주문톤']
 
             if self.b_wgt <= 0 or width_mm <= 0 or length_mm <= 0 or order_ton <= 0:
                 return 0
-            
+
             sheet_weight_g = (self.b_wgt * width_mm * length_mm) / 1000000
             if sheet_weight_g <= 0:
                 return 0
 
             total_sheets_needed = (order_ton * 1000000) / sheet_weight_g
-            sheets_per_roll_length = math.floor(sheet_roll_length_mm / length_mm)
-            if sheets_per_roll_length <= 0:
-                return 0
+            total_meters_needed = total_sheets_needed * (length_mm / 1000)
+            return total_meters_needed
 
-            sheets_per_roll = sheets_per_roll_length * 1 # num_across is always 1
-            return round(total_sheets_needed / sheets_per_roll, 0)
+        df_copy['meters'] = df_copy.apply(calculate_meters, axis=1)
+        demand_meters = df_copy.groupby('지폭')['meters'].sum().to_dict()
+        order_sheet_lengths = df_copy.groupby('지폭')['세로'].first().to_dict()
 
-        df_copy['rolls'] = df_copy.apply(calculate_rolls, axis=1)
-        demand_rolls = df_copy.groupby('지폭')['rolls'].sum().astype(int).to_dict()
-
-        print("\n--- 지폭별 필요 롤 수 ---")
-        # for width, rolls in demand_rolls.items():
-        #     print(f"  지폭 {width}mm: {rolls} 롤")
+        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}]")
+        print("--- 지폭별 필요 총 길이 ---")        
+        # for width, meters in demand_meters.items():
+        #     print(f"  지폭 {width}mm: {meters:.2f} 미터")
         print("--------------------------\n")
-        
-        return demand_rolls
+
+        return demand_meters, order_sheet_lengths
 
     def _generate_initial_patterns_db(self):
         """th_pattern_sequence 테이블의 기존 패턴 데이터를 활용하여 초기 패턴을 생성합니다."""
@@ -169,7 +167,7 @@ class SheetOptimizeVar:
         # 주문량이 많은 아이템부터 순서대로 처리
         sorted_items = sorted(
             self.items,
-            key=lambda i: self.demands_in_rolls.get(list(self.item_composition[i].keys())[0], 0),
+            key=lambda i: self.demands_in_meters.get(list(self.item_composition[i].keys())[0], 0),
             reverse=False
         )
 
@@ -407,36 +405,46 @@ class SheetOptimizeVar:
         print("--------------------------\n")
 
     def _solve_master_problem_ilp(self, is_final_mip=False):
-        """마스터 문제(Master Problem)를 정수계획법으로 해결합니다."""
+        """마스터 문제(Master Problem)를 정수계획법으로 해결합니다. (단위: 미터)"""
         solver = pywraplp.Solver.CreateSolver('SCIP' if is_final_mip else 'GLOP')
         if is_final_mip:
             solver.SetTimeLimit(SOLVER_TIME_LIMIT_MS)
 
         # 변수 정의
         x = {j: solver.IntVar(0, solver.infinity(), f'P_{j}') if is_final_mip else solver.NumVar(0, solver.infinity(), f'P_{j}') for j in range(len(self.patterns))}
-        over_prod_vars = {w: solver.NumVar(0, solver.infinity(), f'Over_{w}') for w in self.demands_in_rolls}
         
-        under_prod_vars = {}
-        for width, required_rolls in self.demands_in_rolls.items():
-            allowed_under_prod = max(1, math.ceil(required_rolls))
-            under_prod_vars[width] = solver.NumVar(0, allowed_under_prod, f'Under_{width}')
+        # 과부족 변수 (단위: 미터)
+        over_prod_vars = {w: solver.NumVar(0, solver.infinity(), f'Over_{w}') for w in self.demands_in_meters}
+        under_prod_vars = {w: solver.NumVar(0, self.demands_in_meters.get(w, 1000), f'Under_{w}') for w in self.demands_in_meters}
 
-        # 제약조건: 생산량 + 부족량 = 수요량 + 과생산량
+        # 제약조건: 총 생산 길이 + 부족 길이 = 수요 길이 + 과생산 길이
         constraints = {}
-        for width, required_rolls in self.demands_in_rolls.items():
+        for width, required_meters in self.demands_in_meters.items():
+            # 각 패턴이 해당 지폭을 몇 개의 스트립으로 생산하는지 계산
+            num_strips_per_pattern = {
+                j: sum(self.item_composition[item_name].get(width, 0) * count for item_name, count in self.patterns[j].items())
+                for j in range(len(self.patterns))
+            }
+
+            # 총 생산 길이 = 패턴 사용 횟수 * 패턴 롤 길이 * 스트립 수
             production_for_width = solver.Sum(
-                x[j] * sum(self.item_composition[item_name].get(width, 0) * count for item_name, count in self.patterns[j].items())
+                x[j] * self.pattern_lengths[j] * num_strips_per_pattern[j]
                 for j in range(len(self.patterns))
             )
-            constraints[width] = solver.Add(production_for_width + under_prod_vars[width] == required_rolls + over_prod_vars[width], f'demand_{width}')
+            constraints[width] = solver.Add(production_for_width + under_prod_vars[width] == required_meters + over_prod_vars[width], f'demand_{width}')
 
-        # 목적함수: 총 롤 수 + 페널티 최소화
-        total_rolls = solver.Sum(x.values())
-        total_over_prod_penalty = solver.Sum(OVER_PROD_PENALTY * var for var in over_prod_vars.values())
-        total_under_prod_penalty = solver.Sum(UNDER_PROD_PENALTY * var for var in under_prod_vars.values())
-        total_complexity_penalty = solver.Sum(PATTERN_COMPLEXITY_PENALTY * len(self.patterns[j]) * x[j] for j in range(len(self.patterns)))
+        # 목적함수: 총 사용 롤 길이(면적) + 페널티 최소화
+        total_roll_length_used = solver.Sum(x[j] * self.pattern_lengths[j] for j in range(len(self.patterns)))
         
-        solver.Minimize(total_rolls + total_over_prod_penalty + total_under_prod_penalty + total_complexity_penalty)
+        # 페널티 단위를 '롤'에서 '미터'에 상응하도록 조정 (과생산 1미터당 페널티)
+        # 예: 1000m 롤 기준 200 페널티 -> 1m 기준 0.2 페널티
+        METER_BASED_OVER_PROD_PENALTY = OVER_PROD_PENALTY / 1000 
+        METER_BASED_UNDER_PROD_PENALTY = UNDER_PROD_PENALTY / 1000
+
+        total_over_prod_penalty = solver.Sum(METER_BASED_OVER_PROD_PENALTY * var for var in over_prod_vars.values())
+        total_under_prod_penalty = solver.Sum(METER_BASED_UNDER_PROD_PENALTY * var for var in under_prod_vars.values())
+        
+        solver.Minimize(total_roll_length_used + total_over_prod_penalty + total_under_prod_penalty)
         
         status = solver.Solve()
         if status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
@@ -447,17 +455,20 @@ class SheetOptimizeVar:
                 'under_production': {w: var.solution_value() for w, var in under_prod_vars.items()}
             }
             if not is_final_mip:
-                solution['duals'] = {w: constraints[w].dual_value() for w in self.demands_in_rolls}
+                solution['duals'] = {w: constraints[w].dual_value() for w in self.demands_in_meters}
             return solution
         return None
 
     def _solve_subproblem_dp(self, duals):
         """서브문제(Sub-problem)를 동적 프로그래밍으로 해결하여 새로운 패턴을 찾습니다."""
+        # duals는 이제 미터당 가치
+        # DP는 (Sum_{w} duals[w] * num_w_in_pattern)를 최대화하는 패턴을 찾음
         dp = [[(0, []) for _ in range(self.max_width + 1)] for _ in range(self.max_pieces + 1)]
 
         item_details = []
         for item_name in self.items:
             item_width = self.item_info[item_name]
+            # item_value는 이제 dual 값의 합. 길이는 나중에 곱해짐.
             item_value = sum(count * duals.get(width, 0) for width, count in self.item_composition[item_name].items())
             if item_value > 0:
                 item_details.append((item_name, item_width, item_value))
@@ -475,17 +486,24 @@ class SheetOptimizeVar:
         candidate_patterns = []
         for k in range(self.min_pieces, self.max_pieces + 1):
             for w in range(self.min_width, self.max_width + 1):
-                reduced_cost = dp[k][w][0]
-                if reduced_cost > 1.0:
+                dp_value = dp[k][w][0]
+                # Reduced Cost = L_p * (dp_value - 1). 먼저 dp_value > 1인 후보만 찾음
+                if dp_value > 1.0:
                     pattern_dict = {}
                     for item in dp[k][w][1]:
                         pattern_dict[item] = pattern_dict.get(item, 0) + 1
-                    candidate_patterns.append({'pattern': pattern_dict, 'cost': reduced_cost})
+                    
+                    # 후보 패턴의 최적 길이(L_p)와 실제 Reduced Cost 계산
+                    l_p = self._calculate_optimal_pattern_length(pattern_dict)
+                    reduced_cost = l_p * (dp_value - 1)
+
+                    if reduced_cost > 0:
+                        candidate_patterns.append({'pattern': pattern_dict, 'cost': reduced_cost})
 
         if not candidate_patterns:
             return []
 
-        # 중복 제거 및 상위 N개 선택
+        # 중복 제거 및 상위 N개 선택 (실제 reduced cost 기준)
         seen_patterns = set()
         unique_candidates = []
         for cand in sorted(candidate_patterns, key=lambda x: x['cost'], reverse=True):
@@ -528,6 +546,49 @@ class SheetOptimizeVar:
         find_combinations_recursive(0, {}, 0, 0)
         self.patterns = all_patterns
 
+    def _calculate_optimal_pattern_length(self, pattern):
+        """패턴에 대한 최적 롤 길이를 휴리스틱 기반으로 계산합니다."""
+        
+        # 1. 패턴에서 가장 수요가 많은 '주요' 지폭 찾기
+        dominant_width = None
+        max_demand = -1
+
+        pattern_widths = {w for item_name in pattern for w in self.item_composition.get(item_name, {})}
+        if not pattern_widths:
+            return self.max_sheet_roll_length # 패턴이 비어있으면 최대 길이 반환
+
+        for width in pattern_widths:
+            demand = self.demands_in_meters.get(width, 0)
+            if demand > max_demand:
+                max_demand = demand
+                dominant_width = width
+        
+        if dominant_width is None:
+            # 수요 정보가 없는 경우, 패턴에 포함된 첫번째 지폭을 주요 지폭으로 사용
+            dominant_width = list(pattern_widths)[0]
+
+        # 2. 주요 지폭의 시트 길이를 기준으로 최적 롤 길이 계산
+        order_len_m = self.order_sheet_lengths.get(dominant_width, self.max_sheet_roll_length) / 1000
+        if order_len_m <= 0:
+            return self.max_sheet_roll_length
+
+        # 3. 최대 길이에 가장 가까운 배수 길이를 후보로 선택
+        l_candidate = math.floor(self.max_sheet_roll_length / order_len_m) * order_len_m
+        
+        # 4. 후보 길이가 최소 길이보다 작으면 최소 길이를, 아니면 후보 길이를 최적 길이로 선택
+        if l_candidate < self.min_sheet_roll_length:
+            return self.min_sheet_roll_length
+        else:
+            return l_candidate
+
+    def _evaluate_patterns(self):
+        """생성된 모든 패턴에 대해 최적 롤 길이를 계산하여 저장합니다."""
+        if not self.patterns:
+            return
+        print(f"\n--- {len(self.patterns)}개의 패턴에 대해 최적 롤 길이를 평가합니다. ---")
+        self.pattern_lengths = [self._calculate_optimal_pattern_length(p) for p in self.patterns]
+        print("--- 패턴 평가 완료 ---")
+
     def run_optimize(self):
         """최적화 실행 메인 함수"""
         if len(self.order_widths) <= SMALL_PROBLEM_THRESHOLD:
@@ -545,6 +606,9 @@ class SheetOptimizeVar:
             if not self.patterns:
                 return {"error": "초기 유효 패턴을 생성할 수 없습니다. 제약조건이 너무 엄격할 수 있습니다."}
 
+            # 초기 패턴 길이를 평가합니다.
+            self._evaluate_patterns()
+
             # 열 생성 루프
             no_improvement_count = 0
             for iteration in range(CG_MAX_ITERATIONS):
@@ -557,12 +621,19 @@ class SheetOptimizeVar:
                 patterns_added = 0
                 if new_patterns:
                     current_pattern_keys = {frozenset(p.items()) for p in self.patterns}
+                    newly_added_patterns = []
                     for new_pattern in new_patterns:
                         if frozenset(new_pattern.items()) not in current_pattern_keys:
                             pattern_width = sum(self.item_info[item] * count for item, count in new_pattern.items())
                             if pattern_width >= self.min_width:
                                 self.patterns.append(new_pattern)
+                                newly_added_patterns.append(new_pattern)
                                 patterns_added += 1
+                    
+                    # 새로 추가된 패턴에 대해서만 길이 평가
+                    if newly_added_patterns:
+                        new_lengths = [self._calculate_optimal_pattern_length(p) for p in newly_added_patterns]
+                        self.pattern_lengths.extend(new_lengths)
                 
                 if patterns_added > 0:
                     no_improvement_count = 0
@@ -570,12 +641,18 @@ class SheetOptimizeVar:
                     no_improvement_count += 1
                 
                 if no_improvement_count >= CG_NO_IMPROVEMENT_LIMIT:
+                    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}]")
                     print(f"--- {CG_NO_IMPROVEMENT_LIMIT}번의 반복 동안 개선이 없어 수렴으로 간주하고 종료합니다 (반복 {iteration}). ---")
                     break
 
         if not self.patterns:
             return {"error": "유효한 패턴을 생성할 수 없습니다."}
 
+        # 최종 최적화 전 모든 패턴의 길이가 평가되었는지 확인합니다.
+        if len(self.pattern_lengths) != len(self.patterns):
+             self._evaluate_patterns()
+
+        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}]")
         print(f"\n--- 총 {len(self.patterns)}개의 패턴으로 최종 최적화를 수행합니다. ---")
         final_solution = self._solve_master_problem_ilp(is_final_mip=True)
         if not final_solution:
@@ -586,25 +663,30 @@ class SheetOptimizeVar:
     def _format_results(self, final_solution):
         """최종 결과를 데이터프레임 형식으로 포매팅합니다."""
         
-        # 최종 생산량 계산
-        final_production_rolls = {width: 0 for width in self.order_widths}
+        # 최종 생산량 계산 (단위: 미터)
+        final_production_meters = {width: 0 for width in self.order_widths}
         for j, count in final_solution['pattern_counts'].items():
             if count > 0.99:
                 roll_count = int(round(count))
-                for item_name, num_in_pattern in self.patterns[j].items():
+                pattern = self.patterns[j]
+                pattern_len = self.pattern_lengths[j]
+
+                for item_name, num_in_pattern in pattern.items():
                     for width, num_pieces in self.item_composition[item_name].items():
-                        if width in final_production_rolls:
-                            final_production_rolls[width] += roll_count * num_in_pattern * num_pieces
+                        if width in final_production_meters:
+                            num_strips = num_in_pattern * num_pieces
+                            final_production_meters[width] += roll_count * pattern_len * num_strips
 
         # 결과 데이터프레임 생성
         result_patterns, pattern_details_for_db = self._build_pattern_details(final_solution)
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
-            df_patterns = df_patterns[['Pattern', 'Roll_Production_Length', 'Count', 'Loss_per_Roll']]
+            df_patterns = df_patterns[['Pattern', 'Roll_Production_Width', 'Roll_Length', 'Count', 'Loss_per_Roll']]
 
         # 주문 이행 요약 생성
-        fulfillment_summary = self._build_fulfillment_summary(final_production_rolls)
+        fulfillment_summary = self._build_fulfillment_summary(final_production_meters)
 
+        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}]")
         print("\n[주문 이행 요약]")
         # print(fulfillment_summary.to_string())
 
@@ -625,6 +707,7 @@ class SheetOptimizeVar:
             
             roll_count = int(round(count))
             pattern_dict = self.patterns[j]
+            pattern_len = self.pattern_lengths[j]
             
             sorted_pattern_items = sorted(pattern_dict.items(), key=lambda item: self.item_info[item[0]], reverse=True)
 
@@ -643,7 +726,8 @@ class SheetOptimizeVar:
 
             result_patterns.append({
                 'Pattern': ' + '.join(pattern_item_strs),
-                'Roll_Production_Length': total_width,
+                'Roll_Production_Width': total_width,
+                'Roll_Length': round(pattern_len, 2),
                 'Count': roll_count,
                 'Loss_per_Roll': self.original_max_width - total_width
             })
@@ -654,34 +738,37 @@ class SheetOptimizeVar:
             })
         return result_patterns, pattern_details_for_db
 
-    def _build_fulfillment_summary(self, final_production_rolls):
-        """주문 이행 요약 데이터프레임을 생성합니다."""
+    def _build_fulfillment_summary(self, final_production_meters):
+        """주문 이행 요약 데이터프레임을 생성합니다. (단위: 톤, 미터)"""
         summary_data = []
-        for width, required_rolls in self.demands_in_rolls.items():
-            produced_rolls = final_production_rolls.get(width, 0)
+        for width, required_meters in self.demands_in_meters.items():
+            produced_meters = final_production_meters.get(width, 0)
             order_tons = self.width_summary[width]['order_tons']
-            
-            if required_rolls > 0:
-                tons_per_roll = order_tons / required_rolls
-                produced_tons = produced_rolls * tons_per_roll
+            sheet_length_mm = self.order_sheet_lengths[width]
+
+            # 미터를 톤으로 역산
+            if required_meters > 0:
+                tons_per_meter = order_tons / required_meters
+                produced_tons = produced_meters * tons_per_meter
             else:
                 produced_tons = 0
             
             over_prod_tons = produced_tons - order_tons
+            over_prod_meters = produced_meters - required_meters
 
             summary_data.append({
                 '지폭': width,
                 '주문량(톤)': order_tons,
                 '생산량(톤)': round(produced_tons, 2),
                 '과부족(톤)': round(over_prod_tons, 2),
-                '필요롤수': required_rolls,
-                '생산롤수': produced_rolls,
-                '과부족(롤)': produced_rolls - required_rolls,
+                '필요길이(m)': round(required_meters, 2),
+                '생산길이(m)': round(produced_meters, 2),
+                '과부족(m)': round(over_prod_meters, 2),
             })
         
         return pd.DataFrame(summary_data)[[
             '지폭', '주문량(톤)', '생산량(톤)', '과부족(톤)',
-            '필요롤수', '생산롤수', '과부족(롤)'
+            '필요길이(m)', '생산길이(m)', '과부족(m)'
         ]]
     
     def _generate_initial_patterns_test(self):
@@ -928,7 +1015,8 @@ class SheetOptimizeVar:
                         print(f"    - 생성된 순수 패턴 {new_pattern}이 최종 제약조건(최소너비/폭수)을 만족하지 못합니다. (너비: {total_width}, 폭 수: {total_pieces})")
                 else:
                     print(f"    - 지폭 {width}mm에 대한 순수 패턴을 구성하지 못했습니다.")
-
+        
+        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}]")
         print(f"--- 총 {len(self.patterns)}개의 초기 패턴 생성됨 ---")
         print(self.patterns)
         print("--------------------------\n")
