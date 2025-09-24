@@ -62,6 +62,23 @@ class Database:
                 and a.b_wgt = b.b_wgt 
                 and lot_no = '3250900071' and version = '01'
             """
+
+            # query = """ 
+            #     select 
+            #         a.plant, pm_no, a.schedule_unit, a.lot_no, '05' as version, a.min_width, a.roll_max_width, 
+            #         a.sheet_max_width, a.max_re_count as max_pieces, 4 as sheet_max_pieces,
+            #         a.paper_type, a.b_wgt,
+            #         a.min_sc_width - 100, a.max_sc_width, a.sheet_trim_size, b.max_length as sheet_length_re
+            #     from hsfp_st.th_versions_manager@hsfp_st_rlink a, hsfp_st.th_tar_std_length@hsfp_st_rlink b
+            #     where a.plant = b.plant
+            #     and a.paper_type = b.paper_type
+            #     and a.b_wgt = b.b_wgt 
+            #     and b.operation_code = 'RE' 
+            #     and b.rs_gubun = 'S'
+            #     and lot_no = '8250800131' and version = '99'
+            # """
+
+            # print(f"Executing query to fetch target lot:\n{query}")
             cursor.execute(query)
             result = cursor.fetchone()
             # 반환 값 개수를 16개로 맞춤
@@ -69,6 +86,91 @@ class Database:
         except oracledb.Error as error:
             print(f"Error while fetching target lot: {error}")
             return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        finally:
+            if connection:
+                self.pool.release(connection)
+
+    def get_target_lot_var(self):
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+            # 데몬용 쿼리 복원 (사용자 추가 필드 유지)
+            # query = """ 
+            #     SELECT 
+            #         plant, pm_no, schedule_unit, lot_no, version, min_width, roll_max_width as max_width, max_re_count as max_pieces,
+            #         paper_type, b_wgt
+            #     FROM th_versions_manager 
+            #     WHERE calc = 9 AND ROWNUM = 1
+            # """
+
+            query = """ 
+                select 
+                    a.plant, pm_no, a.schedule_unit, a.lot_no, '05' as version, a.min_width, a.roll_max_width, 
+                    a.sheet_max_width, a.max_re_count as max_pieces, 4 as sheet_max_pieces,
+                    a.paper_type, a.b_wgt,
+                    a.min_sc_width - 100, a.max_sc_width, a.sheet_trim_size, 
+                    b.min_length as min_sheet_length_re,
+                    b.max_length as max_sheet_length_re
+                from hsfp_st.th_versions_manager@hsfp_st_rlink a, hsfp_st.th_tar_std_length@hsfp_st_rlink b
+                where a.plant = b.plant
+                and a.paper_type = b.paper_type
+                and a.b_wgt = b.b_wgt 
+                and b.operation_code = 'RE' 
+                and b.rs_gubun = 'S'
+                and lot_no = '8250800131' and version = '99'
+            """
+
+            print(f"Executing query to fetch target lot:\n{query}")
+            cursor.execute(query)
+            result = cursor.fetchone()
+            # 반환 값 개수를 17개로 맞춤
+            return result if result else (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
+        except oracledb.Error as error:
+            print(f"Error while fetching target lot: {error}")
+            return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        finally:
+            if connection:
+                self.pool.release(connection)
+
+    def get_target_lot_ca(self):
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+            # 데몬용 쿼리 복원 (사용자 추가 필드 유지)
+            # query = """ 
+            #     SELECT 
+            #         plant, pm_no, schedule_unit, lot_no, version, min_width, roll_max_width as max_width, max_re_count as max_pieces,
+            #         paper_type, b_wgt
+            #     FROM th_versions_manager 
+            #     WHERE calc = 9 AND ROWNUM = 1
+            # """
+
+            query = """ 
+                select 
+                    a.plant, pm_no, a.schedule_unit, a.lot_no, '05' as version, a.min_width -300, a.roll_max_width, 
+                    a.sheet_max_width, a.max_re_count as max_pieces, 2 as sheet_max_pieces,
+                    a.paper_type, a.b_wgt,
+                    a.min_sc_width - 100, a.max_sc_width, a.sheet_trim_size, 
+                    b.std_length as min_sheet_length_re,
+                    b.std_length as max_sheet_length_re
+                from th_versions_manager@hsfp_ca_rlink a, th_tar_std_length_ca@hsfp_ca_rlink b
+                where a.plant = b.plant
+                and a.paper_type = b.paper_type
+                and a.b_wgt = b.b_wgt 
+                and b.rs_gubun = 'S'
+                and lot_no = '5250900062' and version = '99'
+            """
+
+            # print(f"Executing query to fetch target lot:\n{query}")
+            cursor.execute(query)
+            result = cursor.fetchone()
+            # 반환 값 개수를 17개로 맞춤
+            return result if result else (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
+        except oracledb.Error as error:
+            print(f"Error while fetching target lot: {error}")
+            return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
         finally:
             if connection:
                 self.pool.release(connection)
@@ -138,6 +240,16 @@ class Database:
         try:
             connection = self.pool.acquire()
             cursor = connection.cursor()
+            # sql_query = """
+            #     SELECT
+            #         width, length, quality_grade, order_ton_cnt, export_yn, order_no
+            #     FROM
+            #         hsfp_st.h3t_production_order
+            #     WHERE paper_prod_seq = :p_paper_prod_seq
+            #       AND rs_gubun = 'S'
+            #     ORDER BY width, length
+            # """
+
             sql_query = """
                 SELECT
                     width, length, quality_grade, order_ton_cnt, export_yn, order_no
@@ -147,6 +259,103 @@ class Database:
                   AND rs_gubun = 'S'
                 ORDER BY width, length
             """
+
+            cursor.execute(sql_query, p_paper_prod_seq=paper_prod_seq)
+            rows = cursor.fetchall()
+            raw_orders = []
+            for row in rows:
+                width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
+                export_type = '수출' if export_yn == 'Y' else '내수'
+                raw_orders.append({
+                    '오더번호': order_no,
+                    '가로': int(width),
+                    '세로': int(length),
+                    '주문톤': float(order_ton_cnt),
+                    '등급': quality_grade,
+                    '수출내수': export_type
+                })
+            print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
+            return raw_orders
+        except oracledb.Error as error:
+            print(f"Error while getting sheet orders from DB: {error}")
+            return None
+        finally:
+            if connection:
+                self.pool.release(connection)
+
+    def get_sheet_orders_from_db_var(self, paper_prod_seq):
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+            # sql_query = """
+            #     SELECT
+            #         width, length, quality_grade, order_ton_cnt, export_yn, order_no
+            #     FROM
+            #         hsfp_st.h3t_production_order
+            #     WHERE paper_prod_seq = :p_paper_prod_seq
+            #       AND rs_gubun = 'S'
+            #     ORDER BY width, length
+            # """
+
+            sql_query = """
+                SELECT
+                    width, length, quality_grade, order_ton_cnt, export_yn, order_no
+                FROM
+                    hsfp_st.h3t_production_order@hsfp_st_rlink
+                WHERE paper_prod_seq = :p_paper_prod_seq
+                  AND rs_gubun = 'S'
+                ORDER BY width, length
+            """
+
+            cursor.execute(sql_query, p_paper_prod_seq=paper_prod_seq)
+            rows = cursor.fetchall()
+            raw_orders = []
+            for row in rows:
+                width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
+                export_type = '수출' if export_yn == 'Y' else '내수'
+                raw_orders.append({
+                    '오더번호': order_no,
+                    '가로': int(width),
+                    '세로': int(length),
+                    '주문톤': float(order_ton_cnt),
+                    '등급': quality_grade,
+                    '수출내수': export_type
+                })
+            print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
+            return raw_orders
+        except oracledb.Error as error:
+            print(f"Error while getting sheet orders from DB: {error}")
+            return None
+        finally:
+            if connection:
+                self.pool.release(connection)
+
+    def get_sheet_orders_from_db_ca(self, paper_prod_seq):
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+            # sql_query = """
+            #     SELECT
+            #         width, length, quality_grade, order_ton_cnt, export_yn, order_no
+            #     FROM
+            #         hsfp_st.h3t_production_order
+            #     WHERE paper_prod_seq = :p_paper_prod_seq
+            #       AND rs_gubun = 'S'
+            #     ORDER BY width, length
+            # """
+
+            sql_query = """
+                SELECT
+                    width, length, quality_grade, order_ton_cnt, export_yn, order_no
+                FROM
+                    h3t_production_order@hsfp_ca_rlink
+                WHERE paper_prod_seq = :p_paper_prod_seq
+                  AND rs_gubun = 'S'
+                ORDER BY width, length
+            """
+
             cursor.execute(sql_query, p_paper_prod_seq=paper_prod_seq)
             rows = cursor.fetchall()
             raw_orders = []

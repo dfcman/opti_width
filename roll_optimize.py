@@ -1,6 +1,14 @@
 import pandas as pd
 from ortools.linear_solver import pywraplp
-import time
+
+OVER_PROD_PENALTY = 200.0
+UNDER_PROD_PENALTY = 10000.0
+PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6
+CG_MAX_ITERATIONS = 200
+CG_NO_IMPROVEMENT_LIMIT = 25
+CG_SUBPROBLEM_TOP_N = 3
+SMALL_PROBLEM_THRESHOLD = 10
+FINAL_MIP_TIME_LIMIT_MS = 60000
 
 class RollOptimize:
     
@@ -10,228 +18,310 @@ class RollOptimize:
         self.min_width = min_width
         self.max_pieces = max_pieces
         self.patterns = []
+        self.pattern_keys = set()
         self.demands = df_spec_pre.groupby('group_order_no')['주문수량'].sum().to_dict()
         self.items = list(self.demands.keys())
         self.item_info = df_spec_pre.set_index('group_order_no')['지폭'].to_dict()
 
+    def _clear_patterns(self):
+        self.patterns = []
+        self.pattern_keys = set()
+
+    def _rebuild_pattern_cache(self):
+        self.pattern_keys = {frozenset(p.items()) for p in self.patterns}
+
+    def _add_pattern(self, pattern):
+        key = frozenset(pattern.items())
+        if key in self.pattern_keys:
+            return False
+        self.patterns.append(dict(pattern))
+        self.pattern_keys.add(key)
+        return True
+
     def _generate_initial_patterns(self):
-        # A more sophisticated initial pattern generation
-        sorted_items = sorted(self.items, key=lambda item: self.item_info[item], reverse=True)
-        
-        # Create single-item patterns first
+        self._clear_patterns()
+        if not self.items:
+            return
+
+        sorted_by_width_desc = sorted(self.items, key=lambda item: self.item_info[item], reverse=True)
+        sorted_by_width_asc = sorted(self.items, key=lambda item: self.item_info[item])
+
+        # guarantee each item appears at least once
         for item in self.items:
-            self.patterns.append({item: 1})
+            pattern = {}
+            width = 0
+            pieces = 0
+            item_width = self.item_info[item]
+            while pieces < self.max_pieces and width + item_width <= self.max_width and width < self.min_width:
+                pattern[item] = pattern.get(item, 0) + 1
+                width += item_width
+                pieces += 1
+            if not pattern:
+                pattern = {item: 1}
+                width = item_width
+            self._add_pattern(pattern)
 
-        # Create some greedy patterns
-        for _ in range(30): # Generate 30 greedy patterns
-            new_pattern = {}
-            current_width = 0
-            current_pieces = 0
-            # Shuffle items to get different patterns
-            # random.shuffle(sorted_items) # This would require importing random
-            for item in sorted_items:
-                item_width = self.item_info[item]
-                # Try to fit as many of this item as possible
-                while current_width + item_width <= self.max_width and current_pieces < self.max_pieces:
-                    new_pattern[item] = new_pattern.get(item, 0) + 1
-                    current_width += item_width
-                    current_pieces += 1
-            
-            if new_pattern and new_pattern not in self.patterns:
-                self.patterns.append(new_pattern)
-            
-            # Rotate the list to start with a different item next time
-            if sorted_items:
-                sorted_items = sorted_items[1:] + sorted_items[:1]
+        def build_greedy(order):
+            rotation = list(order)
+            if not rotation:
+                return
+            for _ in range(len(rotation)):
+                pattern = {}
+                width = 0
+                pieces = 0
+                for item in rotation:
+                    item_width = self.item_info[item]
+                    while pieces < self.max_pieces and width + item_width <= self.max_width:
+                        pattern[item] = pattern.get(item, 0) + 1
+                        width += item_width
+                        pieces += 1
+                if pattern:
+                    self._add_pattern(pattern)
+                rotation = rotation[1:] + rotation[:1]
 
+        build_greedy(sorted_by_width_desc)
+        build_greedy(sorted_by_width_asc)
 
+        def first_fit(order):
+            for item in order:
+                pattern = {item: 1}
+                width = self.item_info[item]
+                pieces = 1
+                while pieces < self.max_pieces:
+                    remaining_width = self.max_width - width
+                    candidate = next((i for i in order if self.item_info[i] <= remaining_width), None)
+                    if not candidate:
+                        break
+                    pattern[candidate] = pattern.get(candidate, 0) + 1
+                    width += self.item_info[candidate]
+                    pieces += 1
+                    if width >= self.min_width:
+                        break
+                if width < self.min_width:
+                    for candidate in reversed(sorted_by_width_desc):
+                        if pieces >= self.max_pieces:
+                            break
+                        candidate_width = self.item_info[candidate]
+                        if width + candidate_width <= self.max_width:
+                            pattern[candidate] = pattern.get(candidate, 0) + 1
+                            width += candidate_width
+                            pieces += 1
+                        if width >= self.min_width:
+                            break
+                self._add_pattern(pattern)
+
+        first_fit(sorted_by_width_desc)
+        first_fit(sorted_by_width_asc)
+
+        covered_items = {item for pattern in self.patterns for item in pattern}
+        uncovered = [item for item in self.items if item not in covered_items]
+        for item in uncovered:
+            pattern = {item: 1}
+            width = self.item_info[item]
+            pieces = 1
+            for candidate in sorted_by_width_desc:
+                if pieces >= self.max_pieces or width >= self.min_width:
+                    break
+                candidate_width = self.item_info[candidate]
+                if width + candidate_width > self.max_width:
+                    continue
+                pattern[candidate] = pattern.get(candidate, 0) + 1
+                width += candidate_width
+                pieces += 1
+            self._add_pattern(pattern)
     def _solve_master_problem(self, is_final_mip=False):
-        solver = pywraplp.Solver.CreateSolver('GLOP' if not is_final_mip else 'SCIP')
-        x = {j: (solver.IntVar if is_final_mip else solver.NumVar)(0, solver.infinity(), f'P_{j}') for j in range(len(self.patterns))}
-        
-        production_exprs = {}
+        solver_name = 'SCIP' if is_final_mip else 'GLOP'
+        solver = pywraplp.Solver.CreateSolver(solver_name)
+        if not solver:
+            return None
+        if is_final_mip and hasattr(solver, 'SetTimeLimit'):
+            solver.SetTimeLimit(FINAL_MIP_TIME_LIMIT_MS)
+
+        x = {j: (solver.IntVar if is_final_mip else solver.NumVar)(0, solver.infinity(), f'P_{j}')
+             for j in range(len(self.patterns))}
+        over_prod_vars = {item: solver.NumVar(0, solver.infinity(), f'Over_{item}') for item in self.demands}
+
         constraints = {}
-        for item, demand in self.demands.items():
-            production_expr = solver.Sum(p.get(item, 0) * x[j] for j, p in enumerate(self.patterns))
-            production_exprs[item] = production_expr
-            constraints[item] = solver.Add(production_expr >= demand, f'demand_{item}')
-
-        # 목표 함수 변경: 총 폐기물(waste) 최소화
-        # 폐기물 = (롤 폐기물) + (초과 생산 폐기물)
-
-        # 1. 롤 폐기물 (Trim Loss): 각 패턴 사용 시 남는 롤의 폭
         total_trim_loss = solver.Sum(
-            (self.max_width - sum(self.item_info[item] * count for item, count in p.items())) * x[j]
-            for j, p in enumerate(self.patterns)
+            (self.max_width - sum(self.item_info[item] * count for item, count in pattern.items())) * x[j]
+            for j, pattern in enumerate(self.patterns)
         )
 
-        # 2. 초과 생산 폐기물 (Over-production Waste): 주문량을 초과하여 생산된 제품의 총 폭
-        total_over_production_width = solver.Sum(
-            (production_exprs[item] - demand) * self.item_info[item]
-            for item, demand in self.demands.items()
-        )
-        over_production_penalty_weight = 1000000
+        for item, demand in self.demands.items():
+            production_expr = solver.Sum(self.patterns[j].get(item, 0) * x[j] for j in range(len(self.patterns)))
+            constraints[item] = solver.Add(
+                production_expr == demand + over_prod_vars[item],
+                f'demand_{item}'
+            )
 
-        # 새로운 목표 함수: 총 폐기물 최소화 + (초과 생산에 대한 막대한 페널티)
-        solver.Minimize(total_trim_loss + over_production_penalty_weight * total_over_production_width)
+        total_over_penalty = solver.Sum(OVER_PROD_PENALTY * self.item_info[item] * over_prod_vars[item]
+                                        for item in self.demands)
+        
+        solver.Minimize(total_trim_loss + total_over_penalty)
 
         status = solver.Solve()
-        if status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
-            solution = {
-                'objective': solver.Objective().Value(),
-                'pattern_counts': {j: var.solution_value() for j, var in x.items()}
-            }
-            if not is_final_mip:
-                solution['duals'] = {item: constraints[item].dual_value() for item in self.demands}
-            return solution
-        return None
+        if status not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
+            return None
 
-    def _solve_subproblem_old(self, duals):
-        dp = [[(0, []) for _ in range(self.max_pieces + 1)] for _ in range(self.max_width + 1)]
+        solution = {
+            'objective': solver.Objective().Value(),
+            'pattern_counts': {j: var.solution_value() for j, var in x.items()},
+            'over_production': {item: over_prod_vars[item].solution_value() for item in self.demands},
+        }
+        if not is_final_mip:
+            solution['duals'] = {item: constraints[item].dual_value() for item in self.demands}
+        return solution
+
+    def _solve_subproblem(self, duals):
+        width_limit = self.max_width
+        piece_limit = self.max_pieces
+        item_details = []
         for item in self.items:
-            value = duals.get(item, 0)
-            weight = self.item_info[item]
-            for w in range(self.max_width, weight - 1, -1):
-                for k in range(self.max_pieces, 0, -1):
-                    if dp[w - weight][k - 1][0] + value > dp[w][k][0]:
-                        dp[w][k] = (dp[w - weight][k - 1][0] + value, dp[w - weight][k - 1][1] + [item])
-        
-        best_pattern_items = []
-        max_value = 1.0
-        for w in range(self.min_width, self.max_width + 1):
-            for k in range(1, self.max_pieces + 1):
-                if dp[w][k][0] > max_value:
-                    max_value = dp[w][k][0]
-                    best_pattern_items = dp[w][k][1]
+            item_width = self.item_info[item]
+            item_value = duals.get(item, 0)
+            if item_value <= 0:
+                continue
+            item_details.append((item, item_width, item_value))
+        if not item_details:
+            return []
 
-        if not best_pattern_items:
-            return None, 0
-            
-        new_pattern = {}
-        for item in best_pattern_items:
-            new_pattern[item] = new_pattern.get(item, 0) + 1
-        return new_pattern, max_value
+        dp_value = [[float('-inf')] * (width_limit + 1) for _ in range(piece_limit + 1)]
+        dp_parent = [[None] * (width_limit + 1) for _ in range(piece_limit + 1)]
+        dp_value[0][0] = 0.0
 
-    def _solve_subproblem_new(self, duals):
-        dp = [[(0, []) for _ in range(self.max_width + 1)] for _ in range(self.max_pieces + 1)]
+        for pieces in range(piece_limit + 1):
+            for width in range(width_limit + 1):
+                current_value = dp_value[pieces][width]
+                if current_value == float('-inf'):
+                    continue
+                for item_name, item_width, item_value in item_details:
+                    next_pieces = pieces + 1
+                    next_width = width + item_width
+                    if next_pieces > piece_limit or next_width > width_limit:
+                        continue
+                    new_value = current_value + item_value
+                    if new_value > dp_value[next_pieces][next_width] + 1e-9:
+                        dp_value[next_pieces][next_width] = new_value
+                        dp_parent[next_pieces][next_width] = (pieces, width, item_name)
 
-        for k in range(1, self.max_pieces + 1):
-            for w in range(1, self.max_width + 1):
-                for item in self.items:
-                    weight = self.item_info[item]
-                    value = duals.get(item, 0)
-                    
-                    if weight <= w:
-                        prev_value, prev_items = dp[k-1][w-weight]
-                        
-                        if prev_value > 0 or k == 1:
-                            if prev_value + value > dp[k][w][0]:
-                                dp[k][w] = (prev_value + value, prev_items + [item])
+        candidate_patterns = []
+        seen_patterns = set()
+        for pieces in range(1, piece_limit + 1):
+            for width in range(self.min_width, width_limit + 1):
+                value = dp_value[pieces][width]
+                if value <= PATTERN_VALUE_THRESHOLD:
+                    continue
+                parent = dp_parent[pieces][width]
+                if not parent:
+                    continue
+                pattern = {}
+                cur_pieces, cur_width = pieces, width
+                while cur_pieces > 0:
+                    parent_info = dp_parent[cur_pieces][cur_width]
+                    if not parent_info:
+                        pattern = None
+                        break
+                    prev_pieces, prev_width, item_name = parent_info
+                    pattern[item_name] = pattern.get(item_name, 0) + 1
+                    cur_pieces, cur_width = prev_pieces, prev_width
+                if not pattern or cur_pieces != 0 or cur_width != 0:
+                    continue
+                key = frozenset(pattern.items())
+                if key in seen_patterns:
+                    continue
+                total_width = sum(self.item_info[name] * count for name, count in pattern.items())
+                if total_width < self.min_width or total_width > self.max_width:
+                    continue
+                seen_patterns.add(key)
+                candidate_patterns.append({'pattern': pattern, 'value': value, 'width': total_width, 'pieces': pieces})
 
-        best_pattern_items = []
-        max_value = 1.0
-        for k in range(1, self.max_pieces + 1):
-            for w in range(self.min_width, self.max_width + 1):
-                if dp[k][w][0] > max_value:
-                    max_value = dp[k][w][0]
-                    best_pattern_items = dp[k][w][1]
-        
-        if not best_pattern_items:
-            return None, 0
-        
-        new_pattern = {}
-        for item in best_pattern_items:
-            new_pattern[item] = new_pattern.get(item, 0) + 1
-        return new_pattern, max_value
+        candidate_patterns.sort(key=lambda x: x['value'], reverse=True)
+        return candidate_patterns[:CG_SUBPROBLEM_TOP_N]
 
     def _generate_all_patterns(self):
-        """
-        Generates all feasible cutting patterns using a recursive approach.
-        This is for the direct MIP model for small-scale problems.
-        """
         all_patterns = []
         seen_patterns = set()
-        
         item_list = list(self.items)
 
-        def find_combinations_recursive(start_index, current_pattern, current_width, current_pieces):
-            if current_pattern:
-                pattern_key = frozenset(current_pattern.items())
-                if pattern_key not in seen_patterns:
-                    all_patterns.append(current_pattern.copy())
-                    seen_patterns.add(pattern_key)
+        def add_pattern_from_state(pattern):
+            if not pattern:
+                return
+            key = frozenset(pattern.items())
+            if key in seen_patterns:
+                return
+            total_width = sum(self.item_info[item] * count for item, count in pattern.items())
+            if self.min_width <= total_width <= self.max_width:
+                all_patterns.append(dict(pattern))
+                seen_patterns.add(key)
 
-            if current_pieces >= self.max_pieces:
+        def find_combinations_recursive(start_index, current_pattern, current_width, current_pieces):
+            add_pattern_from_state(current_pattern)
+            if current_pieces >= self.max_pieces or start_index >= len(item_list):
                 return
 
             for i in range(start_index, len(item_list)):
                 item = item_list[i]
                 item_width = self.item_info[item]
+                if current_width + item_width > self.max_width:
+                    continue
+                current_pattern[item] = current_pattern.get(item, 0) + 1
+                find_combinations_recursive(i, current_pattern, current_width + item_width, current_pieces + 1)
+                current_pattern[item] -= 1
+                if current_pattern[item] == 0:
+                    del current_pattern[item]
 
-                if current_width + item_width <= self.max_width:
-                    current_pattern[item] = current_pattern.get(item, 0) + 1
-                    find_combinations_recursive(i, current_pattern, current_width + item_width, current_pieces + 1)
-                    current_pattern[item] -= 1
-                    if current_pattern[item] == 0:
-                        del current_pattern[item]
-        
         find_combinations_recursive(0, {}, 0, 0)
-        self.patterns = all_patterns
+        self.patterns = [dict(p) for p in all_patterns]
+        self._rebuild_pattern_cache()
 
     def run_optimize(self):
-        # Step 1: Pattern Generation
-        # If the number of order types is small (<=10), generate all feasible patterns for a direct MIP solve.
-        if len(self.items) <= 10:
+        if len(self.items) <= SMALL_PROBLEM_THRESHOLD:
             self._generate_all_patterns()
-        # Otherwise, use column generation for larger problems.
         else:
             self._generate_initial_patterns()
             if not self.patterns:
-                return {"error": "초기 패턴을 생성할 수 없습니다."}
-            
-            for iteration in range(200):
+                return {"error": "초기 유효 패턴을 생성하지 못했습니다."}
+
+            no_improvement = 0
+            for _ in range(CG_MAX_ITERATIONS):
                 master_solution = self._solve_master_problem()
                 if not master_solution or 'duals' not in master_solution:
                     break
 
-                # --- HYBRID PATTERN GENERATION ---
-                new_pattern_1, val1 = self._solve_subproblem_old(master_solution['duals'])
-                new_pattern_2, val2 = self._solve_subproblem_new(master_solution['duals'])
-                
-                added_pattern = False
-                # Add pattern from old algorithm if it's good and new
-                if new_pattern_1 and val1 > 1.0 and new_pattern_1 not in self.patterns:
-                    self.patterns.append(new_pattern_1)
-                    added_pattern = True
+                candidate_patterns = self._solve_subproblem(master_solution['duals'])
+                patterns_added = 0
+                for candidate in candidate_patterns:
+                    pattern = candidate['pattern']
+                    pattern_width = candidate['width']
+                    if pattern_width < self.min_width:
+                        continue
+                    if self._add_pattern(pattern):
+                        patterns_added += 1
 
-                # Add pattern from new algorithm if it's good and new
-                if new_pattern_2 and val2 > 1.0 and new_pattern_2 not in self.patterns:
-                    self.patterns.append(new_pattern_2)
-                    added_pattern = True
+                if patterns_added == 0:
+                    no_improvement += 1
+                else:
+                    no_improvement = 0
 
-                # If neither algorithm found a new useful pattern, stop iterating.
-                if not added_pattern:
+                if no_improvement >= CG_NO_IMPROVEMENT_LIMIT:
                     break
 
-        # Step 2: Final MIP Solve
         if not self.patterns:
-             return {"error": "유효한 패턴을 생성할 수 없습니다."}
+            return {"error": "유효한 패턴을 생성하지 못했습니다."}
 
-        # Filter for patterns that meet the min_width requirement
-        good_patterns = [
-            p for p in self.patterns
-            if sum(self.item_info[item] * count for item, count in p.items()) >= self.min_width
+        self.patterns = [
+            pattern for pattern in self.patterns
+            if sum(self.item_info[item] * count for item, count in pattern.items()) >= self.min_width
         ]
-        self.patterns = good_patterns
-        
         if not self.patterns:
-             return {"error": f"{self.min_width}mm 이상으로 조합할 수 있는 패턴이 없습니다."}
+            return {"error": f"{self.min_width}mm 이상으로 조합할 수 있는 패턴이 없습니다."}
+
+        self._rebuild_pattern_cache()
 
         final_solution = self._solve_master_problem(is_final_mip=True)
         if not final_solution:
-            return {"error": f"최종 해를 찾을 수 없습니다. {self.min_width}mm 이상의 폭으로 조합할 수 없는 주문이 포함되었을 수 있습니다."}
-        
-        # Step 3: Format and return results
+            return {"error": f"최종 해를 찾을 수 없습니다. {self.min_width}mm 이상을 충족하는 주문이 부족했을 수 있습니다."}
+
         return self._format_results(final_solution)
 
     def _format_results(self, final_solution):

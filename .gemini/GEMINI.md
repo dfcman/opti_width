@@ -1,0 +1,3 @@
+## Gemini Added Memories
+- 지폭 최적화 소스 개선 방안: 현재 코드는 모든 조합을 무작위로 탐색하고('Brute-force') 주문 수량을 고려하지 않는 한계가 있습니다. 이를 개선하기 위해, 실제 주문량을 만족시키면서 폐기물을 최소화하는 '절단 최적 문제(Cutting Stock Problem)'로 접근해야 합니다. Google의 'OR-Tools' 라이브러리를 사용하면 이 문제를 효율적으로 해결할 수 있습니다. 개선 방법은 1) OR-Tools 설치, 2) 가능한 커팅 패턴 생성, 3) 정수 계획법 모델을 사용해 '총 사용 롤 최소화'를 목표로 설정, 4) '각 지폭의 주문 수량 만족'을 제약조건으로 설정하여 최적해를 찾는 것입니다.
+- The user has finalized the `update_lot_status` and `get_target_lot` functions in `db_connector.py` to match their production database. Do not modify these two functions in any future changes.
