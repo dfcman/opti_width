@@ -187,7 +187,6 @@ class SheetOptimizeCa:
         
         compositions = []
         seen_compositions = set()
-        get_pieces = lambda item_name: sum(self.item_composition[item_name].values())
 
         sorted_items_demand = sorted(
             self.items,
@@ -202,43 +201,38 @@ class SheetOptimizeCa:
         for sorted_items in heuristics:
             for item in sorted_items:
                 item_width = self.item_info[item]
-                item_pieces = get_pieces(item)
                 
                 current_pattern = {item: 1}
                 current_width = item_width
-                current_pieces = item_pieces
+                current_pieces = 1
 
                 while current_pieces < self.max_pieces:
                     remaining_width = self.max_width - current_width
                     
                     best_fit_item = None
                     for i in sorted_items:
-                        fit_item_pieces = get_pieces(i)
-                        if self.item_info[i] <= remaining_width and current_pieces + fit_item_pieces <= self.max_pieces:
+                        if self.item_info[i] <= remaining_width and current_pieces + 1 <= self.max_pieces:
                              best_fit_item = i
                              break
                     
                     if not best_fit_item:
                         break 
 
-                    best_fit_item_pieces = get_pieces(best_fit_item)
                     current_pattern[best_fit_item] = current_pattern.get(best_fit_item, 0) + 1
                     current_width += self.item_info[best_fit_item]
-                    current_pieces += best_fit_item_pieces
+                    current_pieces += 1
 
                 while current_width < self.min_width and current_pieces < self.max_pieces:
                     item_to_add = None
                     for i in reversed(sorted_items):
-                        add_item_pieces = get_pieces(i)
-                        if current_width + self.item_info[i] <= self.max_width and current_pieces + add_item_pieces <= self.max_pieces:
+                        if current_width + self.item_info[i] <= self.max_width and current_pieces + 1 <= self.max_pieces:
                             item_to_add = i
                             break
                             
                     if item_to_add:
-                        item_to_add_pieces = get_pieces(item_to_add)
                         current_pattern[item_to_add] = current_pattern.get(item_to_add, 0) + 1
                         current_width += self.item_info[item_to_add]
-                        current_pieces += item_to_add_pieces
+                        current_pieces += 1
                     else:
                         break
 
@@ -251,16 +245,13 @@ class SheetOptimizeCa:
         for item in self.items:
             item_width = self.item_info.get(item, 0)
             if item_width <= 0: continue
-            
-            item_pieces = get_pieces(item)
-            if item_pieces == 0: continue
 
-            num_items = min(int(self.max_width / item_width), int(self.max_pieces / item_pieces))
+            num_items = min(int(self.max_width / item_width), self.max_pieces)
             
             while num_items > 0:
                 new_pattern = {item: num_items}
                 total_width = item_width * num_items
-                total_pieces = item_pieces * num_items
+                total_pieces = num_items
                 if self.min_width <= total_width and self.min_pieces <= total_pieces <= self.max_pieces:
                     comp_key = frozenset(new_pattern.items())
                     if comp_key not in seen_compositions:

@@ -43,92 +43,99 @@ class RollOptimize:
         if not self.items:
             return
 
+        # 1. 다양한 휴리스틱을 위한 정렬된 아이템 리스트 생성
+        sorted_by_demand = sorted(
+            self.items,
+            key=lambda i: self.demands.get(i, 0),
+            reverse=True
+        )
         sorted_by_width_desc = sorted(self.items, key=lambda item: self.item_info[item], reverse=True)
         sorted_by_width_asc = sorted(self.items, key=lambda item: self.item_info[item])
 
-        # guarantee each item appears at least once
+        heuristics = [sorted_by_demand, sorted_by_width_desc, sorted_by_width_asc]
+
+        # 2. 각 휴리스틱에 대해 First-Fit과 유사한 패턴 생성
+        for sorted_items in heuristics:
+            for item in sorted_items:
+                current_pattern = {item: 1}
+                current_width = self.item_info[item]
+                current_pieces = 1
+
+                # max_pieces에 도달할 때까지 아이템 추가
+                while current_pieces < self.max_pieces:
+                    remaining_width = self.max_width - current_width
+                    
+                    # 남은 공간에 맞는 첫 번째 아이템 찾기 (First-Fit)
+                    best_fit_item = next((i for i in sorted_items if self.item_info[i] <= remaining_width), None)
+                    
+                    if not best_fit_item:
+                        break 
+
+                    current_pattern[best_fit_item] = current_pattern.get(best_fit_item, 0) + 1
+                    current_width += self.item_info[best_fit_item]
+                    current_pieces += 1
+
+                # 너비가 min_width보다 작은 경우 보정
+                while current_width < self.min_width and current_pieces < self.max_pieces:
+                    # 추가해도 max_width를 넘지 않는 가장 적절한 아이템 탐색 (너비가 큰 순으로)
+                    item_to_add = next((i for i in sorted_by_width_desc if current_width + self.item_info[i] <= self.max_width), None)
+                    
+                    if item_to_add:
+                        current_pattern[item_to_add] = current_pattern.get(item_to_add, 0) + 1
+                        current_width += self.item_info[item_to_add]
+                        current_pieces += 1
+                    else:
+                        break # 더 이상 추가할 아이템이 없으면 종료
+
+                # 최종 유효성 검사 후 패턴 추가
+                if current_width >= self.min_width:
+                    self._add_pattern(current_pattern)
+
+        # 3. 순수 품목 패턴 생성
         for item in self.items:
-            pattern = {}
-            width = 0
-            pieces = 0
-            item_width = self.item_info[item]
-            while pieces < self.max_pieces and width + item_width <= self.max_width and width < self.min_width:
-                pattern[item] = pattern.get(item, 0) + 1
-                width += item_width
-                pieces += 1
-            if not pattern:
-                pattern = {item: 1}
-                width = item_width
-            self._add_pattern(pattern)
+            item_width = self.item_info.get(item, 0)
+            if item_width <= 0: continue
 
-        def build_greedy(order):
-            rotation = list(order)
-            if not rotation:
-                return
-            for _ in range(len(rotation)):
-                pattern = {}
-                width = 0
-                pieces = 0
-                for item in rotation:
-                    item_width = self.item_info[item]
-                    while pieces < self.max_pieces and width + item_width <= self.max_width:
-                        pattern[item] = pattern.get(item, 0) + 1
-                        width += item_width
-                        pieces += 1
-                if pattern:
-                    self._add_pattern(pattern)
-                rotation = rotation[1:] + rotation[:1]
+            # 해당 아이템으로만 구성된 패턴 생성
+            num_items = min(int(self.max_width / item_width), self.max_pieces)
+            
+            while num_items > 0:
+                new_pattern = {item: num_items}
+                total_width = item_width * num_items
+                
+                if total_width >= self.min_width:
+                    if self._add_pattern(new_pattern):
+                        break # 이 아이템으로 만들 수 있는 가장 좋은 순수패턴을 찾았으므로 종료
+                
+                num_items -= 1
 
-        build_greedy(sorted_by_width_desc)
-        build_greedy(sorted_by_width_asc)
+        # 4. 폴백 로직: 초기 패턴으로 커버되지 않는 아이템 확인
+        covered_items = {item for pattern in self.patterns for item in pattern}
+        uncovered_items = set(self.items) - covered_items
 
-        def first_fit(order):
-            for item in order:
+        if uncovered_items:
+            for item in uncovered_items:
+                # 너비가 큰 아이템부터 채워나가는 Greedy 방식으로 패턴 생성
                 pattern = {item: 1}
                 width = self.item_info[item]
                 pieces = 1
-                while pieces < self.max_pieces:
+                
+                while pieces < self.max_pieces and width < self.min_width:
                     remaining_width = self.max_width - width
-                    candidate = next((i for i in order if self.item_info[i] <= remaining_width), None)
+                    
+                    candidate = next((i for i in sorted_by_width_desc if self.item_info[i] <= remaining_width), None)
                     if not candidate:
                         break
+                        
                     pattern[candidate] = pattern.get(candidate, 0) + 1
                     width += self.item_info[candidate]
                     pieces += 1
-                    if width >= self.min_width:
-                        break
-                if width < self.min_width:
-                    for candidate in reversed(sorted_by_width_desc):
-                        if pieces >= self.max_pieces:
-                            break
-                        candidate_width = self.item_info[candidate]
-                        if width + candidate_width <= self.max_width:
-                            pattern[candidate] = pattern.get(candidate, 0) + 1
-                            width += candidate_width
-                            pieces += 1
-                        if width >= self.min_width:
-                            break
-                self._add_pattern(pattern)
-
-        first_fit(sorted_by_width_desc)
-        first_fit(sorted_by_width_asc)
-
-        covered_items = {item for pattern in self.patterns for item in pattern}
-        uncovered = [item for item in self.items if item not in covered_items]
-        for item in uncovered:
-            pattern = {item: 1}
-            width = self.item_info[item]
-            pieces = 1
-            for candidate in sorted_by_width_desc:
-                if pieces >= self.max_pieces or width >= self.min_width:
-                    break
-                candidate_width = self.item_info[candidate]
-                if width + candidate_width > self.max_width:
-                    continue
-                pattern[candidate] = pattern.get(candidate, 0) + 1
-                width += candidate_width
-                pieces += 1
-            self._add_pattern(pattern)
+                
+                if width >= self.min_width:
+                    self._add_pattern(pattern)
+                else:
+                    # 그래도 min_width를 못 넘으면, 그냥 단일 아이템 패턴이라도 추가
+                    self._add_pattern({item: 1})
     def _solve_master_problem(self, is_final_mip=False):
         solver_name = 'SCIP' if is_final_mip else 'GLOP'
         solver = pywraplp.Solver.CreateSolver(solver_name)

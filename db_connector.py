@@ -60,7 +60,7 @@ class Database:
                 where a.plant = b.plant
                 and a.paper_type = b.paper_type
                 and a.b_wgt = b.b_wgt 
-                and lot_no = '3250900071' and version = '01'
+                and lot_no = '3250900073' and version = '01'
             """
 
             # query = """ 

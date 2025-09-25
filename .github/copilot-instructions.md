@@ -1,5 +1,5 @@
 # Copilot Instructions for opti_paperwidth Codebase
-
+- The user prefers all explanations to be in Korean.
 ## Overview
 This repository focuses on optimization algorithms for paper width and sheet scheduling, likely for manufacturing or logistics. The codebase is organized as a set of Python scripts, each handling a distinct part of the workflow.
 

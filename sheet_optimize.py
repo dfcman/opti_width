@@ -159,149 +159,68 @@ class SheetOptimize:
             print(f"--- DB에서 {added_count}개의 신규 초기 패턴을 추가했습니다. ---")
 
     def _generate_initial_patterns(self):
+        """휴리스틱을 사용하여 초기 패턴을 생성합니다."""
+        seen_patterns = {frozenset(p.items()) for p in self.patterns}
 
-        # frozenset으로 패턴 중복 체크를 효율적으로 관리
-        seen_patterns = set()
-        # 주문량이 많은 아이템부터 순서대로 처리
-        sorted_items = sorted(
+        # 1. 다양한 휴리스틱을 위한 정렬된 아이템 리스트 생성
+        sorted_by_demand = sorted(
             self.items,
             key=lambda i: self.demands_in_rolls.get(list(self.item_composition[i].keys())[0], 0),
-            reverse=False
+            reverse=True
         )
+        sorted_by_width_desc = sorted(self.items, key=lambda i: self.item_info[i], reverse=True)
+        sorted_by_width_asc = sorted(self.items, key=lambda i: self.item_info[i], reverse=False)
 
-        for item in sorted_items:
-            item_width = self.item_info[item]
-            
-            current_pattern = {item: 1}
-            current_width = item_width
-            current_pieces = 1
-
-            # max_pieces에 도달할 때까지 아이템 추가
-            while current_pieces < self.max_pieces:
-                remaining_width = self.max_width - current_width
+        heuristics = [sorted_by_demand, sorted_by_width_desc, sorted_by_width_asc]
+        
+        # 2. 각 휴리스틱에 대해 First-Fit과 유사한 패턴 생성
+        for sorted_items in heuristics:
+            for item in sorted_items:
+                item_width = self.item_info[item]
                 
-                # 남은 공간에 맞는 가장 큰 아이템을 찾음 (First-Fit)
-                best_fit_item = next((i for i in sorted_items if self.item_info[i] <= remaining_width), None)
-                
-                if not best_fit_item:
-                    break 
+                current_pattern = {item: 1}
+                current_width = item_width
+                current_pieces = 1
 
-                current_pattern[best_fit_item] = current_pattern.get(best_fit_item, 0) + 1
-                current_width += self.item_info[best_fit_item]
-                current_pieces += 1
+                # max_pieces에 도달할 때까지 아이템 추가
+                while current_pieces < self.max_pieces:
+                    remaining_width = self.max_width - current_width
+                    
+                    # 남은 공간에 맞는 가장 큰 아이템을 찾음 (First-Fit)
+                    best_fit_item = next((i for i in sorted_items if self.item_info[i] <= remaining_width), None)
+                    
+                    if not best_fit_item:
+                        break 
 
-            # 너비가 min_width보다 작은 경우 보정
-            while current_width < self.min_width and current_pieces < self.max_pieces:
-                # 추가해도 max_width를 넘지 않는 가장 적절한 아이템 탐색
-                item_to_add = next((i for i in reversed(sorted_items) if current_width + self.item_info[i] <= self.max_width), None)
-                
-                if item_to_add:
-                    current_pattern[item_to_add] = current_pattern.get(item_to_add, 0) + 1
-                    current_width += self.item_info[item_to_add]
+                    current_pattern[best_fit_item] = current_pattern.get(best_fit_item, 0) + 1
+                    current_width += self.item_info[best_fit_item]
                     current_pieces += 1
-                else:
-                    break # 더 이상 추가할 아이템이 없으면 종료
 
-            # 최종 유효성 검사 후 패턴 추가
-            if self.min_width <= current_width and self.min_pieces <= current_pieces:
-                pattern_key = frozenset(current_pattern.items())
-                if pattern_key not in seen_patterns:
-                    self.patterns.append(current_pattern)
-                    seen_patterns.add(pattern_key)
+                # 너비가 min_width보다 작은 경우 보정
+                while current_width < self.min_width and current_pieces < self.max_pieces:
+                    # 추가해도 max_width를 넘지 않는 가장 적절한 아이템 탐색
+                    item_to_add = next((i for i in sorted_by_width_desc if current_width + self.item_info[i] <= self.max_width), None)
+                    
+                    if item_to_add:
+                        current_pattern[item_to_add] = current_pattern.get(item_to_add, 0) + 1
+                        current_width += self.item_info[item_to_add]
+                        current_pieces += 1
+                    else:
+                        break # 더 이상 추가할 아이템이 없으면 종료
+
+                # 최종 유효성 검사 후 패턴 추가
+                if self.min_width <= current_width and self.min_pieces <= current_pieces:
+                    pattern_key = frozenset(current_pattern.items())
+                    if pattern_key not in seen_patterns:
+                        self.patterns.append(current_pattern)
+                        seen_patterns.add(pattern_key)
+        
         print(f"--- {len(self.patterns)}개의 혼합 패턴 생성됨 ---")
 
-        # 너비가 큰 아이템부터 순서대로 처리 (First-Fit-Decreasing)
-        sorted_items = sorted(self.items, key=lambda i: self.item_info[i], reverse=True)
-
-        for item in sorted_items:
-            item_width = self.item_info[item]
-            
-            current_pattern = {item: 1}
-            current_width = item_width
-            current_pieces = 1
-
-            # max_pieces에 도달할 때까지 아이템 추가
-            while current_pieces < self.max_pieces:
-                remaining_width = self.max_width - current_width
-                
-                # 남은 공간에 맞는 가장 큰 아이템을 찾음 (First-Fit)
-                best_fit_item = next((i for i in sorted_items if self.item_info[i] <= remaining_width), None)
-                
-                if not best_fit_item:
-                    break 
-
-                current_pattern[best_fit_item] = current_pattern.get(best_fit_item, 0) + 1
-                current_width += self.item_info[best_fit_item]
-                current_pieces += 1
-
-            # 너비가 min_width보다 작은 경우 보정
-            while current_width < self.min_width and current_pieces < self.max_pieces:
-                # 추가해도 max_width를 넘지 않는 가장 적절한 아이템 탐색
-                item_to_add = next((i for i in reversed(sorted_items) if current_width + self.item_info[i] <= self.max_width), None)
-                
-                if item_to_add:
-                    current_pattern[item_to_add] = current_pattern.get(item_to_add, 0) + 1
-                    current_width += self.item_info[item_to_add]
-                    current_pieces += 1
-                else:
-                    break # 더 이상 추가할 아이템이 없으면 종료
-
-            # 최종 유효성 검사 후 패턴 추가
-            if self.min_width <= current_width and self.min_pieces <= current_pieces:
-                pattern_key = frozenset(current_pattern.items())
-                if pattern_key not in seen_patterns:
-                    self.patterns.append(current_pattern)
-                    seen_patterns.add(pattern_key)
-        print(f"--- {len(self.patterns)}개의 혼합 패턴 생성됨 ---")
-
-        # 너비가 큰 아이템부터 순서대로 처리 (First-Fit-Decreasing)
-        sorted_items = sorted(self.items, key=lambda i: self.item_info[i], reverse=False)
-
-        for item in sorted_items:
-            item_width = self.item_info[item]
-            
-            current_pattern = {item: 1}
-            current_width = item_width
-            current_pieces = 1
-
-            # max_pieces에 도달할 때까지 아이템 추가
-            while current_pieces < self.max_pieces:
-                remaining_width = self.max_width - current_width
-                
-                # 남은 공간에 맞는 가장 큰 아이템을 찾음 (First-Fit)
-                best_fit_item = next((i for i in sorted_items if self.item_info[i] <= remaining_width), None)
-                
-                if not best_fit_item:
-                    break 
-
-                current_pattern[best_fit_item] = current_pattern.get(best_fit_item, 0) + 1
-                current_width += self.item_info[best_fit_item]
-                current_pieces += 1
-
-            # 너비가 min_width보다 작은 경우 보정
-            while current_width < self.min_width and current_pieces < self.max_pieces:
-                # 추가해도 max_width를 넘지 않는 가장 적절한 아이템 탐색
-                item_to_add = next((i for i in reversed(sorted_items) if current_width + self.item_info[i] <= self.max_width), None)
-                
-                if item_to_add:
-                    current_pattern[item_to_add] = current_pattern.get(item_to_add, 0) + 1
-                    current_width += self.item_info[item_to_add]
-                    current_pieces += 1
-                else:
-                    break # 더 이상 추가할 아이템이 없으면 종료
-
-            # 최종 유효성 검사 후 패턴 추가
-            if self.min_width <= current_width and self.min_pieces <= current_pieces:
-                pattern_key = frozenset(current_pattern.items())
-                if pattern_key not in seen_patterns:
-                    self.patterns.append(current_pattern)
-                    seen_patterns.add(pattern_key)
-        print(f"--- {len(self.patterns)}개의 혼합 패턴 생성됨 ---")
-
-
-        # --- 2. 모든 복합폭에 대해 '순수 품목 패턴' 생성 ---
+        # --- 3. 모든 복합폭에 대해 '순수 품목 패턴' 생성 ---
         pure_patterns_added = 0
-        for item in sorted_items:
+        # 순수 패턴은 어떤 정렬이든 상관 없으므로 마지막 정렬(오름차순) 사용
+        for item in sorted_by_width_asc:
             item_width = self.item_info.get(item, 0)
             if item_width <= 0: continue
 
@@ -326,7 +245,7 @@ class SheetOptimize:
         if pure_patterns_added > 0:
             print(f"--- {pure_patterns_added}개의 순수 품목 패턴 추가됨 ---")
 
-        # --- 폴백 로직: 초기 패턴으로 커버되지 않는 주문이 있는지 최종 확인 ---
+        # --- 4. 폴백 로직: 초기 패턴으로 커버되지 않는 주문이 있는지 최종 확인 ---
         covered_widths = {w for p in self.patterns for item_name in p for w in self.item_composition.get(item_name, {})}
         uncovered_widths = set(self.order_widths) - covered_widths
 
