@@ -281,7 +281,7 @@ class RollOptimize:
         self.patterns = [dict(p) for p in all_patterns]
         self._rebuild_pattern_cache()
 
-    def run_optimize(self):
+    def run_optimize(self, start_prod_seq=0):
         if len(self.items) <= SMALL_PROBLEM_THRESHOLD:
             self._generate_all_patterns()
         else:
@@ -329,16 +329,20 @@ class RollOptimize:
         if not final_solution:
             return {"error": f"최종 해를 찾을 수 없습니다. {self.min_width}mm 이상을 충족하는 주문이 부족했을 수 있습니다."}
 
-        return self._format_results(final_solution)
+        return self._format_results(final_solution, start_prod_seq)
 
-    def _format_results(self, final_solution):
+    def _format_results(self, final_solution, start_prod_seq=0):
         result_patterns = []
         pattern_details_for_db = []
+        pattern_roll_details_for_db = []
         production_counts = {item: 0 for item in self.demands}
+        prod_seq = start_prod_seq
 
         for j, count in final_solution['pattern_counts'].items():
             if count > 0.99:
                 pattern_dict = self.patterns[j]
+                prod_seq += 1
+                
                 db_widths, db_group_nos = [], []
                 for group_no, num in pattern_dict.items():
                     width = self.item_info[group_no]
@@ -353,32 +357,67 @@ class RollOptimize:
                 result_patterns.append({
                     'Pattern': pattern_str,
                     'Pattern_Width': total_width,
+                    'Loss_per_Roll': loss,
                     'Count': int(round(count)),
-                    'Loss_per_Roll': loss
+                    'Prod_seq': prod_seq
                 })
                 pattern_details_for_db.append({
-                    'Count': int(round(count)),
                     'widths': (db_widths + [0] * 8)[:8],
-                    'group_nos': (db_group_nos + [''] * 8)[:8]
+                    'group_nos': (db_group_nos + [''] * 8)[:8],
+                    'Count': int(round(count)),
+                    'Prod_seq': prod_seq
                 })
+                
+                
+                for i in range(len(db_widths)):
+                    roll_width = db_widths[i]
+                    group_no = db_group_nos[i]
+                    
+                    new_widths = [0] * 8
+                    new_widths[0] = roll_width
+                    
+                    new_group_nos = [''] * 8
+                    new_group_nos[0] = group_no
+                    
+                    pattern_roll_details_for_db.append({
+                        'rollwidth': roll_width,
+                        'widths': new_widths,
+                        'group_nos': new_group_nos,
+                        'Count': int(round(count)),
+                        'Prod_seq': prod_seq,
+                        'Roll_seq': i + 1
+                    })
 
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
             df_patterns = df_patterns[['Pattern', 'Pattern_Width', 'Count', 'Loss_per_Roll']]
 
-        df_demand = pd.DataFrame.from_dict(self.demands, orient='index', columns=['Total_Ordered_per_Group'])
+        # --- Fulfillment Summary Generation ---
+        df_demand = pd.DataFrame.from_dict(self.demands, orient='index', columns=['필요롤수'])
         df_demand.index.name = 'group_order_no'
-        df_prod = pd.DataFrame.from_dict(production_counts, orient='index', columns=['Total_Produced_per_Group'])
+        
+        df_prod = pd.DataFrame.from_dict(production_counts, orient='index', columns=['생산롤수'])
         df_prod.index.name = 'group_order_no'
         
         df_summary = df_demand.join(df_prod)
-        df_summary['Over_Production'] = df_summary['Total_Produced_per_Group'] - df_summary['Total_Ordered_per_Group']
+        df_summary['과부족(롤)'] = df_summary['생산롤수'] - df_summary['필요롤수']
 
-        group_info_cols = self.df_spec_pre[['group_order_no', '지폭', '롤길이', '등급']].drop_duplicates()
-        fulfillment_summary = pd.merge(group_info_cols, df_summary.reset_index(), on='group_order_no')
+        info_cols = ['group_order_no', '지폭', '롤길이', '등급', '수출내수']
+        available_info_cols = [c for c in self.df_spec_pre.columns if c in info_cols]
+        group_info_df = self.df_spec_pre[available_info_cols].drop_duplicates(subset=['group_order_no'])
+
+        fulfillment_summary = pd.merge(group_info_df, df_summary.reset_index(), on='group_order_no')
+        
+        fulfillment_summary.rename(columns={'지폭': '가로', '롤길이': '세로'}, inplace=True)
+        
+        final_cols = ['group_order_no', '가로', '세로', '수출내수', '등급', '필요롤수', '생산롤수', '과부족(롤)']
+        available_final_cols = [c for c in final_cols if c in fulfillment_summary.columns]
+        fulfillment_summary = fulfillment_summary[available_final_cols]
 
         return {
             "pattern_result": df_patterns.sort_values('Count', ascending=False),
             "pattern_details_for_db": pattern_details_for_db,
-            "fulfillment_summary": fulfillment_summary
+            "pattern_roll_details_for_db": pattern_roll_details_for_db,
+            "fulfillment_summary": fulfillment_summary,
+            "last_prod_seq": prod_seq
         }

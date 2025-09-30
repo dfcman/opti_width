@@ -146,7 +146,7 @@ class Database:
             #     FROM th_versions_manager 
             #     WHERE calc = 9 AND ROWNUM = 1
             # """
-
+            # 5250900616, 5250900062, 5250900429
             query = """ 
                 select 
                     a.plant, pm_no, a.schedule_unit, a.lot_no, '05' as version, a.min_width -300, a.roll_max_width, 
@@ -160,7 +160,7 @@ class Database:
                 and a.paper_type = b.paper_type
                 and a.b_wgt = b.b_wgt 
                 and b.rs_gubun = 'S'
-                and lot_no = '5250900062' and version = '99'
+                and lot_no = '5250900616' and version = '99'
             """
 
             # print(f"Executing query to fetch target lot:\n{query}")
@@ -336,7 +336,7 @@ class Database:
         try:
             connection = self.pool.acquire()
             cursor = connection.cursor()
-            # sql_query = """
+            # sql_query = """ 
             #     SELECT
             #         width, length, quality_grade, order_ton_cnt, export_yn, order_no
             #     FROM
@@ -399,7 +399,7 @@ class Database:
                     groupno1, groupno2, groupno3, groupno4, groupno5, groupno6, groupno7, groupno8
                 ) VALUES (
                     'C', :plant, :pm_no, :schedule_unit, :max_width, :paper_type, :b_wgt,
-                    :lot_no, :version, :prod_seq, :unit_no, 1, :pok_cnt,
+                    :lot_no, :version, :prod_seq, :unit_no, :seq, :pok_cnt,
                     :w1 + :w2 + :w3 + :w4 + :w5 + :w6 + :w7 + :w8,
                     :w1, :w2, :w3, :w4, :w5, :w6, :w7, :w8,
                     :g1, :g2, :g3, :g4, :g5, :g6, :g7, :g8
@@ -412,6 +412,8 @@ class Database:
                 # print(f"Number of pattern details: {pattern['Count']}")
                 for _ in range(pattern['Count']):
                     total_seq += 1
+                    prod_seq = pattern['Prod_seq']
+                    # print(f"Prod_seq:{prod_seq}")
                     
                     # Python에서 pok_cnt 계산
                     pok_cnt_value = len([w for w in pattern['widths'] if w > 0])
@@ -425,8 +427,9 @@ class Database:
                         'b_wgt': b_wgt,
                         'lot_no': lot_no,
                         'version': version,
-                        'prod_seq': total_seq,
-                        'unit_no': total_seq,
+                        'prod_seq': prod_seq,
+                        'unit_no': prod_seq,
+                        'seq': total_seq,
                         'pok_cnt': pok_cnt_value, # 계산된 값 바인딩
                         'w1': pattern['widths'][0], 'w2': pattern['widths'][1],
                         'w3': pattern['widths'][2], 'w4': pattern['widths'][3],
@@ -445,6 +448,83 @@ class Database:
 
         except oracledb.Error as error:
             print(f"Error while inserting pattern sequence: {error}")
+            if connection:
+                connection.rollback()
+            return False
+        finally:
+            if connection:
+                self.pool.release(connection)
+
+    def insert_roll_sequence(self, lot_no, version, plant, pm_no, schedule_unit, max_width, 
+                                paper_type, b_wgt, pattern_roll_details):
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+
+            cursor.execute("DELETE FROM th_roll_sequence WHERE lot_no = :lot_no AND version = :version", lot_no=lot_no, version=version)
+            print(f"Deleted existing roll_sequence for lot {lot_no}, version {version}")
+
+            # This function will insert the detailed roll information. 
+            # To avoid conflicts with the main insert, this will NOT delete existing records.
+            # It will also start prod_seq from a higher number.
+            
+            insert_query = """
+                INSERT INTO th_roll_sequence (
+                    module, plant, pm_no, schedule_unit, paper_type, b_wgt,
+                    lot_no, version, prod_seq, unit_no, seq, roll_seq, pok_cnt,
+                    rollwidth, 
+                    width1, width2, width3, width4, width5, width6, width7,
+                    group1, group2, group3, group4, group5, group6, group7
+                ) VALUES (
+                    'R', :plant, :pm_no, :schedule_unit, :paper_type, :b_wgt,
+                    :lot_no, :version, :prod_seq, :unit_no, :seq, :roll_seq, :pok_cnt,
+                    :rollwidth,
+                    :w1, :w2, :w3, :w4, :w5, :w6, :w7,
+                    :g1, :g2, :g3, :g4, :g5, :g6, :g7
+                )
+            """
+
+            for roll_detail in pattern_roll_details:
+                # print(f"Number of pattern details: {pattern['Count']}")
+                for seq in range(roll_detail['Count']):
+                    prod_seq = roll_detail['Prod_seq']
+                    roll_seq = roll_detail['Roll_seq']
+                    # roll_detail.get('Roll_seq', 1)
+
+                    pok_cnt_value = len([w for w in roll_detail['widths'] if w > 0])
+
+                    bind_vars = {
+                        'plant': plant,
+                        'pm_no': pm_no,
+                        'schedule_unit': schedule_unit,
+                        'paper_type': paper_type,
+                        'b_wgt': b_wgt,
+                        'lot_no': lot_no,
+                        'version': version,
+                        'prod_seq': prod_seq,
+                        'unit_no': prod_seq,
+                        'seq':seq,
+                        'roll_seq': roll_seq,
+                        'pok_cnt': pok_cnt_value,
+                        'rollwidth': roll_detail['rollwidth'],
+                        'w1': roll_detail['widths'][0], 'w2': roll_detail['widths'][1],
+                        'w3': roll_detail['widths'][2], 'w4': roll_detail['widths'][3],
+                        'w5': roll_detail['widths'][4], 'w6': roll_detail['widths'][5],
+                        'w7': roll_detail['widths'][6],
+                        'g1': roll_detail['group_nos'][0][:15], 'g2': roll_detail['group_nos'][1][:15],
+                        'g3': roll_detail['group_nos'][2][:15], 'g4': roll_detail['group_nos'][3][:15],
+                        'g5': roll_detail['group_nos'][4][:15], 'g6': roll_detail['group_nos'][5][:15],
+                        'g7': roll_detail['group_nos'][6][:15]
+                    }
+                    cursor.execute(insert_query, bind_vars)
+
+            connection.commit()
+            print(f"Successfully inserted {len(pattern_roll_details)} new roll sequences.")
+            return True
+
+        except oracledb.Error as error:
+            print(f"Error while inserting roll sequence: {error}")
             if connection:
                 connection.rollback()
             return False

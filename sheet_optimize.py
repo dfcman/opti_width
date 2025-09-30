@@ -40,12 +40,13 @@ class SheetOptimize:
         self.sheet_roll_length = sheet_roll_length
         self.sheet_trim = sheet_trim
         self.original_max_width = max_width
-        self.df_orders = df_spec_pre.copy()
         
-        self.demands_in_rolls = self._calculate_demand_rolls(self.df_orders)
+        # _calculate_demand_rolls에서 'rolls' 열이 추가된 데이터프레임을 받음
+        self.df_orders, self.demands_in_rolls = self._calculate_demand_rolls(df_spec_pre)
         self.order_widths = list(self.demands_in_rolls.keys()) 
 
         width_summary = {}
+        # 'rolls' 열이 추가되었으므로 self.df_orders를 사용
         tons_per_width = self.df_orders.groupby('지폭')['주문톤'].sum()
         for width, required_rolls in self.demands_in_rolls.items():
             order_tons = tons_per_width.get(width, 0)
@@ -89,7 +90,7 @@ class SheetOptimize:
         return items, item_info, item_composition
 
     def _calculate_demand_rolls(self, df_orders):
-        """주문량을 바탕으로 지폭별 필요 롤 수를 계산합니다."""
+        """주문량을 바탕으로 지폭별 필요 롤 수를 계산하고, 원본 데이터프레임에 'rolls' 열을 추가하여 반환합니다."""
         df_copy = df_orders.copy()
         sheet_roll_length_mm = self.sheet_roll_length * 1000
 
@@ -113,15 +114,15 @@ class SheetOptimize:
             sheets_per_roll = sheets_per_roll_length * 1 # num_across is always 1
             return round(total_sheets_needed / sheets_per_roll, 0)
 
-        df_copy['rolls'] = df_copy.apply(calculate_rolls, axis=1)
-        demand_rolls = df_copy.groupby('지폭')['rolls'].sum().astype(int).to_dict()
+        df_copy['rolls'] = df_copy.apply(calculate_rolls, axis=1).astype(int)
+        demand_rolls = df_copy.groupby('지폭')['rolls'].sum().to_dict()
 
         print("\n--- 지폭별 필요 롤 수 ---")
         # for width, rolls in demand_rolls.items():
         #     print(f"  지폭 {width}mm: {rolls} 롤")
         print("--------------------------\n")
         
-        return demand_rolls
+        return df_copy, demand_rolls
 
     def _generate_initial_patterns_db(self):
         """th_pattern_sequence 테이블의 기존 패턴 데이터를 활용하여 초기 패턴을 생성합니다."""
@@ -558,39 +559,70 @@ class SheetOptimize:
     def _format_results(self, final_solution):
         """최종 결과를 데이터프레임 형식으로 포매팅합니다."""
         
-        # 최종 생산량 계산
-        final_production_rolls = {width: 0 for width in self.order_widths}
-        for j, count in final_solution['pattern_counts'].items():
-            if count > 0.99:
-                roll_count = int(round(count))
-                for item_name, num_in_pattern in self.patterns[j].items():
-                    for width, num_pieces in self.item_composition[item_name].items():
-                        if width in final_production_rolls:
-                            final_production_rolls[width] += roll_count * num_in_pattern * num_pieces
-
         # 결과 데이터프레임 생성
-        result_patterns, pattern_details_for_db = self._build_pattern_details(final_solution)
+        result_patterns, pattern_details_for_db, pattern_roll_details_for_db, demand_tracker = self._build_pattern_details(final_solution)
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
             df_patterns = df_patterns[['Pattern', 'Roll_Production_Length', 'Count', 'Loss_per_Roll']]
 
-        # 주문 이행 요약 생성
-        fulfillment_summary = self._build_fulfillment_summary(final_production_rolls)
+        # 주문 이행 요약 생성 (수정된 _build_fulfillment_summary 호출)
+        fulfillment_summary = self._build_fulfillment_summary(demand_tracker)
 
-        print("\n[주문 이행 요약]")
+        print("\n[주문 이행 요약 (그룹오더별)]")
         # print(fulfillment_summary.to_string())
 
         return {
             "pattern_result": df_patterns.sort_values('Count', ascending=False) if not df_patterns.empty else df_patterns,
             "pattern_details_for_db": pattern_details_for_db,
+            "pattern_roll_details_for_db": pattern_roll_details_for_db,
             "fulfillment_summary": fulfillment_summary
         }
 
     def _build_pattern_details(self, final_solution):
-        """패턴 사용 결과와 DB 저장을 위한 상세 정보를 생성합니다."""
+        """
+        패턴 사용 결과와 DB 저장을 위한 상세 정보를 생성합니다.
+        이 메서드는 최적화 결과(패턴별 총 생산량)를 개별 group_order_no의 수요에 맞게 분배(disaggregation)합니다.
+        """
+        # 1. group_order_no별 수요를 추적하기 위한 데이터프레임 생성
+        demand_tracker = self.df_orders.copy()
+        demand_tracker['original_order_idx'] = demand_tracker.index # 원본 인덱스 보존
+        demand_tracker = demand_tracker[['original_order_idx', 'group_order_no', '지폭', 'rolls']].copy()
+        demand_tracker['fulfilled'] = 0
+        # 할당 순서를 고정하기 위해 정렬
+        demand_tracker = demand_tracker.sort_values(by=['지폭', 'group_order_no']).reset_index(drop=True)
+
+        # 최종 결과를 저장할 리스트
         result_patterns = []
         pattern_details_for_db = []
+        pattern_roll_details_for_db = []
+        
+        prod_seq_counter = 0
 
+        # 패턴별로 한 번만 수행할 정보 미리 계산 (for display summary)
+        pattern_summary_map = {}
+        for j, pattern_dict in enumerate(self.patterns):
+            sorted_pattern_items = sorted(pattern_dict.items(), key=lambda item: self.item_info[item[0]], reverse=True)
+            
+            pattern_item_strs = []
+            total_width_for_pattern = 0
+            
+            for item_name, num_of_composite in sorted_pattern_items:
+                composite_width = self.item_info[item_name]
+                total_width_for_pattern += composite_width * num_of_composite
+                
+                base_width_dict = self.item_composition[item_name]
+                base_width, num_of_base = list(base_width_dict.items())[0]
+                
+                formatted_name = f"{composite_width}({base_width}*{num_of_base})"
+                pattern_item_strs.extend([formatted_name] * num_of_composite)
+                
+            pattern_summary_map[j] = {
+                'Pattern': ' + '.join(pattern_item_strs),
+                'Roll_Production_Length': total_width_for_pattern,
+                'Loss_per_Roll': self.original_max_width - total_width_for_pattern
+            }
+
+        # 2. 최적해의 패턴별로 루프를 돌며 생산량을 분배
         for j, count in final_solution['pattern_counts'].items():
             if count < 0.99:
                 continue
@@ -598,61 +630,107 @@ class SheetOptimize:
             roll_count = int(round(count))
             pattern_dict = self.patterns[j]
             
-            sorted_pattern_items = sorted(pattern_dict.items(), key=lambda item: self.item_info[item[0]], reverse=True)
+            # 화면 표시용 요약 정보에 집계된 롤 수 추가
+            summary = pattern_summary_map[j].copy() # Use copy to avoid modifying map
+            summary['Count'] = roll_count
+            result_patterns.append(summary)
 
-            db_widths, db_group_nos, pattern_item_strs = [], [], []
-            total_width = 0
-
-            for item_name, num in sorted_pattern_items:
-                width = self.item_info[item_name]
-                total_width += width * num
-                db_widths.extend([width] * num)
-                db_group_nos.extend([item_name] * num)
+            # 3. 패턴이 사용된 횟수(roll_count)만큼 반복하여 각 롤에 대한 DB 레코드 생성
+            for _ in range(roll_count):
+                prod_seq_counter += 1
                 
-                base_width, multiplier = map(int, item_name.split('x'))
-                formatted_name = f"{self.item_info[item_name]}({base_width}*{multiplier})"
-                pattern_item_strs.extend([formatted_name] * num)
+                composite_widths_for_db = []
+                composite_group_nos_for_db = []
 
-            result_patterns.append({
-                'Pattern': ' + '.join(pattern_item_strs),
-                'Roll_Production_Length': total_width,
-                'Count': roll_count,
-                'Loss_per_Roll': self.original_max_width - total_width
-            })
-            pattern_details_for_db.append({
-                'Count': roll_count,
-                'widths': (db_widths + [0] * 8)[:8],
-                'group_nos': (db_group_nos + [''] * 8)[:8]
-            })
-        return result_patterns, pattern_details_for_db
+                roll_seq_counter = 0
+                sorted_pattern_items = sorted(pattern_dict.items(), key=lambda item: self.item_info[item[0]], reverse=True)
+                for item_name, num_of_composite in sorted_pattern_items:
+                    composite_width = self.item_info[item_name]
+                    base_width_dict = self.item_composition[item_name]
 
-    def _build_fulfillment_summary(self, final_production_rolls):
-        """주문 이행 요약 데이터프레임을 생성합니다."""
-        summary_data = []
-        for width, required_rolls in self.demands_in_rolls.items():
-            produced_rolls = final_production_rolls.get(width, 0)
-            order_tons = self.width_summary[width]['order_tons']
-            
-            if required_rolls > 0:
-                tons_per_roll = order_tons / required_rolls
-                produced_tons = produced_rolls * tons_per_roll
-            else:
-                produced_tons = 0
-            
-            over_prod_tons = produced_tons - order_tons
+                    for _ in range(num_of_composite):
+                        roll_seq_counter += 1
+                        
+                        base_widths_for_item = []
+                        base_group_nos_for_item = []
+                        assigned_group_no_for_composite = None
 
-            summary_data.append({
-                '지폭': width,
-                '주문량(톤)': order_tons,
-                '생산량(톤)': round(produced_tons, 2),
-                '과부족(톤)': round(over_prod_tons, 2),
-                '필요롤수': required_rolls,
-                '생산롤수': produced_rolls,
-                '과부족(롤)': produced_rolls - required_rolls,
-            })
+                        for base_width, num_of_base in base_width_dict.items():
+                            for _ in range(num_of_base):
+                                piece_width = base_width
+                                
+                                # Demand tracking
+                                target_indices = demand_tracker[
+                                    (demand_tracker['지폭'] == piece_width) &
+                                    (demand_tracker['fulfilled'] < demand_tracker['rolls'])
+                                ].index
+                                
+                                assigned_group_no = None
+                                if not target_indices.empty:
+                                    target_idx = target_indices.min()
+                                    demand_tracker.loc[target_idx, 'fulfilled'] += 1
+                                    assigned_group_no = demand_tracker.loc[target_idx, 'group_order_no']
+                                else:
+                                    fallback_indices = demand_tracker[demand_tracker['지폭'] == piece_width].index
+                                    if not fallback_indices.empty:
+                                        assigned_group_no = demand_tracker.loc[fallback_indices.min(), 'group_order_no']
+                                    else:
+                                        assigned_group_no = "ERROR" # 데이터 오류
+                                
+                                base_widths_for_item.append(base_width)
+                                base_group_nos_for_item.append(assigned_group_no)
+
+                                if assigned_group_no_for_composite is None:
+                                    assigned_group_no_for_composite = assigned_group_no
+                        
+                        composite_widths_for_db.append(composite_width)
+                        composite_group_nos_for_db.append(assigned_group_no_for_composite if assigned_group_no_for_composite is not None else "")
+
+                        pattern_roll_details_for_db.append({
+                            'rollwidth': composite_width,
+                            'widths': (base_widths_for_item + [0] * 7)[:7],
+                            'group_nos': (base_group_nos_for_item + [''] * 7)[:7],
+                            'Count': 1,
+                            'Prod_seq': prod_seq_counter,
+                            'Roll_seq': roll_seq_counter
+                        })
+
+                pattern_details_for_db.append({
+                    'Count': 1,
+                    'widths': (composite_widths_for_db + [0] * 8)[:8],
+                    'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
+                    'Prod_seq': prod_seq_counter
+                })
+
+        return result_patterns, pattern_details_for_db, pattern_roll_details_for_db, demand_tracker
+
+    def _build_fulfillment_summary(self, demand_tracker):
+        """주문 이행 요약 데이터프레임을 생성합니다. (개별 주문별)"""
         
-        return pd.DataFrame(summary_data)[[
-            '지폭', '주문량(톤)', '생산량(톤)', '과부족(톤)',
+        summary_df = self.df_orders[['group_order_no', '가로', '세로', '수출내수', '등급', '주문톤', 'rolls']].copy()
+        summary_df.rename(columns={'rolls': '필요롤수', '주문톤': '주문량(톤)'}, inplace=True)
+        
+        # Merge fulfilled_rolls directly using original_order_idx
+        # demand_tracker has 'original_order_idx' from _build_pattern_details
+        summary_df = pd.merge(summary_df, demand_tracker[['original_order_idx', 'fulfilled']], 
+                              left_index=True, right_on='original_order_idx', how='left')
+        summary_df.rename(columns={'fulfilled': '생산롤수'}, inplace=True)
+        summary_df.drop(columns=['original_order_idx'], inplace=True) # Drop the temporary merge key
+
+        summary_df['생산롤수'] = summary_df['생산롤수'].fillna(0).astype(int)
+        
+        # 4. 과부족 및 생산톤 계산
+        summary_df['과부족(롤)'] = summary_df['생산롤수'].astype(int) - summary_df['필요롤수'].astype(int)
+        
+        # 0으로 나누기 오류를 방지하며 롤당 톤 계산
+        tons_per_roll = (summary_df['주문량(톤)'] / summary_df['필요롤수']).replace([float('inf'), -float('inf')], 0).fillna(0)
+        
+        summary_df['생산량(톤)'] = (summary_df['생산롤수'] * tons_per_roll).round(2)
+        summary_df['과부족(톤)'] = (summary_df['생산량(톤)'] - summary_df['주문량(톤)']).round(2)
+
+        # 최종 컬럼 순서 정리
+        return summary_df[[
+            'group_order_no', '가로', '세로', '수출내수', '등급', '주문량(톤)', '생산량(톤)', '과부족(톤)',
             '필요롤수', '생산롤수', '과부족(롤)'
         ]]
     

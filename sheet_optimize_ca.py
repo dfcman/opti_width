@@ -54,11 +54,9 @@ class SheetOptimizeCa:
         self.max_sheet_roll_length = max_sheet_roll_length
         self.sheet_trim = sheet_trim
         self.original_max_width = max_width
-        self.df_orders = df_spec_pre.copy()
-        self.width_to_group_order_no = self.df_orders.drop_duplicates('지폭').set_index('지폭')['group_order_no'].to_dict()
-
-        # 수요 단위를 '롤'에서 '미터'로 변경
-        self.demands_in_meters, self.order_sheet_lengths = self._calculate_demand_meters(self.df_orders)
+        
+        # 수요 단위를 '롤'에서 '미터'로 변경하고, 'meters' 열이 추가된 데이터프레임을 받음
+        self.df_orders, self.demands_in_meters, self.order_sheet_lengths = self._calculate_demand_meters(df_spec_pre)
         self.order_widths = list(self.demands_in_meters.keys())
 
         width_summary = {}
@@ -127,7 +125,7 @@ class SheetOptimizeCa:
         return items, item_info, item_composition
 
     def _calculate_demand_meters(self, df_orders):
-        """주문량을 바탕으로 지폭별 필요 총 길이(미터)를 계산합니다."""
+        """주문량을 바탕으로 지폭별 필요 총 길이(미터)를 계산하고, 'meters' 열이 추가된 데이터프레임을 반환합니다."""
         df_copy = df_orders.copy()
 
         def calculate_meters(row):
@@ -154,7 +152,7 @@ class SheetOptimizeCa:
         print("--- 지폭별 필요 총 길이 ---")
         print("--------------------------")
 
-        return demand_meters, order_sheet_lengths
+        return df_copy, demand_meters, order_sheet_lengths
 
     def _generate_initial_patterns_db(self):
         """DB의 기존 패턴을 불러와 초기 패턴 '조합'을 생성합니다."""
@@ -632,38 +630,41 @@ class SheetOptimizeCa:
 
     def _format_results(self, final_solution):
         """최종 결과를 데이터프레임 형식으로 포매팅합니다."""
-        final_production_meters = {width: 0 for width in self.order_widths}
-        for j, count in final_solution['pattern_counts'].items():
-            if count > 0.99:
-                roll_count = int(round(count))
-                pattern = self.patterns[j]
-                
-                for item_name, num_in_pattern in pattern['composition'].items():
-                    for width, num_pieces in self.item_composition[item_name].items():
-                        if width in final_production_meters:
-                            num_strips = num_in_pattern * num_pieces
-                            final_production_meters[width] += roll_count * pattern['length'] * num_strips
-
-        result_patterns, pattern_details_for_db = self._build_pattern_details(final_solution)
+        
+        # _build_pattern_details에서 모든 것을 처리하고, 분배 결과인 demand_tracker를 반환받음
+        result_patterns, pattern_details_for_db, pattern_roll_details_for_db, demand_tracker = self._build_pattern_details(final_solution)
+        
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
             df_patterns = df_patterns[['Pattern', 'Roll_Production_Width', 'Roll_Length', 'Count', 'Loss_per_Roll']]
 
-        fulfillment_summary = self._build_fulfillment_summary(final_production_meters)
+        # 주문 이행 요약 생성 (분배된 상세 데이터를 기반으로)
+        fulfillment_summary = self._build_fulfillment_summary(demand_tracker)
 
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]") 
-        print("[주문 이행 요약]")
+        print("[주문 이행 요약 (그룹오더별)]")
         
         return {
             "pattern_result": df_patterns.sort_values('Count', ascending=False) if not df_patterns.empty else df_patterns,
             "pattern_details_for_db": pattern_details_for_db,
+            "pattern_roll_details_for_db": pattern_roll_details_for_db,
             "fulfillment_summary": fulfillment_summary
         }
 
     def _build_pattern_details(self, final_solution):
-        """패턴 사용 결과와 DB 저장을 위한 상세 정보를 생성합니다."""
+        """패턴 사용 결과와 DB 저장을 위한 상세 정보를 생성하고, 생산량을 그룹오더별로 분배합니다."""
+        
+        # 1. 수요 추적기 생성 (group_order_no별 필요 미터)
+        demand_tracker = self.df_orders.copy()
+        demand_tracker['original_order_idx'] = demand_tracker.index # 원본 인덱스 보존
+        demand_tracker = demand_tracker[['original_order_idx', 'group_order_no', '지폭', 'meters']].copy()
+        demand_tracker['fulfilled_meters'] = 0.0
+        demand_tracker = demand_tracker.sort_values(by=['지폭', 'group_order_no']).reset_index(drop=True)
+
         result_patterns = []
         pattern_details_for_db = []
+        pattern_roll_details_for_db = []
+        prod_seq_counter = 0
 
         for j, count in final_solution['pattern_counts'].items():
             if count < 0.99:
@@ -671,51 +672,29 @@ class SheetOptimizeCa:
             
             roll_count = int(round(count))
             pattern = self.patterns[j]
-            pattern_dict = pattern['composition']
+            pattern_comp = pattern['composition']
             pattern_len = pattern['length']
-            
-            sorted_pattern_items = sorted(pattern_dict.items(), key=lambda item: self.item_info[item[0]], reverse=True)
 
-            db_widths, db_group_nos, pattern_item_strs = [], [], []
+            # --- 요약 결과 생성 ---
+            sorted_pattern_items = sorted(pattern_comp.items(), key=lambda item: self.item_info[item[0]], reverse=True)
+            pattern_item_strs = []
             total_width = 0
-
             for item_name, num in sorted_pattern_items:
                 width = self.item_info[item_name]
                 total_width += width * num
-                db_widths.extend([width] * num)
-
-                # group_order_no를 결정하는 로직 수정
-                if '+' in item_name:
-                    # 여러 종류의 폭이 조합된 복합폭은 첫 번째 아이템의 group_order_no를 사용
-                    try:
-                        first_item = item_name.split('+')[0]
-                        base_width_str = first_item.split('x')[0]
-                        base_width = int(base_width_str)
-                        group_no = self.width_to_group_order_no.get(base_width, item_name)
-                    except (ValueError, IndexError):
-                        group_no = item_name # 예외 발생 시 안전하게 item_name 사용
-                else:
-                    # 단일 종류의 폭으로 구성된 복합폭 (e.g., '788x3')
-                    try:
-                        base_width_str = item_name.split('x')[0]
-                        base_width = int(base_width_str)
-                        # self.width_to_group_order_no 딕셔너리에서 group_order_no를 찾음
-                        group_no = self.width_to_group_order_no.get(base_width, item_name)
-                    except (ValueError, IndexError):
-                        # 예외 발생 시 안전하게 item_name 사용
-                        group_no = item_name
-                db_group_nos.extend([group_no] * num)
                 
-                if '+' in item_name:
-                    formatted_name = f"{self.item_info[item_name]}({item_name})"
+                # item_name 분석
+                sub_items = item_name.split('+')
+                if len(sub_items) > 1 or 'x' not in item_name:
+                     formatted_name = f"{width}({item_name})"
                 else:
                     try:
                         base_width, multiplier = map(int, item_name.split('x'))
-                        formatted_name = f"{self.item_info[item_name]}({base_width}*{multiplier})"
+                        formatted_name = f"{width}({base_width}*{multiplier})"
                     except ValueError:
-                        formatted_name = f"{self.item_info[item_name]}({item_name})"
+                        formatted_name = f"{width}({item_name})"
                 pattern_item_strs.extend([formatted_name] * num)
-
+            
             result_patterns.append({
                 'Pattern': ' + '.join(pattern_item_strs),
                 'Roll_Production_Width': total_width,
@@ -723,40 +702,104 @@ class SheetOptimizeCa:
                 'Count': roll_count,
                 'Loss_per_Roll': pattern['loss_per_roll']
             })
-            pattern_details_for_db.append({
-                'Count': roll_count,
-                'widths': (db_widths + [0] * 8)[:8],
-                'group_nos': (db_group_nos + [''] * 8)[:8]
-            })
-        return result_patterns, pattern_details_for_db
 
-    def _build_fulfillment_summary(self, final_production_meters):
-        """주문 이행 요약 데이터프레임을 생성합니다. (단위: 톤, 미터)"""
-        summary_data = []
-        for width, required_meters in self.demands_in_meters.items():
-            produced_meters = final_production_meters.get(width, 0)
-            order_tons = self.width_summary[width]['order_tons']
-            
-            if required_meters > 0:
-                tons_per_meter = order_tons / required_meters
-                produced_tons = produced_meters * tons_per_meter
-            else:
-                produced_tons = 0
-            
-            over_prod_tons = produced_tons - order_tons
-            over_prod_meters = produced_meters - required_meters
+            # --- DB 저장을 위한 분배 로직 ---
+            for _ in range(roll_count):
+                prod_seq_counter += 1
+                
+                composite_widths_for_db = []
+                composite_group_nos_for_db = []
+                
+                roll_seq_counter = 0
+                for item_name, num_of_composite in sorted_pattern_items:
+                    composite_width = self.item_info[item_name]
+                    base_width_dict = self.item_composition[item_name]
 
-            summary_data.append({
-                '지폭': width,
-                '주문량(톤)': order_tons,
-                '생산량(톤)': round(produced_tons, 2),
-                '과부족(톤)': round(over_prod_tons, 2),
-                '필요길이(m)': round(required_meters, 2),
-                '생산길이(m)': round(produced_meters, 2),
-                '과부족(m)': round(over_prod_meters, 2),
-            })
+                    for _ in range(num_of_composite):
+                        roll_seq_counter += 1
+                        
+                        base_widths_for_item = []
+                        base_group_nos_for_item = []
+                        assigned_group_no_for_composite = None
+
+                        for base_width, num_of_base in base_width_dict.items():
+                            for _ in range(num_of_base):
+                                piece_width = base_width
+                                
+                                # Demand tracking
+                                target_indices = demand_tracker[
+                                    (demand_tracker['지폭'] == piece_width) &
+                                    (demand_tracker['fulfilled_meters'] < demand_tracker['meters'])
+                                ].index
+                                
+                                assigned_group_no = None
+                                if not target_indices.empty:
+                                    target_idx = target_indices.min()
+                                    demand_tracker.loc[target_idx, 'fulfilled_meters'] += pattern_len
+                                    assigned_group_no = demand_tracker.loc[target_idx, 'group_order_no']
+                                else:
+                                    fallback_indices = demand_tracker[demand_tracker['지폭'] == piece_width].index
+                                    if not fallback_indices.empty:
+                                        assigned_group_no = demand_tracker.loc[fallback_indices.min(), 'group_order_no']
+                                    else:
+                                        assigned_group_no = "ERROR"
+                                
+                                base_widths_for_item.append(base_width)
+                                base_group_nos_for_item.append(assigned_group_no)
+
+                                if assigned_group_no_for_composite is None:
+                                    assigned_group_no_for_composite = assigned_group_no
+                        
+                        composite_widths_for_db.append(composite_width)
+                        composite_group_nos_for_db.append(assigned_group_no_for_composite if assigned_group_no_for_composite is not None else "")
+
+                        pattern_roll_details_for_db.append({
+                            'rollwidth': composite_width,
+                            'widths': (base_widths_for_item + [0] * 7)[:7],
+                            'group_nos': (base_group_nos_for_item + [''] * 7)[:7],
+                            'Count': 1,
+                            'Prod_seq': prod_seq_counter,
+                            'Roll_seq': roll_seq_counter,
+                            'length': pattern_len
+                        })
+
+                pattern_details_for_db.append({
+                    'Count': 1,
+                    'widths': (composite_widths_for_db + [0] * 8)[:8],
+                    'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
+                    'Prod_seq': prod_seq_counter,
+                    'length': pattern_len
+                })
+                
+        return result_patterns, pattern_details_for_db, pattern_roll_details_for_db, demand_tracker
+
+    def _build_fulfillment_summary(self, demand_tracker):
+        """주문 이행 요약 데이터프레임을 생성합니다. (개별 주문별)"""
         
-        return pd.DataFrame(summary_data)[[
-            '지폭', '주문량(톤)', '생산량(톤)', '과부족(톤)',
+        summary_df = self.df_orders[['group_order_no', '가로', '세로', '수출내수', '등급', '주문톤', 'meters']].copy()
+        summary_df.rename(columns={'meters': '필요길이(m)', '주문톤': '주문량(톤)'}, inplace=True)
+        
+        # Merge fulfilled_meters directly using original_order_idx
+        # demand_tracker has 'original_order_idx' from _build_pattern_details
+        summary_df = pd.merge(summary_df, demand_tracker[['original_order_idx', 'fulfilled_meters']], 
+                              left_index=True, right_on='original_order_idx', how='left')
+        summary_df.rename(columns={'fulfilled_meters': '생산길이(m)'}, inplace=True)
+        summary_df.drop(columns=['original_order_idx'], inplace=True) # Drop the temporary merge key
+
+        summary_df['생산길이(m)'] = summary_df['생산길이(m)'].fillna(0)
+        
+        summary_df['과부족(m)'] = summary_df['생산길이(m)'] - summary_df['필요길이(m)']
+        tons_per_meter = (summary_df['주문량(톤)'] / summary_df['필요길이(m)']).replace([float('inf'), -float('inf')], 0).fillna(0)
+        summary_df['생산량(톤)'] = (summary_df['생산길이(m)'] * tons_per_meter).round(2)
+        summary_df['과부족(톤)'] = (summary_df['생산량(톤)'] - summary_df['주문량(톤)']).round(2)
+
+        final_cols = [
+            'group_order_no', '가로', '세로', '수출내수', '등급', 
+            '주문량(톤)', '생산량(톤)', '과부족(톤)',
             '필요길이(m)', '생산길이(m)', '과부족(m)'
-        ]]
+        ]
+        
+        for col in ['필요길이(m)', '생산길이(m)', '과부족(m)']:
+            summary_df[col] = summary_df[col].round(2)
+
+        return summary_df[final_cols]
