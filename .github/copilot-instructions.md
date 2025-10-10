@@ -10,17 +10,17 @@ This repository focuses on optimization algorithms for paper width and sheet sch
 - **db_connector.py**: Database connectivity, likely for fetching or storing order and result data.
 - **execute.py**: Orchestrates execution of optimization routines.
 - **results/**: Stores output CSVs from optimization runs.
-- **config.ini, settings.json**: Configuration files for parameters and environment settings.
+- **conf/config.ini, settings.json**: Configuration files for parameters and environment settings.
 
 ## Data Flow
 - Input data is read from CSV files (e.g., `my_orders.csv`, `roll_orders.csv`, `target_lot.csv`).
 - Optimization scripts process these inputs and write results to the `results/` directory as CSVs.
-- Configuration is loaded from `config.ini` and/or `settings.json`.
+- Configuration is loaded from `conf/config.ini` and/or `settings.json`.
 
 ## Developer Workflows
 - **Run optimization**: Execute scripts directly, e.g., `python sheet_optimize.py` or `python roll_optimize.py`.
 - **Debugging**: Use `test.py`, `test1.py`, etc. for isolated logic tests. No formal test framework detected.
-- **Configuration**: Adjust parameters in `config.ini` or `settings.json` before running scripts.
+- **Configuration**: Adjust parameters in `conf/config.ini` or `settings.json` before running scripts.
 - **Results**: Check output in `results/` for generated CSVs.
 
 ## Project-Specific Patterns
@@ -41,7 +41,7 @@ python roll_optimize.py
 ```
 
 ## Key Files
-- `sheet_optimize.py`, `roll_optimize.py`, `band.py`, `processing.py`, `db_connector.py`, `config.ini`, `settings.json`, `results/`
+- `sheet_optimize.py`, `roll_optimize.py`, `band.py`, `processing.py`, `db_connector.py`, `conf/config.ini`, `settings.json`, `results/`
 
 ---
 **Update this file if workflows or architecture change.**

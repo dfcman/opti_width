@@ -6,11 +6,12 @@ import os
 import logging
 import argparse
 import pprint
-from roll_optimize import RollOptimize
-from sheet_optimize import SheetOptimize
-from sheet_optimize_var import SheetOptimizeVar
-from sheet_optimize_ca import SheetOptimizeCa
-from db_connector import Database
+from optimize.roll_optimize import RollOptimize
+from optimize.roll_sl_optimize import RollSLOptimize
+from optimize.sheet_optimize import SheetOptimize
+from optimize.sheet_optimize_var import SheetOptimizeVar
+from optimize.sheet_optimize_ca import SheetOptimizeCa
+from db.db_connector import Database
 
 def process_roll_lot(
         db, plant, pm_no, schedule_unit, lot_no, version, re_min_width, re_max_width, re_max_pieces, paper_type, b_wgt
@@ -100,6 +101,69 @@ def process_roll_lot(
     logging.info("\n--- 전체 최적화 성공. 최종 결과를 처리합니다. ---")
     save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, final_results)
 
+def process_roll_sl_lot(
+        db, plant, pm_no, schedule_unit, lot_no, version, 
+        re_min_width, re_max_width, re_max_pieces, 
+        paper_type, b_wgt,
+        min_sl_width, max_sl_width, sl_trim_size
+):
+    """쉬트지 lot에 대한 전체 최적화 프로세스를 처리합니다."""
+    logging.info(f"\n{'='*60}")
+    logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sheet Lot: {lot_no} (Version: {version}) 처리 시작")
+    logging.info(f"적용 파라미터: min_width={re_min_width}, max_width={re_max_width}, max_pieces={re_max_pieces}, min_sc_width={min_sl_width}, max_sc_width={max_sl_width}")
+    logging.info(f"{'='*60}")
+
+    db.update_lot_status(lot_no=lot_no, version=version, status=1)
+    raw_orders = db.get_roll_sl_orders_from_db(paper_prod_seq=lot_no)
+    logging.info(f"--- Lot {lot_no} 원본 주문 정보 ---")
+
+    if not raw_orders:
+        logging.error(f"[에러] Lot {lot_no}의 오더를 가져오지 못했습니다. 상태를 99(에러)로 변경합니다.")
+        db.update_lot_status(lot_no=lot_no, version=version, status=99)
+        return
+
+    df_orders = pd.DataFrame(raw_orders)
+
+    # 그룹오더 번호 생성 (쉬트지 기준)
+    group_cols = ['지폭', '롤길이', '등급'] # 쉬트지는 '가로'(width)가 중요
+    df_orders['지폭'] = pd.to_numeric(df_orders['지폭'])
+    df_orders['롤길이'] = pd.to_numeric(df_orders['롤길이'])
+    df_orders['등급'] = df_orders['등급'].astype(str)
+    df_groups = df_orders[group_cols].drop_duplicates().sort_values(by=group_cols).reset_index(drop=True)
+    df_groups['group_order_no'] = [f"30{lot_no}{i+1:03d}" for i in df_groups.index]
+    df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
+
+    # 최적화 실행
+    logging.info("--- 쉬트지 최적화 시작 ---")
+    # b_wgt, 롤길이(6330), 트림(20) 등 쉬트지 사양 전달
+    optimizer = RollSLOptimize(
+        df_spec_pre=df_orders,
+        max_width=int(re_max_width),
+        min_width=int(re_min_width),
+        max_pieces=int(re_max_pieces),
+        b_wgt=float(b_wgt),
+        sl_trim=sl_trim_size,
+        min_sl_width=min_sl_width,
+        max_sl_width=max_sl_width
+    )
+    try:
+        results = optimizer.run_optimize()
+        logging.info("--- Optimizer results ---\n")
+        # logging.info(pprint.pformat(results))
+    except Exception as e:
+        import traceback
+        logging.error(traceback.format_exc())
+        raise e
+
+    if not results or "error" in results:
+        error_msg = results['error'] if results and 'error' in results else "No solution found"
+        logging.error(f"[에러] Lot {lot_no} 최적화 실패: {error_msg}. 상태를 99(에러)로 변경합니다.")
+        db.update_lot_status(lot_no=lot_no, version=version, status=99)
+        return
+    
+    logging.info("최적화 성공. 결과를 처리합니다.")
+    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results)
+
 def process_sheet_lot(
         db, plant, pm_no, schedule_unit, lot_no, version, 
         re_min_width, re_max_width, re_max_pieces, 
@@ -148,8 +212,8 @@ def process_sheet_lot(
     )
     try:
         results = optimizer.run_optimize()
-        logging.info("--- Optimizer results ---")
-        logging.info(results)
+        logging.info("--- Optimizer results ---\n")
+        logging.info(pprint.pformat(results))
     except Exception as e:
         import traceback
         logging.error(traceback.format_exc())
@@ -215,8 +279,8 @@ def process_sheet_lot_var(
     )
     try:
         results = optimizer.run_optimize()
-        logging.info("--- Optimizer results ---")
-        logging.info(results)
+        logging.info("--- Optimizer results ---\n")
+        # logging.info(pprint.pformat(results))
     except Exception as e:
         import traceback
         logging.error(traceback.format_exc())
@@ -282,8 +346,8 @@ def process_sheet_lot_ca(
     )
     try:
         results = optimizer.run_optimize()
-        logging.info("--- Optimizer results ---")
-        logging.info(results)
+        logging.info("--- Optimizer results ---\n")
+        logging.info(pprint.pformat(results))
     except Exception as e:
         import traceback
         logging.error(traceback.format_exc())
@@ -301,9 +365,11 @@ def process_sheet_lot_ca(
 def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results):
     """최적화 결과를 DB에 저장하고 CSV파일로 출력합니다."""
     logging.info("최적화 결과 (패턴별 생산량):")
-    logging.info(results["pattern_result"].to_string())
-    logging.info("\n\n# ================= 주문 충족 현황 ================== #\n")
-    logging.info(results["fulfillment_summary"].to_string())
+    logging.info("\n" + results["pattern_result"].to_string())
+    logging.info("\n# ================= 주문 충족 현황 ================== #\n")
+    logging.info("\n" + results["fulfillment_summary"].to_string())
+    logging.info("\n# ================= 주문 충족 현황 ================== #\n")
+    logging.info("\n" + results["fulfillment_summary"].to_string())
     logging.info("\n")
     logging.info("최적화 성공. 이제 결과를 DB에 저장합니다.")
 
@@ -371,7 +437,7 @@ def setup_logging(lot_no, version):
 def main():
     """메인 실행 함수"""
     parser = argparse.ArgumentParser(description="롤지 또는 쉬트지 최적화를 실행합니다.")
-    parser.add_argument("--order-type", required=True, choices=['roll', 'sheet', 'sheet_var', 'sheet_ca'], help="오더 유형 ('roll' 또는 'sheet')")
+    parser.add_argument("--order-type", required=True, choices=['roll', 'roll_sl', 'sheet', 'sheet_var', 'sheet_ca'], help="오더 유형 ('roll' 또는 'sheet')")
     args = parser.parse_args()
 
     db = None
@@ -379,9 +445,10 @@ def main():
     version = None
     try:
         config = configparser.ConfigParser()
-        if not os.path.exists('config.ini'):
-            raise FileNotFoundError("config.ini 파일을 찾을 수 없습니다.")
-        config.read('config.ini')
+        config_path = os.path.join('conf', 'config.ini')
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"{config_path} 파일을 찾을 수 없습니다.")
+        config.read(config_path, encoding='utf-8')
         db_config = config['database']
         
         db = Database(user=db_config['user'], password=db_config['password'], dsn=db_config['dsn'])
@@ -404,6 +471,19 @@ def main():
             process_roll_lot(
                 db, plant, pm_no, schedule_unit, lot_no, version, 
                 min_width, max_width, max_pieces, paper_type, b_wgt
+            )
+        elif args.order_type == 'roll_sl':
+            ( 
+                plant, pm_no, schedule_unit, lot_no, version, min_width, 
+                max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
+                paper_type, b_wgt,
+                min_sl_width, max_sl_width, sl_trim_size
+            ) = db.get_target_lot_sl()
+
+            process_roll_sl_lot(
+                db, plant, pm_no, schedule_unit, lot_no, version, 
+                min_width, max_width, max_pieces, paper_type, b_wgt,
+                min_sl_width, max_sl_width, sl_trim_size
             )
         elif args.order_type == 'sheet':
             process_sheet_lot(
@@ -452,6 +532,6 @@ def main():
         if db:
             db.close_pool()
         logging.info("\n프로그램을 종료합니다.")
-1
+
 if __name__ == "__main__":
     main()

@@ -1,5 +1,5 @@
 # Configuration files
-config.ini
+conf/config.ini
 
 # Python cache
 __pycache__/
@@ -9,6 +9,4 @@ __pycache__/
 
 # CSV 결과 파일 제외
 *.csv
-results/3250900071_05.log
-results/3250900073_05.log
-results/3250900429_05.log
+results/*.log

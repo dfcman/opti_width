@@ -16,7 +16,7 @@ SMALL_PROBLEM_THRESHOLD = 8     # 전체 탐색을 수행할 최대 주문 지�
 SOLVER_TIME_LIMIT_MS = 60000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
 CG_MAX_ITERATIONS = 100         # 열 생성(Column Generation) 최대 반복 횟수
 CG_NO_IMPROVEMENT_LIMIT = 100    # 개선 없는 경우, 열 생성 조기 종료 조건
-CG_SUBPROBLEM_TOP_N = 1         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
+CG_SUBPROBLEM_TOP_N = 3         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
 
 class SheetOptimize:
     def __init__(
@@ -318,9 +318,75 @@ class SheetOptimize:
                 else:
                     print(f"    - 지폭 {width}mm에 대한 순수 패턴을 구성하지 못했습니다.")
 
+        # --- 5. 생성된 패턴들을 후처리하여 작은 복합폭들을 통합 ---
+        self._consolidate_patterns()
+
         print(f"--- 총 {len(self.patterns)}개의 초기 패턴 생성됨 ---")
         print(self.patterns)
         print("--------------------------\n")
+
+    def _consolidate_patterns(self):
+        """
+        생성된 초기 패턴들을 후처리하여 작은 복합폭 아이템들을 가능한 큰 복합폭 아이템으로 통합합니다.
+        예: {'814x1': 2}는 {'814x2': 1}로 변경을 시도합니다.
+        """
+        print("\n--- 생성된 패턴에 대해 후처리(통합)를 시작합니다. ---")
+        
+        processed_patterns = []
+        seen_patterns = set()
+
+        for pattern in self.patterns:
+            # 1. 패턴을 기본 지폭 단위로 모두 분해
+            base_width_counts = Counter()
+            for item_name, count in pattern.items():
+                composition = self.item_composition.get(item_name)
+                if composition:
+                    for base_width, num_base in composition.items():
+                        base_width_counts[base_width] += num_base * count
+
+            # 2. 가장 큰 복합폭부터 사용하여 새로운 패턴 재구성
+            new_pattern = {}
+            current_total_width = 0
+            current_total_pieces = 0
+            
+            sorted_base_widths = sorted(base_width_counts.keys(), reverse=True)
+
+            for base_width in sorted_base_widths:
+                remaining_base_count = base_width_counts[base_width]
+                
+                for i in range(4, 0, -1):
+                    if remaining_base_count < i:
+                        continue
+
+                    item_name = f"{base_width}x{i}"
+                    if item_name in self.item_info:
+                        num_to_use = remaining_base_count // i
+                        item_width = self.item_info[item_name]
+                        
+                        if num_to_use > 0 and \
+                           current_total_pieces + num_to_use <= self.max_pieces and \
+                           current_total_width + item_width * num_to_use <= self.max_width:
+                            
+                            new_pattern[item_name] = new_pattern.get(item_name, 0) + num_to_use
+                            current_total_width += item_width * num_to_use
+                            current_total_pieces += num_to_use
+                            remaining_base_count -= num_to_use * i
+            
+            # 3. 재구성된 패턴을 사용할지 결정
+            is_new_pattern_valid = (self.min_width <= current_total_width and self.min_pieces <= current_total_pieces)
+            
+            chosen_pattern = pattern # 기본적으로 원본 유지
+            if is_new_pattern_valid and new_pattern and frozenset(new_pattern.items()) != frozenset(pattern.items()):
+                chosen_pattern = new_pattern # 유효하고 변경되었으면 새 패턴 선택
+
+            pattern_key = frozenset(chosen_pattern.items())
+            if pattern_key not in seen_patterns:
+                processed_patterns.append(chosen_pattern)
+                seen_patterns.add(pattern_key)
+
+        original_count = len(self.patterns)
+        self.patterns = processed_patterns
+        print(f"--- 패턴 통합 완료: {original_count}개 -> {len(self.patterns)}개 패턴으로 정리됨 ---")
 
     def _solve_master_problem_ilp(self, is_final_mip=False):
         """마스터 문제(Master Problem)를 정수계획법으로 해결합니다."""
@@ -550,7 +616,7 @@ class SheetOptimize:
             return {"error": "유효한 패턴을 생성할 수 없습니다."}
 
         print(f"\n--- 총 {len(self.patterns)}개의 패턴으로 최종 최적화를 수행합니다. ---")
-        final_solution = self._solve_master_problem_ilp(is_final_mip=True)
+        final_solution = self._solve_master_problem_ilp(is_final_mip=True)        
         if not final_solution:
             return {"error": "최종 해를 찾을 수 없습니다."}
         
@@ -563,7 +629,7 @@ class SheetOptimize:
         result_patterns, pattern_details_for_db, pattern_roll_details_for_db, demand_tracker = self._build_pattern_details(final_solution)
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
-            df_patterns = df_patterns[['Pattern', 'Roll_Production_Length', 'Count', 'Loss_per_Roll']]
+            df_patterns = df_patterns[['Pattern', 'wd_width', 'Count', 'Loss_per_Roll']]
 
         # 주문 이행 요약 생성 (수정된 _build_fulfillment_summary 호출)
         fulfillment_summary = self._build_fulfillment_summary(demand_tracker)
@@ -618,7 +684,7 @@ class SheetOptimize:
                 
             pattern_summary_map[j] = {
                 'Pattern': ' + '.join(pattern_item_strs),
-                'Roll_Production_Length': total_width_for_pattern,
+                'wd_width': total_width_for_pattern,
                 'Loss_per_Roll': self.original_max_width - total_width_for_pattern
             }
 
@@ -688,6 +754,7 @@ class SheetOptimize:
 
                         pattern_roll_details_for_db.append({
                             'rollwidth': composite_width,
+                            'roll_production_length': self.sheet_roll_length,
                             'widths': (base_widths_for_item + [0] * 7)[:7],
                             'group_nos': (base_group_nos_for_item + [''] * 7)[:7],
                             'Count': 1,
@@ -696,6 +763,7 @@ class SheetOptimize:
                         })
 
                 pattern_details_for_db.append({
+                    'roll_production_length': self.sheet_roll_length,
                     'Count': 1,
                     'widths': (composite_widths_for_db + [0] * 8)[:8],
                     'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
@@ -725,8 +793,8 @@ class SheetOptimize:
         # 0으로 나누기 오류를 방지하며 롤당 톤 계산
         tons_per_roll = (summary_df['주문량(톤)'] / summary_df['필요롤수']).replace([float('inf'), -float('inf')], 0).fillna(0)
         
-        summary_df['생산량(톤)'] = (summary_df['생산롤수'] * tons_per_roll).round(2)
-        summary_df['과부족(톤)'] = (summary_df['생산량(톤)'] - summary_df['주문량(톤)']).round(2)
+        summary_df['생산량(톤)'] = (summary_df['생산롤수'] * tons_per_roll).round(3)
+        summary_df['과부족(톤)'] = (summary_df['생산량(톤)'] - summary_df['주문량(톤)']).round(0)
 
         # 최종 컬럼 순서 정리
         return summary_df[[
