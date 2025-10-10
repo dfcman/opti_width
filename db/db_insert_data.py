@@ -174,3 +174,60 @@ class DataInserters:
         finally:
             if connection:
                 self.pool.release(connection)
+
+    def insert_cut_sequence(self, lot_no, version, plant, pm_no, schedule_unit, 
+                                paper_type, b_wgt, pattern_roll_cut_details):
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+
+            cursor.execute("DELETE FROM th_cut_sequence WHERE lot_no = :lot_no AND version = :version", lot_no=lot_no, version=version)
+            print(f"Deleted existing cut_sequence for lot {lot_no}, version {version}")
+
+            insert_query = """
+                INSERT INTO th_cut_sequence (
+                    MODULE, PLANT, PM_NO, SCHEDULE_UNIT, LOT_NO, VERSION, 
+                    PROD_SEQ, UNIT_NO, SEQ, ROLL_SEQ, CUT_SEQ, WIDTH, GROUP_NO, 
+                    WEIGHT, TOTAL_LENGTH, CUT_CNT, PAPER_TYPE, B_WGT
+                ) VALUES (
+                    'C', :plant, :pm_no, :schedule_unit, :lot_no, :version, 
+                    :prod_seq, :unit_no, :seq, :roll_seq, :cut_seq, :width, :group_no, 
+                    :weight, :total_length, :cut_cnt, :paper_type, :b_wgt
+                )
+            """
+
+            for cut_detail in pattern_roll_cut_details:
+                bind_vars = {
+                    'plant': plant,
+                    'pm_no': pm_no,
+                    'schedule_unit': schedule_unit,
+                    'lot_no': lot_no,
+                    'version': version,
+                    'prod_seq': cut_detail['PROD_SEQ'],
+                    'unit_no': cut_detail['UNIT_NO'],
+                    'seq': cut_detail['SEQ'],
+                    'roll_seq': cut_detail['ROLL_SEQ'],
+                    'cut_seq': cut_detail['CUT_SEQ'],
+                    'width': cut_detail['WIDTH'],
+                    'group_no': cut_detail['GROUP_NO'],
+                    'weight': cut_detail['WEIGHT'],
+                    'total_length': cut_detail['TOTAL_LENGTH'],
+                    'cut_cnt': cut_detail['CUT_CNT'],
+                    'paper_type': paper_type,
+                    'b_wgt': b_wgt
+                }
+                cursor.execute(insert_query, bind_vars)
+
+            connection.commit()
+            print(f"Successfully inserted {len(pattern_roll_cut_details)} new cut sequences.")
+            return True
+
+        except oracledb.Error as error:
+            print(f"Error while inserting cut sequence: {error}")
+            if connection:
+                connection.rollback()
+            return False
+        finally:
+            if connection:
+                self.pool.release(connection)

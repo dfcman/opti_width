@@ -626,7 +626,7 @@ class SheetOptimize:
         """최종 결과를 데이터프레임 형식으로 포매팅합니다."""
         
         # 결과 데이터프레임 생성
-        result_patterns, pattern_details_for_db, pattern_roll_details_for_db, demand_tracker = self._build_pattern_details(final_solution)
+        result_patterns, pattern_details_for_db, pattern_roll_details_for_db, pattern_roll_cut_details_for_db, demand_tracker = self._build_pattern_details(final_solution)
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
             df_patterns = df_patterns[['Pattern', 'wd_width', 'Count', 'Loss_per_Roll']]
@@ -641,6 +641,7 @@ class SheetOptimize:
             "pattern_result": df_patterns.sort_values('Count', ascending=False) if not df_patterns.empty else df_patterns,
             "pattern_details_for_db": pattern_details_for_db,
             "pattern_roll_details_for_db": pattern_roll_details_for_db,
+            "pattern_roll_cut_details_for_db": pattern_roll_cut_details_for_db,
             "fulfillment_summary": fulfillment_summary
         }
 
@@ -661,8 +662,10 @@ class SheetOptimize:
         result_patterns = []
         pattern_details_for_db = []
         pattern_roll_details_for_db = []
+        pattern_roll_cut_details_for_db = []
         
         prod_seq_counter = 0
+        total_cut_seq_counter = 0
 
         # 패턴별로 한 번만 수행할 정보 미리 계산 (for display summary)
         pattern_summary_map = {}
@@ -762,6 +765,30 @@ class SheetOptimize:
                             'Roll_seq': roll_seq_counter
                         })
 
+                        cut_seq_counter = 0
+                        for i in range(len(base_widths_for_item)):
+                            width = base_widths_for_item[i]
+                            if width > 0:
+                                cut_seq_counter += 1
+                                total_cut_seq_counter += 1
+                                group_no = base_group_nos_for_item[i]
+                                
+                                # 중량 계산: (평량 g/m^2) * (폭 mm / 1000) * (길이 m) = g
+                                weight = (self.b_wgt * (width / 1000) * self.sheet_roll_length)
+
+                                pattern_roll_cut_details_for_db.append({
+                                    'PROD_SEQ': prod_seq_counter,
+                                    'UNIT_NO': prod_seq_counter,
+                                    'SEQ': total_cut_seq_counter,
+                                    'ROLL_SEQ': roll_seq_counter,
+                                    'CUT_SEQ': cut_seq_counter,
+                                    'WIDTH': width,
+                                    'GROUP_NO': group_no,
+                                    'WEIGHT': weight,
+                                    'TOTAL_LENGTH': self.sheet_roll_length,
+                                    'CUT_CNT': len([w for w in base_widths_for_item if w > 0]),
+                                })
+
                 pattern_details_for_db.append({
                     'roll_production_length': self.sheet_roll_length,
                     'Count': 1,
@@ -770,7 +797,7 @@ class SheetOptimize:
                     'Prod_seq': prod_seq_counter
                 })
 
-        return result_patterns, pattern_details_for_db, pattern_roll_details_for_db, demand_tracker
+        return result_patterns, pattern_details_for_db, pattern_roll_details_for_db, pattern_roll_cut_details_for_db, demand_tracker
 
     def _build_fulfillment_summary(self, demand_tracker):
         """주문 이행 요약 데이터프레임을 생성합니다. (개별 주문별)"""

@@ -395,6 +395,20 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
             logging.error(f"[에러] insert_roll_sequence에서 예외 발생: {e}")
             raise
 
+    # 롤 재단 상세 정보 저장
+    if 'pattern_roll_cut_details_for_db' in results and results['pattern_roll_cut_details_for_db']:
+        logging.info("\n\n# ================= 롤 재단 상세 정보 (pattern_roll_cut_details_for_db) ================== #\n")
+        try:
+            success_cut_db = db.insert_cut_sequence(
+                lot_no, version, plant, pm_no, schedule_unit, 
+                paper_type, b_wgt, results['pattern_roll_cut_details_for_db']
+            )
+            if not success_cut_db:
+                logging.error(f"[에러] Lot {lot_no}의 롤 재단 상세 정보를 DB에 저장하지 못했습니다.")
+        except Exception as e:
+            logging.error(f"[에러] insert_cut_sequence에서 예외 발생: {e}")
+            raise
+
     if not success_db:
         logging.error(f"[에러] Lot {lot_no}의 패턴을 DB에 저장하지 못했습니다. 상태를 99(에러)로 변경합니다.")
         db.update_lot_status(lot_no=lot_no, version=version, status=99)
