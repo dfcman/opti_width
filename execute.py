@@ -37,7 +37,16 @@ def process_roll_lot(
     for col in ['지폭', '롤길이']:
         df_orders[col] = pd.to_numeric(df_orders[col])
     df_orders['등급'] = df_orders['등급'].astype(str)
-    df_groups = df_orders[group_cols].drop_duplicates().sort_values(by=group_cols).reset_index(drop=True)
+    # group_cols로 그룹화하고 각 그룹의 첫 번째 '오더번호'를 대표로 선택합니다.
+    df_groups = df_orders.groupby(group_cols).agg(
+        대표오더번호=('오더번호', 'first'),
+        plant=('plant', 'first'),
+        pm_no=('pm_no', 'first'),
+        schedule_unit=('schedule_unit', 'first'),
+        lot_no=('lot_no', 'first'),
+        version=('version', 'first')
+    ).reset_index()
+    df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     df_groups['group_order_no'] = [f"30{lot_no}{i+1:03d}" for i in df_groups.index]
     df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
 
@@ -99,7 +108,7 @@ def process_roll_lot(
     }
 
     logging.info("\n--- 전체 최적화 성공. 최종 결과를 처리합니다. ---")
-    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, final_results)
+    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, final_results, df_orders)
 
 def process_roll_sl_lot(
         db, plant, pm_no, schedule_unit, lot_no, version, 
@@ -129,8 +138,18 @@ def process_roll_sl_lot(
     df_orders['지폭'] = pd.to_numeric(df_orders['지폭'])
     df_orders['롤길이'] = pd.to_numeric(df_orders['롤길이'])
     df_orders['등급'] = df_orders['등급'].astype(str)
-    df_groups = df_orders[group_cols].drop_duplicates().sort_values(by=group_cols).reset_index(drop=True)
+    # group_cols로 그룹화하고 각 그룹의 첫 번째 '오더번호'를 대표로 선택합니다.
+    df_groups = df_orders.groupby(group_cols).agg(
+        대표오더번호=('오더번호', 'first'),
+        plant=('plant', 'first'),
+        pm_no=('pm_no', 'first'),
+        schedule_unit=('schedule_unit', 'first'),
+        lot_no=('lot_no', 'first'),
+        version=('version', 'first')
+    ).reset_index()
+    df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     df_groups['group_order_no'] = [f"30{lot_no}{i+1:03d}" for i in df_groups.index]
+
     df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
 
     # 최적화 실행
@@ -162,7 +181,7 @@ def process_roll_sl_lot(
         return
     
     logging.info("최적화 성공. 결과를 처리합니다.")
-    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results)
+    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results, df_orders)
 
 def process_sheet_lot(
         db, plant, pm_no, schedule_unit, lot_no, version, 
@@ -192,9 +211,23 @@ def process_sheet_lot(
     df_orders['가로'] = pd.to_numeric(df_orders['가로'])
     df_orders['세로'] = pd.to_numeric(df_orders['세로'])
     df_orders['등급'] = df_orders['등급'].astype(str)
-    df_groups = df_orders[group_cols].drop_duplicates().sort_values(by=group_cols).reset_index(drop=True)
+    # df_groups = df_orders[group_cols].drop_duplicates().sort_values(by=group_cols).reset_index(drop=True)# 그룹핑하는 로직.
+
+    
+    # group_cols로 그룹화하고 각 그룹의 첫 번째 '오더번호'를 대표로 선택합니다.
+    df_groups = df_orders.groupby(group_cols).agg(
+        대표오더번호=('오더번호', 'first'),
+        plant=('plant', 'first'),
+        pm_no=('pm_no', 'first'),
+        schedule_unit=('schedule_unit', 'first'),
+        lot_no=('lot_no', 'first'),
+        version=('version', 'first')
+    ).reset_index()
+    df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     df_groups['group_order_no'] = [f"30{lot_no}{i+1:03d}" for i in df_groups.index]
+    
     df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
+    logging.info(f"--- Lot {df_groups.to_string()} 그룹마스터 정보 ---")
 
     # 최적화 실행
     logging.info("--- 쉬트지 최적화 시작 ---")
@@ -226,7 +259,7 @@ def process_sheet_lot(
         return
     
     logging.info("최적화 성공. 결과를 처리합니다.")
-    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results)
+    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results, df_orders)
 
 
 def process_sheet_lot_var(
@@ -258,8 +291,18 @@ def process_sheet_lot_var(
     df_orders['가로'] = pd.to_numeric(df_orders['가로'])
     df_orders['세로'] = pd.to_numeric(df_orders['세로'])
     df_orders['등급'] = df_orders['등급'].astype(str)
-    df_groups = df_orders[group_cols].drop_duplicates().sort_values(by=group_cols).reset_index(drop=True)
+    # group_cols로 그룹화하고 각 그룹의 첫 번째 '오더번호'를 대표로 선택합니다.
+    df_groups = df_orders.groupby(group_cols).agg(
+        대표오더번호=('오더번호', 'first'),
+        plant=('plant', 'first'),
+        pm_no=('pm_no', 'first'),
+        schedule_unit=('schedule_unit', 'first'),
+        lot_no=('lot_no', 'first'),
+        version=('version', 'first')
+    ).reset_index()
+    df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     df_groups['group_order_no'] = [f"30{lot_no}{i+1:03d}" for i in df_groups.index]
+    
     df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
 
     # 최적화 실행
@@ -293,7 +336,7 @@ def process_sheet_lot_var(
         return
     
     logging.info("최적화 성공. 결과를 처리합니다.")
-    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results)
+    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results, df_orders)
 
 
 def process_sheet_lot_ca(
@@ -325,8 +368,20 @@ def process_sheet_lot_ca(
     df_orders['가로'] = pd.to_numeric(df_orders['가로'])
     df_orders['세로'] = pd.to_numeric(df_orders['세로'])
     df_orders['등급'] = df_orders['등급'].astype(str)
-    df_groups = df_orders[group_cols].drop_duplicates().sort_values(by=group_cols).reset_index(drop=True)
+    # df_groups = df_orders[group_cols].drop_duplicates().sort_values(by=group_cols).reset_index(drop=True) # 그룹핑하는 로직.
+    
+    # group_cols로 그룹화하고 각 그룹의 첫 번째 '오더번호'를 대표로 선택합니다.
+    df_groups = df_orders.groupby(group_cols).agg(
+        대표오더번호=('오더번호', 'first'),
+        plant=('plant', 'first'),
+        pm_no=('pm_no', 'first'),
+        schedule_unit=('schedule_unit', 'first'),
+        lot_no=('lot_no', 'first'),
+        version=('version', 'first')
+    ).reset_index()
+    df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     df_groups['group_order_no'] = [f"30{lot_no}{i+1:03d}" for i in df_groups.index]
+    
     df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
 
     # 최적화 실행
@@ -360,76 +415,87 @@ def process_sheet_lot_ca(
         return
     
     logging.info("최적화 성공. 결과를 처리합니다.")
-    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results)
+    save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results, df_orders)
 
-def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results):
+def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, results, df_orders=None):
     """최적화 결과를 DB에 저장하고 CSV파일로 출력합니다."""
     logging.info("최적화 결과 (패턴별 생산량):")
     logging.info("\n" + results["pattern_result"].to_string())
     logging.info("\n# ================= 주문 충족 현황 ================== #\n")
     logging.info("\n" + results["fulfillment_summary"].to_string())
-    logging.info("\n# ================= 주문 충족 현황 ================== #\n")
-    logging.info("\n" + results["fulfillment_summary"].to_string())
     logging.info("\n")
     logging.info("최적화 성공. 이제 결과를 DB에 저장합니다.")
 
-    # DB에 패턴 저장
-    success_db = db.insert_pattern_sequence(
-        lot_no, version, plant, pm_no, schedule_unit, re_max_width, 
-        paper_type, b_wgt, results['pattern_details_for_db']
-    )
+    connection = None
+    try:
+        # 트랜잭션 시작
+        connection = db.pool.acquire()
 
-    # 롤 상세 정보 출력 및 저장
-    if 'pattern_roll_details_for_db' in results:
-        logging.info("\n\n# ================= 롤 상세 정보 (pattern_roll_details_for_db) ================== #\n")
-        # logging.info(pprint.pformat(results['pattern_roll_details_for_db']))
+        # 1. 그룹 오더 정보 저장
+        if df_orders is not None and not df_orders.empty:
+            db.insert_order_group(
+                connection, lot_no, version, plant, pm_no, schedule_unit, df_orders
+            )
 
-        try:
-            success_roll_db = db.insert_roll_sequence(
-                lot_no, version, plant, pm_no, schedule_unit, re_max_width, 
+        # 2. DB에 패턴 저장
+        db.insert_pattern_sequence(
+            connection, lot_no, version, plant, pm_no, schedule_unit, re_max_width, 
+            paper_type, b_wgt, results['pattern_details_for_db']
+        )
+
+        # 3. 롤 상세 정보 저장
+        if 'pattern_roll_details_for_db' in results and results['pattern_roll_details_for_db']:
+            logging.info("\n\n# ================= 롤 상세 정보 (pattern_roll_details_for_db) ================== #\n")
+            db.insert_roll_sequence(
+                connection, lot_no, version, plant, pm_no, schedule_unit, re_max_width, 
                 paper_type, b_wgt, results['pattern_roll_details_for_db']
             )
-            if not success_roll_db:
-                logging.error(f"[에러] Lot {lot_no}의 롤 상세 정보를 DB에 저장하지 못했습니다.")
-        except Exception as e:
-            logging.error(f"[에러] insert_roll_sequence에서 예외 발생: {e}")
-            raise
 
-    # 롤 재단 상세 정보 저장
-    if 'pattern_roll_cut_details_for_db' in results and results['pattern_roll_cut_details_for_db']:
-        logging.info("\n\n# ================= 롤 재단 상세 정보 (pattern_roll_cut_details_for_db) ================== #\n")
-        try:
-            success_cut_db = db.insert_cut_sequence(
-                lot_no, version, plant, pm_no, schedule_unit, 
+        # 4. 롤 재단 상세 정보 저장
+        if 'pattern_roll_cut_details_for_db' in results and results['pattern_roll_cut_details_for_db']:
+            logging.info("\n\n# ================= 롤 재단 상세 정보 (pattern_roll_cut_details_for_db) ================== #\n")
+            db.insert_cut_sequence(
+                connection, lot_no, version, plant, pm_no, schedule_unit, 
                 paper_type, b_wgt, results['pattern_roll_cut_details_for_db']
             )
-            if not success_cut_db:
-                logging.error(f"[에러] Lot {lot_no}의 롤 재단 상세 정보를 DB에 저장하지 못했습니다.")
-        except Exception as e:
-            logging.error(f"[에러] insert_cut_sequence에서 예외 발생: {e}")
-            raise
 
-    if not success_db:
-        logging.error(f"[에러] Lot {lot_no}의 패턴을 DB에 저장하지 못했습니다. 상태를 99(에러)로 변경합니다.")
-        db.update_lot_status(lot_no=lot_no, version=version, status=99)
-        return
+        # 5. 쉬트 재단 상세 정보 저장        
+        logging.info("\n\n# ================= 쉬트 재단 상세 정보 ================== #\n")
+        db.insert_sheet_sequence(
+            connection, lot_no, version, plant, schedule_unit
+        )
 
-    # CSV 파일로 결과 저장
-    output_dir = 'results'
-    os.makedirs(output_dir, exist_ok=True)
-    output_filename = f"{lot_no}_{version}.csv"
-    output_path = os.path.join(output_dir, output_filename)
-    try:
+        # 모든 DB 저장이 성공한 경우 커밋
+        connection.commit()
+        logging.info("DB 트랜잭션이 성공적으로 커밋되었습니다.")
+
+        # CSV 파일로 결과 저장 및 상태 업데이트
+        output_dir = 'results'
+        os.makedirs(output_dir, exist_ok=True)
+        output_filename = f"{lot_no}_{version}.csv"
+        output_path = os.path.join(output_dir, output_filename)
         results['pattern_result'].to_csv(output_path, index=False, encoding='utf-8-sig')
         logging.info(f"\n[성공] 요약 결과가 다음 파일에 저장되었습니다: {output_path}")
         db.update_lot_status(lot_no=lot_no, version=version, status=0)
+
     except Exception as e:
-        logging.error(f"[에러] 결과를 CSV 파일에 저장하는 중 오류 발생: {e}")
+        logging.error(f"[에러] 데이터 저장 중 오류 발생: {e}")
+        if connection:
+            connection.rollback()
+            logging.info("DB 트랜잭션이 롤백되었습니다.")
+            # 교착 상태를 방지하기 위해 update_lot_status 호출 전에 커넥션을 명시적으로 해제합니다.
+            db.pool.release(connection)
+            connection = None  # finally 블록에서 다시 해제하지 않도록 None으로 설정
+        
+        # 이제 update_lot_status는 풀에서 새 커넥션을 얻을 수 있습니다.
         db.update_lot_status(lot_no=lot_no, version=version, status=99)
 
-    logging.info(f"\n{'='*60}")
-    logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Lot: {lot_no} 처리 완료")
-    logging.info(f"{'='*60}")
+    finally:
+        if connection:
+            db.pool.release(connection)
+        logging.info(f"\n{'='*60}")
+        logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Lot: {lot_no} 처리 완료")
+        logging.info(f"{'='*60}")
 
 def setup_logging(lot_no, version):
     """로그 설정을 초기화합니다."""

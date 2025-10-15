@@ -8,7 +8,7 @@ from .db_insert_data import DataInserters
 from .db_get_data_pattern import PatternGetters
 
 class Database(CsvGetters, RollGetters, SheetGetters, VersionGetters, DataInserters, PatternGetters):
-    def __init__(self, user, password, dsn, min_pool=1, max_pool=1, increment=1):
+    def __init__(self, user, password, dsn, min_pool=1, max_pool=5, increment=1):
         self.user = user
         self.password = password
         self.dsn = dsn

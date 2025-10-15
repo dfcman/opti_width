@@ -9,7 +9,7 @@ class RollGetters:
             #
             sql_query = """
                 SELECT
-                    width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no 
+                    plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no 
                 FROM
                     h3t_production_order
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -20,9 +20,12 @@ class RollGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no = row
+                plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
+                    'plant': plant,
+                    'pm_no': pm_no,
+                    'schedule_unit': schedule_unit,
                     '오더번호': order_no,
                     '지폭': int(width),
                     '가로': int(length),
@@ -50,7 +53,7 @@ class RollGetters:
             #
             sql_query = """
                 SELECT
-                    width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no 
+                    plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no 
                 FROM
                     hsfp_st.h3t_production_order@hsfp_st_rlink
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -61,9 +64,12 @@ class RollGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no = row
+                plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
+                    'plant': plant,
+                    'pm_no': pm_no,
+                    'schedule_unit': schedule_unit,
                     '오더번호': order_no,
                     '지폭': int(width),
                     '롤길이': int(roll_length),

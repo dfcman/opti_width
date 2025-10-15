@@ -44,13 +44,9 @@ class RollOptimize:
             return
 
         # 1. 다양한 휴리스틱을 위한 정렬된 아이템 리스트 생성
-        sorted_by_demand = sorted(
-            self.items,
-            key=lambda i: self.demands.get(i, 0),
-            reverse=True
-        )
-        sorted_by_width_desc = sorted(self.items, key=lambda item: self.item_info[item], reverse=True)
-        sorted_by_width_asc = sorted(self.items, key=lambda item: self.item_info[item])
+        sorted_by_demand = sorted(self.items, key=lambda item: self.demands.get(item, 0), reverse=True)
+        sorted_by_width_desc = sorted(self.items, key=lambda item: self.item_info.get(item, 0), reverse=True)
+        sorted_by_width_asc = sorted(self.items, key=lambda item: self.item_info.get(item, 0))
 
         heuristics = [sorted_by_demand, sorted_by_width_desc, sorted_by_width_asc]
 

@@ -18,7 +18,7 @@ class SheetGetters:
 
             sql_query = """
                 SELECT
-                    width, length, quality_grade, order_ton_cnt, export_yn, order_no
+                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no
                 FROM
                     h3t_production_order
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -30,9 +30,12 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
+                    'plant': plant,
+                    'pm_no': pm_no,
+                    'schedule_unit': schedule_unit,
                     '오더번호': order_no,
                     '가로': int(width),
                     '세로': int(length),
@@ -66,7 +69,7 @@ class SheetGetters:
 
             sql_query = """
                 SELECT
-                    width, length, quality_grade, order_ton_cnt, export_yn, order_no
+                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no
                 FROM
                     hsfp_st.h3t_production_order@hsfp_st_rlink
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -79,9 +82,12 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
+                    'plant': plant,
+                    'pm_no': pm_no,
+                    'schedule_unit': schedule_unit,
                     '오더번호': order_no,
                     '가로': int(width),
                     '세로': int(length),
@@ -115,7 +121,7 @@ class SheetGetters:
 
             sql_query = """
                 SELECT
-                    width, length, quality_grade, order_ton_cnt, export_yn, order_no
+                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no
                 FROM
                     h3t_production_order@hsfp_ca_rlink
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -127,9 +133,12 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
+                    'plant': plant,
+                    'pm_no': pm_no,
+                    'schedule_unit': schedule_unit,
                     '오더번호': order_no,
                     '가로': int(width),
                     '세로': int(length),
