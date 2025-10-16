@@ -24,8 +24,6 @@ class DataInserters:
     def insert_pattern_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit, max_width, 
                                 paper_type, b_wgt, pattern_details):
         cursor = connection.cursor()
-        cursor.execute("DELETE FROM th_pattern_sequence WHERE lot_no = :lot_no AND version = :version", lot_no=lot_no, version=version)
-        print(f"Deleted existing patterns for lot {lot_no}, version {version}")
 
         insert_query = """
             INSERT INTO th_pattern_sequence (
@@ -46,7 +44,7 @@ class DataInserters:
         total_seq = 0
         bind_vars_list = []
         for pattern in pattern_details:
-            for _ in range(pattern['Count']):
+            for seq in range(pattern['Count']):
                 total_seq += 1
                 prod_seq = pattern['Prod_seq']
                 pok_cnt_value = len([w for w in pattern['widths'] if w > 0])
@@ -55,7 +53,7 @@ class DataInserters:
                     'plant': plant, 'pm_no': pm_no, 'schedule_unit': schedule_unit,
                     'max_width': max_width, 'paper_type': paper_type, 'b_wgt': b_wgt,
                     'lot_no': lot_no, 'version': version, 'prod_seq': prod_seq,
-                    'unit_no': prod_seq, 'seq': total_seq,
+                    'unit_no': prod_seq, 'seq': seq + 1,
                     'length': pattern.get('roll_production_length', 0),
                     'pok_cnt': pok_cnt_value,
                     'w1': pattern['widths'][0], 'w2': pattern['widths'][1],
@@ -77,8 +75,6 @@ class DataInserters:
     def insert_roll_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit, max_width, 
                                 paper_type, b_wgt, pattern_roll_details):
         cursor = connection.cursor()
-        cursor.execute("DELETE FROM th_roll_sequence WHERE lot_no = :lot_no AND version = :version", lot_no=lot_no, version=version)
-        print(f"Deleted existing roll_sequence for lot {lot_no}, version {version}")
 
         insert_query = """
             INSERT INTO th_roll_sequence (
@@ -107,7 +103,7 @@ class DataInserters:
                     'plant': plant, 'pm_no': pm_no, 'schedule_unit': schedule_unit,
                     'paper_type': paper_type, 'b_wgt': b_wgt, 'lot_no': lot_no,
                     'version': version, 'prod_seq': prod_seq, 'unit_no': prod_seq,
-                    'seq':seq, 'roll_seq': roll_seq, 'pok_cnt': pok_cnt_value,
+                    'seq':seq + 1, 'roll_seq': roll_seq, 'pok_cnt': pok_cnt_value,
                     'rollwidth': roll_detail['rollwidth'],
                     'w1': roll_detail['widths'][0], 'w2': roll_detail['widths'][1],
                     'w3': roll_detail['widths'][2], 'w4': roll_detail['widths'][3],
@@ -128,8 +124,6 @@ class DataInserters:
     def insert_cut_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit, 
                                 paper_type, b_wgt, pattern_roll_cut_details):
         cursor = connection.cursor()
-        cursor.execute("DELETE FROM th_cut_sequence WHERE lot_no = :lot_no AND version = :version", lot_no=lot_no, version=version)
-        print(f"Deleted existing cut_sequence for lot {lot_no}, version {version}")
 
         insert_query = """
             INSERT INTO th_cut_sequence (
@@ -145,37 +139,61 @@ class DataInserters:
 
         bind_vars_list = []
         for cut_detail in pattern_roll_cut_details:
-            bind_vars = {
-                'plant': plant, 'pm_no': pm_no, 'schedule_unit': schedule_unit,
-                'lot_no': lot_no, 'version': version,
-                'prod_seq': cut_detail['PROD_SEQ'], 
-                'unit_no': cut_detail['UNIT_NO'],
-                'seq': cut_detail['SEQ'], 
-                'roll_seq': cut_detail['ROLL_SEQ'],
-                'cut_seq': cut_detail['CUT_SEQ'], 
-                'width': cut_detail['WIDTH'],
-                'group_no': cut_detail['GROUP_NO'], 
-                'weight': cut_detail['WEIGHT'],
-                'total_length': cut_detail['TOTAL_LENGTH'],
-                'cut_cnt': cut_detail['CUT_CNT'], 
-                'paper_type': paper_type,
-                'b_wgt': b_wgt
-            }
-            bind_vars_list.append(bind_vars)
+            for seq in range(cut_detail['CUT_CNT']):
+                bind_vars = {
+                    'plant': plant, 'pm_no': pm_no, 'schedule_unit': schedule_unit,
+                    'lot_no': lot_no, 'version': version,
+                    'prod_seq': cut_detail['PROD_SEQ'], 
+                    'unit_no': cut_detail['UNIT_NO'],
+                    'seq': seq + 1, 
+                    'roll_seq': cut_detail['ROLL_SEQ'],
+                    'cut_seq': cut_detail['CUT_SEQ'], 
+                    'width': cut_detail['WIDTH'],
+                    'group_no': cut_detail['GROUP_NO'], 
+                    'weight': cut_detail['WEIGHT'],
+                    'total_length': cut_detail['TOTAL_LENGTH'],
+                    'cut_cnt': cut_detail['CUT_CNT'], 
+                    'paper_type': paper_type,
+                    'b_wgt': b_wgt
+                }
+                bind_vars_list.append(bind_vars)
 
         if bind_vars_list:
             cursor.executemany(insert_query, bind_vars_list)
 
         print(f"Prepared {len(bind_vars_list)} new cut sequences for transaction.")
 
+
+    def insert_sheet_sequence(self, connection, lot_no, version, plant, schedule_unit):
+        cursor = connection.cursor()
+        
+        # As per the user's request, this function will call a stored procedure.
+        # The user did not specify if old data should be deleted.
+
+        # Create a variable for the IN OUT cursor parameter
+        out_cursor = cursor.var(oracledb.DB_TYPE_CURSOR)
+
+        # Call the stored procedure with named parameters to ensure correctness
+        cursor.callproc("PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO", keyword_parameters={
+            'P_PLANT': plant,
+            'P_SCHEDULE_UNIT': schedule_unit,
+            'P_LOT_NO': lot_no,
+            'P_VERSION': version,
+            'C_SN': out_cursor
+        })
+
+        # You can now fetch results from the out_cursor if needed, for example:
+        # result_cursor = out_cursor.getvalue()
+        # for row in result_cursor:
+        #     print(row)
+
+        print(f"Prepared sheet sequences for transaction by calling PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO.")
+
     def insert_order_group(self, connection, lot_no, version, plant, pm_no, schedule_unit, df_orders):
         """
         df_orders DataFrame을 th_order_group 테이블에 저장합니다.
         """
         cursor = connection.cursor()
-        # 기존 데이터 삭제
-        cursor.execute("DELETE FROM th_order_group WHERE lot_no = :lot_no AND version = :version", lot_no=lot_no, version=version)
-        print(f"Deleted existing order group for lot {lot_no}, version {version}")
 
         insert_query = """
             INSERT INTO th_order_group (
@@ -205,27 +223,4 @@ class DataInserters:
             cursor.executemany(insert_query, bind_vars_list)
             print(f"Prepared {len(bind_vars_list)} new order group records for transaction.")
 
-    def insert_sheet_sequence(self, connection, lot_no, version, plant, schedule_unit):
-        cursor = connection.cursor()
-        
-        # As per the user's request, this function will call a stored procedure.
-        # The user did not specify if old data should be deleted.
-
-        # Create a variable for the IN OUT cursor parameter
-        out_cursor = cursor.var(oracledb.DB_TYPE_CURSOR)
-
-        # Call the stored procedure with named parameters to ensure correctness
-        cursor.callproc("PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO", keyword_parameters={
-            'P_PLANT': plant,
-            'P_SCHEDULE_UNIT': schedule_unit,
-            'P_LOT_NO': lot_no,
-            'P_VERSION': version,
-            'C_SN': out_cursor
-        })
-
-        # You can now fetch results from the out_cursor if needed, for example:
-        # result_cursor = out_cursor.getvalue()
-        # for row in result_cursor:
-        #     print(row)
-
-        print(f"Prepared sheet sequences for transaction by calling PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO.")
+    

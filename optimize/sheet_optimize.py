@@ -567,7 +567,7 @@ class SheetOptimize:
         find_combinations_recursive(0, {}, 0, 0)
         self.patterns = all_patterns
 
-    def run_optimize(self):
+    def run_optimize(self, start_prod_seq=0):
         """최적화 실행 메인 함수"""
         if len(self.order_widths) <= SMALL_PROBLEM_THRESHOLD:
             print(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 모든 패턴을 탐색합니다 (Small-scale) ---")
@@ -620,13 +620,20 @@ class SheetOptimize:
         if not final_solution:
             return {"error": "최종 해를 찾을 수 없습니다."}
         
-        return self._format_results(final_solution)
+        return self._format_results(final_solution, start_prod_seq=start_prod_seq)
 
-    def _format_results(self, final_solution):
+    def _format_results(self, final_solution, start_prod_seq=0):
         """최종 결과를 데이터프레임 형식으로 포매팅합니다."""
         
         # 결과 데이터프레임 생성
-        result_patterns, pattern_details_for_db, pattern_roll_details_for_db, pattern_roll_cut_details_for_db, demand_tracker = self._build_pattern_details(final_solution)
+        (
+            result_patterns,
+            pattern_details_for_db,
+            pattern_roll_details_for_db,
+            pattern_roll_cut_details_for_db,
+            demand_tracker,
+            last_prod_seq,
+        ) = self._build_pattern_details(final_solution, start_prod_seq=start_prod_seq)
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
             df_patterns = df_patterns[['Pattern', 'wd_width', 'Count', 'Loss_per_Roll']]
@@ -642,10 +649,11 @@ class SheetOptimize:
             "pattern_details_for_db": pattern_details_for_db,
             "pattern_roll_details_for_db": pattern_roll_details_for_db,
             "pattern_roll_cut_details_for_db": pattern_roll_cut_details_for_db,
-            "fulfillment_summary": fulfillment_summary
+            "fulfillment_summary": fulfillment_summary,
+            "last_prod_seq": last_prod_seq,
         }
 
-    def _build_pattern_details(self, final_solution):
+    def _build_pattern_details(self, final_solution, start_prod_seq=0):
         """
         패턴 사용 결과와 DB 저장을 위한 상세 정보를 생성합니다.
         이 메서드는 최적화 결과(패턴별 총 생산량)를 개별 group_order_no의 수요에 맞게 분배(disaggregation)합니다.
@@ -664,7 +672,7 @@ class SheetOptimize:
         pattern_roll_details_for_db = []
         pattern_roll_cut_details_for_db = []
         
-        prod_seq_counter = 0
+        prod_seq_counter = start_prod_seq
         total_cut_seq_counter = 0
 
         # 패턴별로 한 번만 수행할 정보 미리 계산 (for display summary)
@@ -705,6 +713,7 @@ class SheetOptimize:
             result_patterns.append(summary)
 
             # 3. 패턴이 사용된 횟수(roll_count)만큼 반복하여 각 롤에 대한 DB 레코드 생성
+            pattern_detail_record = None
             for _ in range(roll_count):
                 prod_seq_counter += 1
                 
@@ -789,15 +798,34 @@ class SheetOptimize:
                                     'CUT_CNT': len([w for w in base_widths_for_item if w > 0]),
                                 })
 
-                pattern_details_for_db.append({
-                    'roll_production_length': self.sheet_roll_length,
-                    'Count': 1,
-                    'widths': (composite_widths_for_db + [0] * 8)[:8],
-                    'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
-                    'Prod_seq': prod_seq_counter
-                })
+                if pattern_detail_record is None:
+                    pattern_detail_record = {
+                        'roll_production_length': self.sheet_roll_length,
+                        'Count': roll_count,
+                        'widths': (composite_widths_for_db + [0] * 8)[:8],
+                        'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
+                        'Prod_seq': prod_seq_counter,
+                    }
 
-        return result_patterns, pattern_details_for_db, pattern_roll_details_for_db, pattern_roll_cut_details_for_db, demand_tracker
+            if pattern_detail_record is None:
+                pattern_detail_record = {
+                    'roll_production_length': self.sheet_roll_length,
+                    'Count': roll_count,
+                    'widths': [0] * 8,
+                    'group_nos': [''] * 8,
+                    'Prod_seq': prod_seq_counter,
+                }
+
+            pattern_details_for_db.append(pattern_detail_record)
+
+        return (
+            result_patterns,
+            pattern_details_for_db,
+            pattern_roll_details_for_db,
+            pattern_roll_cut_details_for_db,
+            demand_tracker,
+            prod_seq_counter,
+        )
 
     def _build_fulfillment_summary(self, demand_tracker):
         """주문 이행 요약 데이터프레임을 생성합니다. (개별 주문별)"""
