@@ -31,6 +31,8 @@ def process_roll_lot(
         return
 
     df_orders = pd.DataFrame(raw_orders)
+    df_orders['lot_no'] = lot_no
+    df_orders['version'] = version
 
     # 그룹오더 번호 생성
     group_cols = ['지폭', '롤길이', '등급']
@@ -132,6 +134,8 @@ def process_roll_sl_lot(
         return
 
     df_orders = pd.DataFrame(raw_orders)
+    df_orders['lot_no'] = lot_no
+    df_orders['version'] = version
 
     # 그룹오더 번호 생성 (쉬트지 기준)
     group_cols = ['지폭', '롤길이', '등급'] # 쉬트지는 '가로'(width)가 중요
@@ -205,6 +209,8 @@ def process_sheet_lot(
         return
 
     df_orders = pd.DataFrame(raw_orders)
+    df_orders['lot_no'] = lot_no
+    df_orders['version'] = version
 
     # 그룹오더 번호 생성 (쉬트지 기준)
     group_cols = ['가로', '세로', '등급'] # 쉬트지는 '가로'(width)가 중요
@@ -285,6 +291,8 @@ def process_sheet_lot_var(
         return
 
     df_orders = pd.DataFrame(raw_orders)
+    df_orders['lot_no'] = lot_no
+    df_orders['version'] = version
 
     # 그룹오더 번호 생성 (쉬트지 기준)
     group_cols = ['가로', '세로', '등급'] # 쉬트지는 '가로'(width)가 중요
@@ -362,6 +370,8 @@ def process_sheet_lot_ca(
         return
 
     df_orders = pd.DataFrame(raw_orders)
+    df_orders['lot_no'] = lot_no
+    df_orders['version'] = version
 
     # 그룹오더 번호 생성 (쉬트지 기준)
     group_cols = ['가로', '세로', '등급'] # 쉬트지는 '가로'(width)가 중요
@@ -517,7 +527,7 @@ def setup_logging(lot_no, version):
 def main():
     """메인 실행 함수"""
     parser = argparse.ArgumentParser(description="롤지 또는 쉬트지 최적화를 실행합니다.")
-    parser.add_argument("--order-type", required=True, choices=['roll', 'roll_sl', 'sheet', 'sheet_var', 'sheet_ca'], help="오더 유형 ('roll' 또는 'sheet')")
+    parser.add_argument("--order-type", required=False, choices=['roll', 'roll_sl', 'sheet', 'sheet_var', 'sheet_ca'], help="오더 유형 ('roll' 또는 'sheet')")
     args = parser.parse_args()
 
     db = None
@@ -533,79 +543,95 @@ def main():
         
         db = Database(user=db_config['user'], password=db_config['password'], dsn=db_config['dsn'])
 
-        ( 
-            plant, pm_no, schedule_unit, lot_no, version, min_width, 
-            max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
-            paper_type, b_wgt,
-            min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re
-        ) = db.get_target_lot()
-
-        if not lot_no:
-            print("처리할 Lot이 없습니다.") # 이 부분은 로거 설정 전이므로 print 유지
-            return
-
-        # 로깅 설정
-        setup_logging(lot_no, version)
-
-        if args.order_type == 'roll':
-            process_roll_lot(
-                db, plant, pm_no, schedule_unit, lot_no, version, 
-                min_width, max_width, max_pieces, paper_type, b_wgt
-            )
-        elif args.order_type == 'roll_sl':
+        while True:
             ( 
                 plant, pm_no, schedule_unit, lot_no, version, min_width, 
                 max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
                 paper_type, b_wgt,
-                min_sl_width, max_sl_width, sl_trim_size
-            ) = db.get_target_lot_sl()
+                min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re,
+                sheet_order_cnt, roll_order_cnt
+            ) = db.get_target_lot()
 
-            process_roll_sl_lot(
-                db, plant, pm_no, schedule_unit, lot_no, version, 
-                min_width, max_width, max_pieces, paper_type, b_wgt,
-                min_sl_width, max_sl_width, sl_trim_size
-            )
-        elif args.order_type == 'sheet':
-            process_sheet_lot(
-                db, plant, pm_no, schedule_unit, lot_no, version, 
-                min_width, sheet_max_width, sheet_max_pieces, paper_type, b_wgt,
-                min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re
-            )
-        elif args.order_type == 'sheet_var':
-            # 데몬 방식 대신, get_target_lot()을 한 번만 호출하여 테스트합니다.
-            ( 
-                plant, pm_no, schedule_unit, lot_no, version, min_width, 
-                max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
-                paper_type, b_wgt,
-                min_sc_width, max_sc_width, sheet_trim_size, min_sheet_length_re, max_sheet_length_re
-            ) = db.get_target_lot_var()
+            if not lot_no:
+                print("처리할 Lot이 없습니다. 10초 후 다시 시도합니다.") # 이 부분은 로거 설정 전이므로 print 유지
+                time.sleep(10)
+                continue
 
-            process_sheet_lot_var(
-                db, plant, pm_no, schedule_unit, lot_no, version, 
-                min_width, sheet_max_width, sheet_max_pieces, paper_type, b_wgt,
-                min_sc_width, max_sc_width, sheet_trim_size, min_sheet_length_re, max_sheet_length_re
-            )
-        elif args.order_type == 'sheet_ca':
-            # 데몬 방식 대신, get_target_lot()을 한 번만 호출하여 테스트합니다.
-            ( 
-                plant, pm_no, schedule_unit, lot_no, version, min_width, 
-                max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
-                paper_type, b_wgt,
-                min_sc_width, max_sc_width, sheet_trim_size, min_sheet_length_re, max_sheet_length_re
-            ) = db.get_target_lot_ca()
+            # 로깅 설정
+            setup_logging(lot_no, version)
+            logging.info(f"롤지 오더 {roll_order_cnt}건이 있습니다.")
+            logging.info(f"쉬트지 오더 {sheet_order_cnt}건이 있습니다.")
 
-            process_sheet_lot_ca(
-                db, plant, pm_no, schedule_unit, lot_no, version, 
-                min_width, sheet_max_width, sheet_max_pieces, paper_type, b_wgt,
-                min_sc_width, max_sc_width, sheet_trim_size, min_sheet_length_re, max_sheet_length_re
-            )
+            if roll_order_cnt > 0:
+                logging.info(f"롤지 오더 {roll_order_cnt}건이 있습니다.")
 
-    except FileNotFoundError as e:
+                if plant == '3000':
+                    logging.info(f"{plant} 공장 롤지 오더 {roll_order_cnt}건이 있습니다.")
+                    process_roll_lot(
+                        db, plant, pm_no, schedule_unit, lot_no, version, 
+                        min_width, max_width, max_pieces, paper_type, b_wgt
+                    )
+                elif plant != '3000':
+                    logging.info(f"{plant} 공장 롤지 오더 {roll_order_cnt}건이 있습니다.")
+                    ( 
+                        plant, pm_no, schedule_unit, lot_no, version, min_width, 
+                        max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
+                        paper_type, b_wgt,
+                        min_sl_width, max_sl_width, sl_trim_size
+                    ) = db.get_target_lot_sl()
+
+                    process_roll_sl_lot(
+                        db, plant, pm_no, schedule_unit, lot_no, version, 
+                        min_width, max_width, max_pieces, paper_type, b_wgt,
+                        min_sl_width, max_sl_width, sl_trim_size
+                    )
+
+            if sheet_order_cnt > 0: 
+                logging.info(f"쉬트지 오더 {sheet_order_cnt}건이 있습니다.")
+
+                if plant == '3000':
+                    process_sheet_lot(
+                        db, plant, pm_no, schedule_unit, lot_no, version, 
+                        min_width, sheet_max_width, sheet_max_pieces, paper_type, b_wgt,
+                        min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re
+                    )   
+                elif plant == '5000':
+                    ( 
+                        plant, pm_no, schedule_unit, lot_no, version, min_width, 
+                        max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
+                        paper_type, b_wgt,
+                        min_sc_width, max_sc_width, sheet_trim_size, min_sheet_length_re, max_sheet_length_re
+                    ) = db.get_target_lot_ca()
+
+                    process_sheet_lot_ca(
+                        db, plant, pm_no, schedule_unit, lot_no, version, 
+                        min_width, sheet_max_width, sheet_max_pieces, paper_type, b_wgt,
+                        min_sc_width, max_sc_width, sheet_trim_size, min_sheet_length_re, max_sheet_length_re
+                    )
+                else:
+                    ( 
+                        plant, pm_no, schedule_unit, lot_no, version, min_width, 
+                        max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
+                        paper_type, b_wgt,
+                        min_sc_width, max_sc_width, sheet_trim_size, min_sheet_length_re, max_sheet_length_re
+                    ) = db.get_target_lot_var()
+
+                    process_sheet_lot_var(
+                        db, plant, pm_no, schedule_unit, lot_no, version, 
+                        min_width, sheet_max_width, sheet_max_pieces, paper_type, b_wgt,
+                        min_sc_width, max_sc_width, sheet_trim_size, min_sheet_length_re, max_sheet_length_re
+                    )
+
+            time.sleep(10)
+
+    except FileNotFoundError as e:        
         logging.error(f"[치명적 에러] 설정 파일을 찾을 수 없습니다: {e}")
     except KeyboardInterrupt:
         logging.info("\n사용자에 의해 프로그램이 중단되었습니다.")
     except Exception as e:
+        import traceback
         logging.error(f"\n[치명적 에러] 실행 중 예외 발생: {e}")
+        logging.error(traceback.format_exc()) # 상세 traceback 로깅
         if lot_no and version:
             db.update_lot_status(lot_no=lot_no, version=version, status=99)
     finally:
