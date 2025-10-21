@@ -20,7 +20,22 @@ class VersionGetters:
             #         plant, pm_no, schedule_unit, lot_no, '05' as version, min_width, roll_max_width as max_width, max_re_count as max_pieces,
             #         paper_type, b_wgt
             #     from th_versions_manager 
-            #     where lot_no = '3241100322' and version = '01'   -- 3250900073, 3250900429
+            #     where lot_no = '3241100322' and version = '01'   -- 3250900073, 3250900429, 8250900534, 5250900616
+            # """
+
+            # query = """
+            #     select 
+            #         a.plant, pm_no, a.schedule_unit, a.lot_no, '05' as version, a.min_width, a.roll_max_width, 
+            #         a.sheet_max_width, a.max_re_count as max_pieces, 4 as sheet_max_pieces,
+            #         a.paper_type, a.b_wgt,
+            #         1000 as min_sc_width, a.max_sc_width, a.sheet_trim_size, sheet_length_re,
+            #         ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type = '1')) as sheet_order_cnt,
+            #         ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type != '1')) as roll_order_cnt
+            #     from th_versions_manager a, th_tar_std_length b
+            #     where a.plant = b.plant
+            #     and a.paper_type = b.paper_type
+            #     and a.b_wgt = b.b_wgt 
+            #     and lot_no = '3250900068' and version = '01'
             # """
 
             query = """
@@ -28,30 +43,18 @@ class VersionGetters:
                     a.plant, pm_no, a.schedule_unit, a.lot_no, '05' as version, a.min_width, a.roll_max_width, 
                     a.sheet_max_width, a.max_re_count as max_pieces, 4 as sheet_max_pieces,
                     a.paper_type, a.b_wgt,
-                    1000 as min_sc_width, a.max_sc_width, a.sheet_trim_size, sheet_length_re,
-                    ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type = '1')) as sheet_order_cnt,
-                    ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type != '1')) as roll_order_cnt
-                from th_versions_manager a, th_tar_std_length b
-                where a.plant = b.plant
-                and a.paper_type = b.paper_type
-                and a.b_wgt = b.b_wgt 
-                and lot_no = '3250900429' and version = '01'
+                    a.min_sc_width - 100, a.max_sc_width, a.sheet_trim_size, b.max_length as sheet_length_re,
+                    ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type != '1')) as sheet_order_cnt,
+                    ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type = '1')) as roll_order_cnt
+                from hsfp_st.th_versions_manager@hsfp_st_rlink a, hsfp_st.th_tar_std_length@hsfp_st_rlink b
+                where a.plant = b.plant(+)
+                and a.paper_type = b.paper_type(+)
+                and a.b_wgt = b.b_wgt(+)
+                and b.operation_code(+) = 'RE'
+                and b.rs_gubun(+) = 'S'
+                and lot_no = '8250900534' 
+                and version = '99'
             """
-
-            # query = """
-            #     select 
-            #         a.plant, pm_no, a.schedule_unit, a.lot_no, '05' as version, a.min_width, a.roll_max_width, 
-            #         a.sheet_max_width, a.max_re_count as max_pieces, 4 as sheet_max_pieces,
-            #         a.paper_type, a.b_wgt,
-            #         a.min_sc_width - 100, a.max_sc_width, a.sheet_trim_size, b.max_length as sheet_length_re
-            #     from hsfp_st.th_versions_manager@hsfp_st_rlink a, hsfp_st.th_tar_std_length@hsfp_st_rlink b
-            #     where a.plant = b.plant
-            #     and a.paper_type = b.paper_type
-            #     and a.b_wgt = b.b_wgt 
-            #     and b.operation_code = 'RE' 
-            #     and b.rs_gubun = 'S'
-            #     and lot_no = '8250800131' and version = '99'
-            # """
 
             print(f"Executing query to fetch target lot:\n{query}")
             cursor.execute(query)
@@ -65,7 +68,7 @@ class VersionGetters:
             if connection:
                 self.pool.release(connection)
 
-    def get_target_lot_sl(self):
+    def get_target_lot_sl(self, lot_no):
         connection = None
         try:
             connection = self.pool.acquire()
@@ -86,11 +89,13 @@ class VersionGetters:
                     a.paper_type, a.b_wgt,
                     a.min_cm_width - 100, a.max_cm_width, a.ww_trim_size
                 from hsfp_st.th_versions_manager@hsfp_st_rlink a
-                where lot_no = '8250900534' and version = '99'
+                where lot_no = :p_lot_no
+                and version = '99'
             """
 
             print(f"Executing query to fetch target lot:\n{query}")
-            cursor.execute(query)
+            # cursor.execute(query)
+            cursor.execute(query, p_lot_no=lot_no)
             result = cursor.fetchone()
             # 반환 값 개수를 17개로 맞춤
             return result if result else (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
@@ -101,7 +106,7 @@ class VersionGetters:
             if connection:
                 self.pool.release(connection)
 
-    def get_target_lot_var(self):
+    def get_target_lot_var(self, lot_no):
         connection = None
         try:
             connection = self.pool.acquire()
@@ -129,11 +134,13 @@ class VersionGetters:
                 and a.b_wgt = b.b_wgt 
                 and b.operation_code = 'RE' 
                 and b.rs_gubun = 'S'
-                and lot_no = '8250900133' and version = '99'
+                and lot_no = :p_lot_no
+                and version = '99'
             """
 
             print(f"Executing query to fetch target lot:\n{query}")
-            cursor.execute(query)
+            # cursor.execute(query)
+            cursor.execute(query, p_lot_no=lot_no)
             result = cursor.fetchone()
             # 반환 값 개수를 17개로 맞춤
             return result if result else (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
@@ -171,11 +178,13 @@ class VersionGetters:
                 and a.paper_type = b.paper_type
                 and a.b_wgt = b.b_wgt 
                 and b.rs_gubun = 'S'
-                and lot_no = '5250900616' and version = '99'
+                and lot_no = :p_lot_no
+                and version = '99'
             """
 
             # print(f"Executing query to fetch target lot:\n{query}")
-            cursor.execute(query)
+            # cursor.execute(query)
+            cursor.execute(query, p_lot_no=lot_no)
             result = cursor.fetchone()
             # 반환 값 개수를 17개로 맞춤
             return result if result else (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)

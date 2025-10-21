@@ -529,7 +529,8 @@ def main():
                         max_width_sl, _, max_pieces_sl, _, 
                         paper_type_sl, b_wgt_sl,
                         min_sl_width, max_sl_width, sl_trim_size
-                    ) = db.get_target_lot_sl()
+                    ) = db.get_target_lot_sl(lot_no=lot_no)
+                    
                     roll_results, roll_df_orders, prod_seq_counter, group_order_no_counter = process_roll_sl_lot(
                         db, plant_sl, pm_no_sl, schedule_unit_sl, lot_no_sl, version_sl, 
                         min_width_sl, max_width_sl, max_pieces_sl, paper_type_sl, b_wgt_sl,
@@ -555,7 +556,8 @@ def main():
                         _, sheet_max_width_ca, _, sheet_max_pieces_ca, 
                         paper_type_ca, b_wgt_ca,
                         min_sc_width_ca, max_sc_width_ca, sheet_trim_size_ca, min_sheet_length_re_ca, max_sheet_length_re_ca
-                    ) = db.get_target_lot_ca()
+                    ) = db.get_target_lot_ca(lot_no=lot_no)
+
                     sheet_results, sheet_df_orders, prod_seq_counter, group_order_no_counter = process_sheet_lot_ca(
                         db, plant_ca, pm_no_ca, schedule_unit_ca, lot_no_ca, version_ca, 
                         min_width_ca, sheet_max_width_ca, sheet_max_pieces_ca, paper_type_ca, b_wgt_ca,
@@ -568,7 +570,8 @@ def main():
                         _, sheet_max_width_var, _, sheet_max_pieces_var, 
                         paper_type_var, b_wgt_var,
                         min_sc_width_var, max_sc_width_var, sheet_trim_size_var, min_sheet_length_re_var, max_sheet_length_re_var
-                    ) = db.get_target_lot_var()
+                    ) = db.get_target_lot_var(lot_no=lot_no)
+
                     sheet_results, sheet_df_orders, prod_seq_counter, group_order_no_counter = process_sheet_lot_var(
                         db, plant_var, pm_no_var, schedule_unit_var, lot_no_var, version_var, 
                         min_width_var, sheet_max_width_var, sheet_max_pieces_var, paper_type_var, b_wgt_var,

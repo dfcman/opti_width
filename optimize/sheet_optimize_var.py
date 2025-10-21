@@ -136,11 +136,11 @@ class SheetOptimizeVar:
         return self._format_results(final_solution, start_prod_seq)
 
     def _format_results(self, final_solution, start_prod_seq=0):
-        result_patterns, pattern_details_for_db, pattern_roll_details_for_db, demand_tracker, last_prod_seq = self._build_pattern_details(final_solution, start_prod_seq)
+        result_patterns, pattern_details_for_db, pattern_roll_details_for_db, pattern_roll_cut_details_for_db, demand_tracker, last_prod_seq = self._build_pattern_details(final_solution, start_prod_seq)
         
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
-            df_patterns = df_patterns[['Pattern', 'wd_width', 'Roll_Length', 'Count', 'Loss_per_Roll']]
+            df_patterns = df_patterns[['pattern', 'wd_width', 'roll_length', 'count', 'loss_per_roll']]
 
         fulfillment_summary = self._build_fulfillment_summary(demand_tracker)
 
@@ -148,9 +148,10 @@ class SheetOptimizeVar:
         print("[주문 이행 요약 (그룹오더별)]")
         
         return {
-            "pattern_result": df_patterns.sort_values('Count', ascending=False) if not df_patterns.empty else df_patterns,
+            "pattern_result": df_patterns.sort_values('count', ascending=False) if not df_patterns.empty else df_patterns,
             "pattern_details_for_db": pattern_details_for_db,
             "pattern_roll_details_for_db": pattern_roll_details_for_db,
+            "pattern_roll_cut_details_for_db": pattern_roll_cut_details_for_db,
             "fulfillment_summary": fulfillment_summary,
             "last_prod_seq": last_prod_seq
         }
@@ -165,7 +166,9 @@ class SheetOptimizeVar:
         result_patterns = []
         pattern_details_for_db = []
         pattern_roll_details_for_db = []
+        pattern_roll_cut_details_for_db = []
         prod_seq_counter = start_prod_seq
+        total_cut_seq_counter = 0
 
         for j, count in final_solution['pattern_counts'].items():
             if count < 0.99:
@@ -176,91 +179,133 @@ class SheetOptimizeVar:
             pattern_comp = pattern['composition']
             pattern_len = pattern['length']
 
+            prod_seq_counter += 1
+
             sorted_pattern_items = sorted(pattern_comp.items(), key=lambda item: self.item_info[item[0]], reverse=True)
             pattern_item_strs = []
             total_width = 0
+            all_base_pieces_in_roll = []
+
             for item_name, num in sorted_pattern_items:
                 width = self.item_info[item_name]
                 total_width += width * num
+                
+                base_width_dict = self.item_composition[item_name]
+                for base_width, num_base in base_width_dict.items():
+                    all_base_pieces_in_roll.extend([base_width] * (num_base * num))
+
                 base_width, multiplier = map(int, item_name.split('x'))
                 formatted_name = f"{self.item_info[item_name]}({base_width}*{multiplier})"
                 pattern_item_strs.extend([formatted_name] * num)
             
             result_patterns.append({
-                'Pattern': ' + '.join(pattern_item_strs),
+                'pattern': ' + '.join(pattern_item_strs),
                 'wd_width': total_width,
-                'Roll_Length': round(pattern_len, 2),
-                'Count': roll_count,
-                'Loss_per_Roll': self.original_max_width - total_width
+                'roll_length': round(pattern_len, 2),
+                'count': roll_count,
+                'loss_per_roll': self.original_max_width - total_width
             })
 
-            for _ in range(roll_count):
-                prod_seq_counter += 1
+            composite_widths_for_db = []
+            composite_group_nos_for_db = []
+            
+            roll_seq_counter = 0
+            for item_name, num_of_composite in sorted_pattern_items:
+                composite_width = self.item_info[item_name]
+                base_width_dict = self.item_composition[item_name]
+
+                for _ in range(num_of_composite):
+                    roll_seq_counter += 1
+                    
+                    base_widths_for_item = []
+                    base_group_nos_for_item = []
+                    assigned_group_no_for_composite = None
+
+                    for base_width, num_of_base in base_width_dict.items():
+                        for _ in range(num_of_base):
+                            target_indices = demand_tracker[
+                                (demand_tracker['지폭'] == base_width) &
+                                (demand_tracker['fulfilled_meters'] < demand_tracker['meters'])
+                            ].index
+                            
+                            assigned_group_no = "OVERPROD"
+                            if not target_indices.empty:
+                                target_idx = target_indices.min()
+                                assigned_group_no = demand_tracker.loc[target_idx, 'group_order_no']
+                            else:
+                                fallback_indices = demand_tracker[demand_tracker['지폭'] == base_width].index
+                                if not fallback_indices.empty:
+                                    assigned_group_no = demand_tracker.loc[fallback_indices.min(), 'group_order_no']
+                            
+                            base_widths_for_item.append(base_width)
+                            base_group_nos_for_item.append(assigned_group_no)
+
+                            if assigned_group_no_for_composite is None:
+                                assigned_group_no_for_composite = assigned_group_no
+                    
+                    composite_widths_for_db.append(composite_width)
+                    composite_group_nos_for_db.append(assigned_group_no_for_composite if assigned_group_no_for_composite is not None else "")
+
+                    pattern_roll_details_for_db.append({
+                        'rollwidth': composite_width,
+                        'roll_production_length': pattern_len,
+                        'widths': (base_widths_for_item + [0] * 7)[:7],
+                        'group_nos': (base_group_nos_for_item + [''] * 7)[:7],
+                        'count': roll_count,
+                        'prod_seq': prod_seq_counter,
+                        'roll_seq': roll_seq_counter
+                    })
+
+                    cut_seq_counter = 0
+                    for i in range(len(base_widths_for_item)):
+                        width = base_widths_for_item[i]
+                        if width > 0:
+                            cut_seq_counter += 1
+                            total_cut_seq_counter += 1
+                            group_no = base_group_nos_for_item[i]
+                            
+                            weight = (self.b_wgt * (width / 1000) * pattern_len)
+
+                            pattern_roll_cut_details_for_db.append({
+                                'prod_seq': prod_seq_counter,
+                                'unit_no': prod_seq_counter,
+                                'seq': total_cut_seq_counter,
+                                'roll_seq': roll_seq_counter,
+                                'cut_seq': cut_seq_counter,
+                                'width': width,
+                                'group_no': group_no,
+                                'weight': weight,
+                                'total_length': pattern_len,
+                                'count': roll_count,
+                                'cut_cnt': roll_count,
+                            })
+
+            pattern_details_for_db.append({
+                'roll_production_length': pattern_len,
+                'count': roll_count,
+                'widths': (composite_widths_for_db + [0] * 8)[:8],
+                'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
+                'prod_seq': prod_seq_counter
+            })
+
+            # Batch update demand tracker
+            base_counts_in_roll = Counter(all_base_pieces_in_roll)
+            for base_width, num_in_roll in base_counts_in_roll.items():
+                produced_meters = num_in_roll * pattern_len * roll_count
                 
-                composite_widths_for_db = []
-                composite_group_nos_for_db = []
+                relevant_orders = demand_tracker[demand_tracker['지폭'] == base_width].index
                 
-                roll_seq_counter = 0
-                for item_name, num_of_composite in sorted_pattern_items:
-                    composite_width = self.item_info[item_name]
-                    base_width_dict = self.item_composition[item_name]
+                for order_idx in relevant_orders:
+                    if produced_meters <= 0:
+                        break
+                    
+                    needed = demand_tracker.loc[order_idx, 'meters'] - demand_tracker.loc[order_idx, 'fulfilled_meters']
+                    if needed > 0:
+                        fulfill_amount = min(needed, produced_meters)
+                        demand_tracker.loc[order_idx, 'fulfilled_meters'] += fulfill_amount
+                        produced_meters -= fulfill_amount
 
-                    for _ in range(num_of_composite):
-                        roll_seq_counter += 1
-                        
-                        base_widths_for_item = []
-                        base_group_nos_for_item = []
-                        assigned_group_no_for_composite = None
-
-                        for base_width, num_of_base in base_width_dict.items():
-                            for _ in range(num_of_base):
-                                piece_width = base_width
-                                
-                                target_indices = demand_tracker[
-                                    (demand_tracker['지폭'] == piece_width) &
-                                    (demand_tracker['fulfilled_meters'] < demand_tracker['meters'])
-                                ].index
-                                
-                                assigned_group_no = None
-                                if not target_indices.empty:
-                                    target_idx = target_indices.min()
-                                    demand_tracker.loc[target_idx, 'fulfilled_meters'] += pattern_len
-                                    assigned_group_no = demand_tracker.loc[target_idx, 'group_order_no']
-                                else:
-                                    fallback_indices = demand_tracker[demand_tracker['지폭'] == piece_width].index
-                                    if not fallback_indices.empty:
-                                        assigned_group_no = demand_tracker.loc[fallback_indices.min(), 'group_order_no']
-                                    else:
-                                        assigned_group_no = "ERROR"
-                                
-                                base_widths_for_item.append(base_width)
-                                base_group_nos_for_item.append(assigned_group_no)
-
-                                if assigned_group_no_for_composite is None:
-                                    assigned_group_no_for_composite = assigned_group_no
-                        
-                        composite_widths_for_db.append(composite_width)
-                        composite_group_nos_for_db.append(assigned_group_no_for_composite if assigned_group_no_for_composite is not None else "")
-
-                        pattern_roll_details_for_db.append({
-                            'rollwidth': composite_width,
-                            'roll_production_length': pattern_len,
-                            'widths': (base_widths_for_item + [0] * 7)[:7],
-                            'group_nos': (base_group_nos_for_item + [''] * 7)[:7],
-                            'Count': 1,
-                            'Prod_seq': prod_seq_counter,
-                            'Roll_seq': roll_seq_counter
-                        })
-
-                pattern_details_for_db.append({
-                    'roll_production_length': pattern_len,
-                    'Count': 1,
-                    'widths': (composite_widths_for_db + [0] * 8)[:8],
-                    'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
-                    'Prod_seq': prod_seq_counter
-                })
-                
-        return result_patterns, pattern_details_for_db, pattern_roll_details_for_db, demand_tracker, prod_seq_counter
+        return result_patterns, pattern_details_for_db, pattern_roll_details_for_db, pattern_roll_cut_details_for_db, demand_tracker, prod_seq_counter
 
     def _build_fulfillment_summary(self, demand_tracker):
         summary_df = self.df_orders[['group_order_no', '가로', '세로', '수출내수', '등급', '주문톤', 'meters']].copy()

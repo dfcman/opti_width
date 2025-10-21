@@ -44,9 +44,9 @@ class DataInserters:
         total_seq = 0
         bind_vars_list = []
         for pattern in pattern_details:
-            for seq in range(pattern['Count']):
+            for seq in range(pattern['count']):
                 total_seq += 1
-                prod_seq = pattern['Prod_seq']
+                prod_seq = pattern['prod_seq']
                 pok_cnt_value = len([w for w in pattern['widths'] if w > 0])
 
                 bind_vars = {
@@ -94,9 +94,9 @@ class DataInserters:
 
         bind_vars_list = []
         for roll_detail in pattern_roll_details:
-            for seq in range(roll_detail['Count']):
-                prod_seq = roll_detail['Prod_seq']
-                roll_seq = roll_detail['Roll_seq']
+            for seq in range(roll_detail['count']):
+                prod_seq = roll_detail['prod_seq']
+                roll_seq = roll_detail['roll_seq']
                 pok_cnt_value = len([w for w in roll_detail['widths'] if w > 0])
 
                 bind_vars = {
@@ -139,20 +139,20 @@ class DataInserters:
 
         bind_vars_list = []
         for cut_detail in pattern_roll_cut_details:
-            for seq in range(cut_detail['CUT_CNT']):
+            for seq in range(cut_detail['count']):
                 bind_vars = {
                     'plant': plant, 'pm_no': pm_no, 'schedule_unit': schedule_unit,
                     'lot_no': lot_no, 'version': version,
-                    'prod_seq': cut_detail['PROD_SEQ'], 
-                    'unit_no': cut_detail['UNIT_NO'],
+                    'prod_seq': cut_detail['prod_seq'], 
+                    'unit_no': cut_detail['unit_no'],
                     'seq': seq + 1, 
-                    'roll_seq': cut_detail['ROLL_SEQ'],
-                    'cut_seq': cut_detail['CUT_SEQ'], 
-                    'width': cut_detail['WIDTH'],
-                    'group_no': cut_detail['GROUP_NO'], 
-                    'weight': cut_detail['WEIGHT'],
-                    'total_length': cut_detail['TOTAL_LENGTH'],
-                    'cut_cnt': cut_detail['CUT_CNT'], 
+                    'roll_seq': cut_detail['roll_seq'],
+                    'cut_seq': cut_detail['cut_seq'], 
+                    'width': cut_detail['width'],
+                    'group_no': cut_detail['group_no'], 
+                    'weight': cut_detail['weight'],
+                    'total_length': cut_detail['total_length'],
+                    'cut_cnt': 1, 
                     'paper_type': paper_type,
                     'b_wgt': b_wgt
                 }

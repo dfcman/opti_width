@@ -12,10 +12,14 @@ FINAL_MIP_TIME_LIMIT_MS = 60000  # 최종 정수 계획법(MIP) 문제 풀이에
 
 COMPOSITE_MIN_MULTIPLIER = 2  # 복합폭을 구성할 수 있는 최소 롤 개수
 COMPOSITE_MAX_MULTIPLIER = 3  # 복합폭을 구성할 수 있는 최대 롤 개수
-COMPOSITE_USAGE_PENALTY = 0.0  # 복합폭 사용 자체에 대한 페널티 (현재는 사용 안 함)
-PATTERN_COMPLEXITY_PENALTY = 2.0  # 패턴의 복잡도(사용된 아이템 개수)에 대한 페널티
+COMPOSITE_USAGE_PENALTY = 3000.0  # 복합폭 사용 시 추가 부담 (1폭 대비 생산성 저하 반영)
+PATTERN_COMPLEXITY_PENALTY = 2000.0  # 패턴의 복잡도(사용된 아이템 개수)에 대한 페널티
 COMPOSITE_BASE_CANDIDATES = 20  # 복합폭 생성 시 고려할 기본 롤(가장 수요가 많은)의 후보 개수
 COMPOSITE_GENERATION_LIMIT = 2000  # 생성할 수 있는 복합폭 종류의 최대 개수 (성능 제한용)
+SMALL_WIDTH_LIMIT = 480  # 소폭 판정 기준(mm)
+MAX_SMALL_WIDTH_PER_PATTERN = 2  # 한 패턴에서 허용되는 소폭 롤 수
+OVER_PROD_WEIGHT_CAP = 6.0  # 소량 주문에 대한 초과 페널티 가중치 상한
+MIXED_COMPOSITE_PENALTY = 500.0  # 서로 다른 규격 조합 복합롤에 대한 추가 패널티
 
 
 class RollSLOptimize:
@@ -33,6 +37,8 @@ class RollSLOptimize:
         composite_max=COMPOSITE_MAX_MULTIPLIER,
         composite_penalty=COMPOSITE_USAGE_PENALTY,
         pattern_complexity_penalty=PATTERN_COMPLEXITY_PENALTY,
+        small_width_limit=SMALL_WIDTH_LIMIT,
+        max_small_width_per_pattern=MAX_SMALL_WIDTH_PER_PATTERN,
     ):
         self.df_spec_pre = df_spec_pre.copy()
         self.max_width = int(max_width)
@@ -46,6 +52,8 @@ class RollSLOptimize:
         self.composite_max = max(self.composite_min, int(composite_max))
         self.composite_penalty = float(composite_penalty)
         self.pattern_complexity_penalty = float(pattern_complexity_penalty)
+        self.small_width_limit = int(small_width_limit)
+        self.max_small_width_per_pattern = int(max_small_width_per_pattern)
 
         demand_col_candidates = ['주문수량', '주문롤수', 'order_roll_cnt']
         self.demand_column = next((c for c in demand_col_candidates if c in self.df_spec_pre.columns), None)
@@ -81,6 +89,7 @@ class RollSLOptimize:
         self._prepare_items()
 
         self.items = list(self.item_info.keys())
+        self.max_demand = max(self.demands.values()) if self.demands else 1
 
     def _prepare_items(self):
         for item, width in self.base_item_widths.items():
@@ -166,9 +175,46 @@ class RollSLOptimize:
     def _rebuild_pattern_cache(self):
         self.pattern_keys = {frozenset(p.items()) for p in self.patterns}
 
+    def _small_units_for_item(self, item_name):
+        """
+        Returns the count of small-width (<= limit) rolls contributed by an item.
+        Only pure single-width items (단폭) are subject to the cap; composite items are ignored.
+        """
+        piece_count = self.item_piece_count.get(item_name, 0)
+        if piece_count != 1:
+            return 0
+        composition = self.item_composition.get(item_name, {})
+        if len(composition) != 1:
+            return 0
+        base_item, qty = next(iter(composition.items()))
+        base_width = self.base_item_widths.get(base_item, 0)
+        if 0 < base_width <= self.small_width_limit:
+            return qty
+        return 0
+
+    def _count_small_width_units(self, pattern):
+        """패턴 내부의 소폭(기준 이하) 롤 수를 계산합니다."""
+        return sum(self._small_units_for_item(item_name) * count for item_name, count in pattern.items())
+
+    def _is_mixed_composite(self, item_name):
+        composition = self.item_composition.get(item_name, {})
+        if not composition:
+            return False
+        if len(composition) == 1:
+            return False
+        return True
+
+    def _count_mixed_composites(self, pattern):
+        return sum(
+            count for item_name, count in pattern.items()
+            if self._is_mixed_composite(item_name)
+        )
+
     def _add_pattern(self, pattern):
         key = frozenset(pattern.items())
         if key in self.pattern_keys:
+            return False
+        if self._count_small_width_units(pattern) > self.max_small_width_per_pattern:
             return False
         self.patterns.append(dict(pattern))
         self.pattern_keys.add(key)
@@ -236,10 +282,14 @@ class RollSLOptimize:
                 item_width = self.item_info[item]
                 if item_width <= 0 or item_width > self.max_width:
                     continue
+                item_small_units = self._small_units_for_item(item)
+                if item_small_units > self.max_small_width_per_pattern:
+                    continue
 
                 pattern = {item: 1}
                 current_width = item_width
                 current_pieces = 1
+                current_small_units = item_small_units
 
                 while current_pieces < self.max_pieces:
                     remaining_width = self.max_width - current_width
@@ -250,6 +300,9 @@ class RollSLOptimize:
                             continue
                         if candidate_width > remaining_width:
                             continue
+                        candidate_small = self._small_units_for_item(candidate)
+                        if current_small_units + candidate_small > self.max_small_width_per_pattern:
+                            continue
                         best_fit_item = candidate
                         break
                     if not best_fit_item:
@@ -257,6 +310,7 @@ class RollSLOptimize:
                     pattern[best_fit_item] = pattern.get(best_fit_item, 0) + 1
                     current_width += self.item_info[best_fit_item]
                     current_pieces += 1
+                    current_small_units += self._small_units_for_item(best_fit_item)
 
                 while current_width < self.min_width and current_pieces < self.max_pieces:
                     remaining_width = self.max_width - current_width
@@ -267,6 +321,9 @@ class RollSLOptimize:
                             continue
                         if candidate_width > remaining_width:
                             continue
+                        candidate_small = self._small_units_for_item(candidate)
+                        if current_small_units + candidate_small > self.max_small_width_per_pattern:
+                            continue
                         add_item = candidate
                         break
                     if not add_item:
@@ -274,6 +331,7 @@ class RollSLOptimize:
                     pattern[add_item] = pattern.get(add_item, 0) + 1
                     current_width += self.item_info[add_item]
                     current_pieces += 1
+                    current_small_units += self._small_units_for_item(add_item)
 
                 if current_width >= self.min_width and current_pieces <= self.max_pieces:
                     self._add_pattern(pattern)
@@ -287,6 +345,10 @@ class RollSLOptimize:
             num_items = min(max_repeat_width, self.max_pieces)
             while num_items > 0:
                 total_width = item_width * num_items
+                small_units = self._small_units_for_item(item) * num_items
+                if small_units > self.max_small_width_per_pattern:
+                    num_items -= 1
+                    continue
                 if total_width >= self.min_width and num_items <= self.max_pieces:
                     if self._add_pattern({item: num_items}):
                         break
@@ -299,10 +361,14 @@ class RollSLOptimize:
             item_width = self.item_info[item]
             if item_width <= 0 or item_width > self.max_width:
                     continue
+            item_small_units = self._small_units_for_item(item)
+            if item_small_units > self.max_small_width_per_pattern:
+                continue
 
             pattern = {item: 1}
             current_width = item_width
             current_pieces = 1
+            current_small_units = item_small_units
 
             while current_width < self.min_width and current_pieces < self.max_pieces:
                 remaining_width = self.max_width - current_width
@@ -313,6 +379,9 @@ class RollSLOptimize:
                         continue
                     if candidate_width > remaining_width:
                         continue
+                    candidate_small = self._small_units_for_item(candidate)
+                    if current_small_units + candidate_small > self.max_small_width_per_pattern:
+                        continue
                     addition = candidate
                     break
                 if not addition:
@@ -320,6 +389,7 @@ class RollSLOptimize:
                 pattern[addition] = pattern.get(addition, 0) + 1
                 current_width += self.item_info[addition]
                 current_pieces += 1
+                current_small_units += self._small_units_for_item(addition)
 
             if current_width >= self.min_width and current_pieces <= self.max_pieces:
                 self._add_pattern(pattern)
@@ -337,11 +407,15 @@ class RollSLOptimize:
                 return
             total_width = sum(self.item_info[item] * count for item, count in pattern.items())
             total_pieces = sum(pattern.values())
-            if self.min_width <= total_width <= self.max_width and total_pieces <= self.max_pieces:
+            if (
+                self.min_width <= total_width <= self.max_width
+                and total_pieces <= self.max_pieces
+                and self._count_small_width_units(pattern) <= self.max_small_width_per_pattern
+            ):
                 all_patterns.append(dict(pattern))
                 seen_patterns.add(key)
 
-        def backtrack(start_index, current_pattern, current_width, current_pieces):
+        def backtrack(start_index, current_pattern, current_width, current_pieces, current_small_units):
             add_pattern(current_pattern)
             if current_pieces >= self.max_pieces or start_index >= len(item_list):
                 return
@@ -355,13 +429,16 @@ class RollSLOptimize:
                     continue
                 if current_pieces + 1 > self.max_pieces:
                     continue
+                item_small = self._small_units_for_item(item)
+                if current_small_units + item_small > self.max_small_width_per_pattern:
+                    continue
                 current_pattern[item] = current_pattern.get(item, 0) + 1
-                backtrack(i, current_pattern, current_width + item_width, current_pieces + 1)
+                backtrack(i, current_pattern, current_width + item_width, current_pieces + 1, current_small_units + item_small)
                 current_pattern[item] -= 1
                 if current_pattern[item] == 0:
                     del current_pattern[item]
 
-        backtrack(0, {}, 0, 0)
+        backtrack(0, {}, 0, 0, 0)
         self.patterns = all_patterns
         self._rebuild_pattern_cache()
 
@@ -405,9 +482,19 @@ class RollSLOptimize:
             j: self._count_pattern_composite_units(pattern)
             for j, pattern in enumerate(self.patterns)
         }
+        pattern_mixed_counts = {
+            j: self._count_mixed_composites(pattern)
+            for j, pattern in enumerate(self.patterns)
+        }
 
         total_trim_loss = solver.Sum(pattern_trim[j] * x[j] for j in range(len(self.patterns)))
-        total_over_penalty = solver.Sum(OVER_PROD_PENALTY * over_prod_vars[item] for item in self.demands)
+        over_prod_terms = []
+        base_demand = max(self.max_demand, 1)
+        for item in self.demands:
+            demand = max(self.demands[item], 1)
+            weight = min(OVER_PROD_WEIGHT_CAP, base_demand / demand)
+            over_prod_terms.append(OVER_PROD_PENALTY * weight * over_prod_vars[item])
+        total_over_penalty = solver.Sum(over_prod_terms) if over_prod_terms else solver.Sum([])
         total_under_penalty = solver.Sum(UNDER_PROD_PENALTY * under_prod_vars[item] for item in self.demands)
         total_complexity_penalty = solver.Sum(
             self.pattern_complexity_penalty * pattern_pieces[j] * x[j] for j in range(len(self.patterns))
@@ -415,9 +502,12 @@ class RollSLOptimize:
         total_composite_penalty = solver.Sum(
             self.composite_penalty * pattern_composite_units[j] * x[j] for j in range(len(self.patterns))
         )
+        total_mixed_penalty = solver.Sum(
+            MIXED_COMPOSITE_PENALTY * pattern_mixed_counts[j] * x[j] for j in range(len(self.patterns))
+        )
 
         solver.Minimize(total_trim_loss + total_over_penalty + total_under_penalty +
-                        total_complexity_penalty + total_composite_penalty)
+                        total_complexity_penalty + total_composite_penalty + total_mixed_penalty)
 
         # solver.Minimize(total_over_penalty + total_under_penalty +total_composite_penalty)
 
@@ -446,6 +536,8 @@ class RollSLOptimize:
                 continue
             composition = self.item_composition[item]
             item_value = sum(duals.get(base, 0) * qty for base, qty in composition.items())
+            if self._is_mixed_composite(item):
+                item_value -= MIXED_COMPOSITE_PENALTY * 0.05
             if item_value <= 0:
                 continue
             item_details.append((item, item_width, item_pieces, item_value))
@@ -497,6 +589,8 @@ class RollSLOptimize:
                 total_width = sum(self.item_info[name] * count for name, count in pattern.items())
                 if total_width < self.min_width or total_width > self.max_width:
                     continue
+                if self._count_small_width_units(pattern) > self.max_small_width_per_pattern:
+                    continue
                 key = frozenset(pattern.items())
                 if key in seen_patterns:
                     continue
@@ -532,6 +626,7 @@ class RollSLOptimize:
             pattern for pattern in self.patterns
             if self.min_width <= sum(self.item_info[item] * count for item, count in pattern.items()) <= self.max_width
             and sum(pattern.values()) <= self.max_pieces
+            and self._count_small_width_units(pattern) <= self.max_small_width_per_pattern
         ]
         if not self.patterns:
             return {"error": f"{self.min_width}mm 이상을 충족하는 패턴이 없습니다."}
@@ -608,11 +703,11 @@ class RollSLOptimize:
                 composite_units = max(0, self.item_piece_count[item_name] - 1) * num
                 if composite_units > 0:
                     composite_usage.append({
-                        'Prod_seq': prod_seq,
-                        'Item': item_name,
-                        'Composite_Width': item_width,
-                        'Components': dict(composition),
-                        'Count': roll_count * num
+                        'prod_seq': prod_seq,
+                        'item': item_name,
+                        'composite_width': item_width,
+                        'components': dict(composition),
+                        'count': roll_count * num
                     })
 
                 for base_item, qty in composition.items():
@@ -633,31 +728,31 @@ class RollSLOptimize:
                         'rollwidth': item_width,
                         'widths': (expanded_widths + [0] * 7)[:7],
                         'group_nos': (expanded_groups + [''] * 7)[:7],
-                        'Count': roll_count,
-                        'Prod_seq': prod_seq,
-                        'Roll_seq': roll_seq_counter
+                        'count': roll_count,
+                        'prod_seq': prod_seq,
+                        'roll_seq': roll_seq_counter
                     })
 
             loss = self.max_width - total_width
 
             result_patterns.append({
-                'Pattern': ', '.join(pattern_labels),
-                'Pattern_Width': total_width,
-                'Loss_per_Roll': loss,
-                'Count': roll_count,
-                'Prod_seq': prod_seq
+                'pattern': ', '.join(pattern_labels),
+                'pattern_width': total_width,
+                'loss_per_roll': loss,
+                'count': roll_count,
+                'prod_seq': prod_seq
             })
 
             pattern_details_for_db.append({
                 'widths': (widths_for_db + [0] * 8)[:8],
                 'group_nos': (group_nos_for_db + [''] * 8)[:8],
-                'Count': roll_count,
-                'Prod_seq': prod_seq,
+                'count': roll_count,
+                'prod_seq': prod_seq,
                 'composite_map': composite_meta_for_db
             })
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
-            df_patterns = df_patterns[['Pattern', 'Pattern_Width', 'Count', 'Loss_per_Roll']]
+            df_patterns = df_patterns[['pattern', 'pattern_width', 'count', 'loss_per_roll']]
 
         df_demand = pd.DataFrame.from_dict(self.demands, orient='index', columns=['요구롤수'])
         df_demand.index.name = 'group_order_no'
@@ -687,7 +782,7 @@ class RollSLOptimize:
             fulfillment_summary = fulfillment_summary[final_cols]
 
         return {
-            "pattern_result": df_patterns.sort_values('Count', ascending=False) if not df_patterns.empty else df_patterns,
+            "pattern_result": df_patterns.sort_values('count', ascending=False) if not df_patterns.empty else df_patterns,
             "pattern_details_for_db": pattern_details_for_db,
             "pattern_roll_details_for_db": pattern_roll_details_for_db,
             "fulfillment_summary": fulfillment_summary,

@@ -192,20 +192,20 @@ class Optimize:
                 loss = self.max_width - total_width
 
                 result_patterns.append({
-                    'Pattern': pattern_str,
-                    'Pattern_Width': total_width,
-                    'Count': int(round(count)),
-                    'Loss_per_Roll': loss
+                    'pattern': pattern_str,
+                    'pattern_width': total_width,
+                    'count': int(round(count)),
+                    'loss_per_roll': loss
                 })
                 pattern_details_for_db.append({
-                    'Count': int(round(count)),
+                    'count': int(round(count)),
                     'widths': (db_widths + [0] * 8)[:8],
                     'group_nos': (db_group_nos + [''] * 8)[:8]
                 })
 
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
-            df_patterns = df_patterns[['Pattern', 'Pattern_Width', 'Count', 'Loss_per_Roll']]
+            df_patterns = df_patterns[['pattern', 'pattern_width', 'count', 'loss_per_roll']]
 
         df_demand = pd.DataFrame.from_dict(self.demands, orient='index', columns=['Total_Ordered_per_Group'])
         df_demand.index.name = 'group_order_no'
@@ -219,7 +219,7 @@ class Optimize:
         fulfillment_summary = pd.merge(group_info_cols, df_summary.reset_index(), on='group_order_no')
 
         return {
-            "pattern_result": df_patterns.sort_values('Count', ascending=False),
+            "pattern_result": df_patterns.sort_values('count', ascending=False),
             "pattern_details_for_db": pattern_details_for_db,
             "fulfillment_summary": fulfillment_summary
         }

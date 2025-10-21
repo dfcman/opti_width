@@ -342,17 +342,17 @@ class RollOptimize:
                 loss = self.max_width - total_width
 
                 result_patterns.append({
-                    'Pattern': pattern_str,
-                    'Pattern_Width': total_width,
-                    'Loss_per_Roll': loss,
-                    'Count': int(round(count)),
-                    'Prod_seq': prod_seq
+                    'pattern': pattern_str,
+                    'pattern_width': total_width,
+                    'loss_per_roll': loss,
+                    'count': int(round(count)),
+                    'prod_seq': prod_seq
                 })
                 pattern_details_for_db.append({
                     'widths': (db_widths + [0] * 8)[:8],
                     'group_nos': (db_group_nos + [''] * 8)[:8],
-                    'Count': int(round(count)),
-                    'Prod_seq': prod_seq
+                    'count': int(round(count)),
+                    'prod_seq': prod_seq
                 })
                 
                 roll_seq_counter = 0
@@ -371,9 +371,9 @@ class RollOptimize:
                         'rollwidth': roll_width,
                         'widths': new_widths,
                         'group_nos': new_group_nos,
-                        'Count': int(round(count)),
-                        'Prod_seq': prod_seq,
-                        'Roll_seq': roll_seq_counter
+                        'count': int(round(count)),
+                        'prod_seq': prod_seq,
+                        'roll_seq': roll_seq_counter
                     })
 
                     cut_seq_counter = 0
@@ -381,21 +381,21 @@ class RollOptimize:
                         cut_seq_counter += 1
                         total_cut_seq_counter += 1
                         pattern_roll_cut_details_for_db.append({
-                            'PROD_SEQ': prod_seq,
-                            'UNIT_NO': prod_seq,
-                            'SEQ': total_cut_seq_counter,
-                            'ROLL_SEQ': roll_seq_counter,
-                            'CUT_SEQ': cut_seq_counter,
-                            'WIDTH': roll_width,
-                            'GROUP_NO': group_no,
-                            'WEIGHT': 0,  # Weight calculation might be needed here
-                            'TOTAL_LENGTH': 0, # Length calculation might be needed here
-                            'CUT_CNT': int(round(count))
+                            'prod_seq': prod_seq,
+                            'unit_no': prod_seq,
+                            'seq': total_cut_seq_counter,
+                            'roll_seq': roll_seq_counter,
+                            'cut_seq': cut_seq_counter,
+                            'width': roll_width,
+                            'group_no': group_no,
+                            'weight': 0,  # Weight calculation might be needed here
+                            'total_length': 0, # Length calculation might be needed here
+                            'count': int(round(count))
                         })
 
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
-            df_patterns = df_patterns[['Pattern', 'Pattern_Width', 'Count', 'Loss_per_Roll']]
+            df_patterns = df_patterns[['pattern', 'pattern_width', 'count', 'loss_per_roll']]
 
         df_demand = pd.DataFrame.from_dict(self.demands, orient='index', columns=['필요롤수'])
         df_demand.index.name = 'group_order_no'
@@ -419,7 +419,7 @@ class RollOptimize:
         fulfillment_summary = fulfillment_summary[available_final_cols]
 
         return {
-            "pattern_result": df_patterns.sort_values('Count', ascending=False),
+            "pattern_result": df_patterns.sort_values('count', ascending=False),
             "pattern_details_for_db": pattern_details_for_db,
             "pattern_roll_details_for_db": pattern_roll_details_for_db,
             "pattern_roll_cut_details_for_db": pattern_roll_cut_details_for_db,
