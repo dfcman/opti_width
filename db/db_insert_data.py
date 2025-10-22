@@ -170,6 +170,16 @@ class DataInserters:
         # As per the user's request, this function will call a stored procedure.
         # The user did not specify if old data should be deleted.
 
+        # Call the stored procedure with named parameters to ensure correctness
+        cursor.callproc("SP_JP_GEN_SHEETINFO_BUF", keyword_parameters={
+            'a_module': 'C',
+            'a_plant': plant,
+            'a_pm_no': ' ',
+            'a_schedule_unit': schedule_unit,
+            'a_lot_no': lot_no,
+            'a_version': version
+        })
+
         # Create a variable for the IN OUT cursor parameter
         out_cursor = cursor.var(oracledb.DB_TYPE_CURSOR)
 
