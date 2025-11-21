@@ -730,7 +730,8 @@ class RollSLOptimize:
                         'group_nos': (expanded_groups + [''] * 7)[:7],
                         'count': roll_count,
                         'prod_seq': prod_seq,
-                        'roll_seq': roll_seq_counter
+                        'roll_seq': roll_seq_counter,
+                        'rs_gubun': 'R',
                     })
 
             loss = self.max_width - total_width
@@ -740,7 +741,8 @@ class RollSLOptimize:
                 'pattern_width': total_width,
                 'loss_per_roll': loss,
                 'count': roll_count,
-                'prod_seq': prod_seq
+                'prod_seq': prod_seq,
+                'rs_gubun': 'R',
             })
 
             pattern_details_for_db.append({
@@ -748,7 +750,8 @@ class RollSLOptimize:
                 'group_nos': (group_nos_for_db + [''] * 8)[:8],
                 'count': roll_count,
                 'prod_seq': prod_seq,
-                'composite_map': composite_meta_for_db
+                'composite_map': composite_meta_for_db,
+                'rs_gubun': 'R',
             })
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:

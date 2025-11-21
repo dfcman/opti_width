@@ -204,7 +204,7 @@ class SheetOptimizeCa:
             roll_count = int(round(count))
             pattern = self.patterns[j]
             pattern_comp = pattern['composition']
-            pattern_len = pattern['length']
+            pattern_length = pattern['length']
 
             prod_seq_counter += 1
 
@@ -235,7 +235,7 @@ class SheetOptimizeCa:
             result_patterns.append({
                 'pattern': ' + '.join(pattern_item_strs),
                 'wd_width': total_width,
-                'roll_length': round(pattern_len, 2),
+                'roll_length': round(pattern_length, 2),
                 'count': roll_count,
                 'loss_per_roll': pattern['loss_per_roll']
             })
@@ -282,12 +282,13 @@ class SheetOptimizeCa:
 
                     pattern_roll_details_for_db.append({
                         'rollwidth': composite_width,
-                        'roll_production_length': pattern_len,
+                        'pattern_length': pattern_length,
                         'widths': (base_widths_for_item + [0] * 7)[:7],
                         'group_nos': (base_group_nos_for_item + [''] * 7)[:7],
                         'count': roll_count,
                         'prod_seq': prod_seq_counter,
-                        'roll_seq': roll_seq_counter
+                        'roll_seq': roll_seq_counter,
+                        'rs_gubun': 'S'
                     })
 
                     cut_seq_counter = 0
@@ -298,7 +299,7 @@ class SheetOptimizeCa:
                             total_cut_seq_counter += 1
                             group_no = base_group_nos_for_item[i]
                             
-                            weight = (self.b_wgt * (width / 1000) * pattern_len)
+                            weight = (self.b_wgt * (width / 1000) * pattern_length)
 
                             pattern_roll_cut_details_for_db.append({
                                 'prod_seq': prod_seq_counter,
@@ -309,23 +310,25 @@ class SheetOptimizeCa:
                                 'width': width,
                                 'group_no': group_no,
                                 'weight': weight,
-                                'total_length': pattern_len,
+                                'pattern_length': pattern_length,
                                 'count': roll_count,
                                 'cut_cnt': roll_count,
+                                'rs_gubun': 'S',
                             })
 
             pattern_details_for_db.append({
-                'roll_production_length': pattern_len,
+                'pattern_length': pattern_length,
                 'count': roll_count,
                 'widths': (composite_widths_for_db + [0] * 8)[:8],
                 'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
-                'prod_seq': prod_seq_counter
+                'prod_seq': prod_seq_counter,
+                'rs_gubun': 'S',
             })
 
             # Batch update demand tracker
             base_counts_in_roll = Counter(all_base_pieces_in_roll)
             for base_width, num_in_roll in base_counts_in_roll.items():
-                produced_meters = num_in_roll * pattern_len * roll_count
+                produced_meters = num_in_roll * pattern_length * roll_count
                 
                 relevant_orders = demand_tracker[demand_tracker['지폭'] == base_width].index
                 

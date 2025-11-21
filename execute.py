@@ -34,7 +34,7 @@ def process_roll_lot(
     df_orders['lot_no'] = lot_no
     df_orders['version'] = version
 
-    group_cols = ['지폭', '롤길이', '등급']
+    group_cols = ['지폭', '롤길이', '등급', '오더번호']
     for col in ['지폭', '롤길이']:
         df_orders[col] = pd.to_numeric(df_orders[col])
     df_orders['등급'] = df_orders['등급'].astype(str)

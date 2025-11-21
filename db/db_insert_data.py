@@ -29,13 +29,14 @@ class DataInserters:
             INSERT INTO th_pattern_sequence (
                 module, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt,
                 lot_no, version, prod_seq, unit_no, seq, length, pok_cnt, 
-                wd_width, 
+                wd_width, spool_no, spool_seq, rs_gubun,
                 rollwidth1, rollwidth2, rollwidth3, rollwidth4, rollwidth5, rollwidth6, rollwidth7, rollwidth8,
                 groupno1, groupno2, groupno3, groupno4, groupno5, groupno6, groupno7, groupno8
             ) VALUES (
                 'C', :plant, :pm_no, :schedule_unit, :max_width, :paper_type, :b_wgt,
                 :lot_no, :version, :prod_seq, :unit_no, :seq, :length, :pok_cnt,
                 :w1 + :w2 + :w3 + :w4 + :w5 + :w6 + :w7 + :w8,
+                :spool_no, :spool_seq, :rs_gubun,
                 :w1, :w2, :w3, :w4, :w5, :w6, :w7, :w8,
                 :g1, :g2, :g3, :g4, :g5, :g6, :g7, :g8
             )
@@ -54,8 +55,11 @@ class DataInserters:
                     'max_width': max_width, 'paper_type': paper_type, 'b_wgt': b_wgt,
                     'lot_no': lot_no, 'version': version, 'prod_seq': prod_seq,
                     'unit_no': prod_seq, 'seq': seq + 1,
-                    'length': pattern.get('roll_production_length', 0),
+                    'length': pattern.get('pattern_length', 0),
                     'pok_cnt': pok_cnt_value,
+                    'spool_no': prod_seq, 'spool_seq': seq + 1,
+                    # 'rs_gubun': self._get_rs_gubun(pattern),
+                    'rs_gubun': pattern['rs_gubun'],
                     'w1': pattern['widths'][0], 'w2': pattern['widths'][1],
                     'w3': pattern['widths'][2], 'w4': pattern['widths'][3],
                     'w5': pattern['widths'][4], 'w6': pattern['widths'][5],
@@ -80,13 +84,13 @@ class DataInserters:
             INSERT INTO th_roll_sequence (
                 module, plant, pm_no, schedule_unit, paper_type, b_wgt,
                 lot_no, version, prod_seq, unit_no, seq, roll_seq, pok_cnt,
-                rollwidth, 
+                rollwidth, length, spool_no, spool_seq, rs_gubun,
                 width1, width2, width3, width4, width5, width6, width7,
                 group1, group2, group3, group4, group5, group6, group7
             ) VALUES (
-                'R', :plant, :pm_no, :schedule_unit, :paper_type, :b_wgt,
+                'C', :plant, :pm_no, :schedule_unit, :paper_type, :b_wgt,
                 :lot_no, :version, :prod_seq, :unit_no, :seq, :roll_seq, :pok_cnt,
-                :rollwidth,
+                :rollwidth, :length, :spool_no, :spool_seq, :rs_gubun,
                 :w1, :w2, :w3, :w4, :w5, :w6, :w7,
                 :g1, :g2, :g3, :g4, :g5, :g6, :g7
             )
@@ -105,6 +109,11 @@ class DataInserters:
                     'version': version, 'prod_seq': prod_seq, 'unit_no': prod_seq,
                     'seq':seq + 1, 'roll_seq': roll_seq, 'pok_cnt': pok_cnt_value,
                     'rollwidth': roll_detail['rollwidth'],
+                    'length': roll_detail['pattern_length'],
+                    'spool_no': prod_seq, 
+                    'spool_seq': seq + 1,
+                    # 'rs_gubun': self._get_rs_gubun(roll_detail),
+                    'rs_gubun': roll_detail['rs_gubun'],
                     'w1': roll_detail['widths'][0], 'w2': roll_detail['widths'][1],
                     'w3': roll_detail['widths'][2], 'w4': roll_detail['widths'][3],
                     'w5': roll_detail['widths'][4], 'w6': roll_detail['widths'][5],
@@ -129,10 +138,12 @@ class DataInserters:
             INSERT INTO th_cut_sequence (
                 MODULE, PLANT, PM_NO, SCHEDULE_UNIT, LOT_NO, VERSION, 
                 PROD_SEQ, UNIT_NO, SEQ, ROLL_SEQ, CUT_SEQ, WIDTH, GROUP_NO, 
+                SPOOL_NO, SPOOL_SEQ,
                 WEIGHT, TOTAL_LENGTH, CUT_CNT, PAPER_TYPE, B_WGT
             ) VALUES (
                 'C', :plant, :pm_no, :schedule_unit, :lot_no, :version, 
                 :prod_seq, :unit_no, :seq, :roll_seq, :cut_seq, :width, :group_no, 
+                :spool_no, :spool_seq,
                 :weight, :total_length, :cut_cnt, :paper_type, :b_wgt
             )
         """
@@ -146,12 +157,14 @@ class DataInserters:
                     'prod_seq': cut_detail['prod_seq'], 
                     'unit_no': cut_detail['unit_no'],
                     'seq': seq + 1, 
+                    'spool_no': cut_detail['prod_seq'], 
+                    'spool_seq': seq + 1,
                     'roll_seq': cut_detail['roll_seq'],
                     'cut_seq': cut_detail['cut_seq'], 
                     'width': cut_detail['width'],
                     'group_no': cut_detail['group_no'], 
                     'weight': cut_detail['weight'],
-                    'total_length': cut_detail['total_length'],
+                    'total_length': cut_detail['pattern_length'],
                     'cut_cnt': 1, 
                     'paper_type': paper_type,
                     'b_wgt': b_wgt
@@ -180,17 +193,17 @@ class DataInserters:
             'a_version': version
         })
 
-        # Create a variable for the IN OUT cursor parameter
-        out_cursor = cursor.var(oracledb.DB_TYPE_CURSOR)
+        # # Create a variable for the IN OUT cursor parameter
+        # out_cursor = cursor.var(oracledb.DB_TYPE_CURSOR)
 
-        # Call the stored procedure with named parameters to ensure correctness
-        cursor.callproc("PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO", keyword_parameters={
-            'P_PLANT': plant,
-            'P_SCHEDULE_UNIT': schedule_unit,
-            'P_LOT_NO': lot_no,
-            'P_VERSION': version,
-            'C_SN': out_cursor
-        })
+        # # Call the stored procedure with named parameters to ensure correctness
+        # cursor.callproc("PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO", keyword_parameters={
+        #     'P_PLANT': plant,
+        #     'P_SCHEDULE_UNIT': schedule_unit,
+        #     'P_LOT_NO': lot_no,
+        #     'P_VERSION': version,
+        #     'C_SN': out_cursor
+        # })
 
         # You can now fetch results from the out_cursor if needed, for example:
         # result_cursor = out_cursor.getvalue()

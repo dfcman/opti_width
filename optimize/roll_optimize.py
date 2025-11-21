@@ -9,6 +9,7 @@ CG_NO_IMPROVEMENT_LIMIT = 25
 CG_SUBPROBLEM_TOP_N = 3
 SMALL_PROBLEM_THRESHOLD = 10
 FINAL_MIP_TIME_LIMIT_MS = 60000
+PATTERN_SETUP_COST = 300.0 # 새로운 패턴 종류를 1개 사용할 때마다 500mm의 손실과 동일한 페널티
 
 class RollOptimize:
     
@@ -22,6 +23,7 @@ class RollOptimize:
         self.demands = df_spec_pre.groupby('group_order_no')['주문수량'].sum().to_dict()
         self.items = list(self.demands.keys())
         self.item_info = df_spec_pre.set_index('group_order_no')['지폭'].to_dict()
+        self.length_info = df_spec_pre.set_index('group_order_no')['롤길이'].to_dict()
 
     def _clear_patterns(self):
         self.patterns = []
@@ -149,7 +151,24 @@ class RollOptimize:
         total_over_penalty = solver.Sum(OVER_PROD_PENALTY * self.item_info[item] * over_prod_vars[item]
                                         for item in self.demands)
         
-        solver.Minimize(total_trim_loss + total_over_penalty)
+        objective = total_trim_loss + total_over_penalty
+
+        if is_final_mip:
+            # y_j = 1 if pattern j is used, 0 otherwise
+            y = {j: solver.BoolVar(f'y_{j}') for j in range(len(self.patterns))}
+
+            # A loose upper bound on how many times a pattern can be used.
+            M = sum(self.demands.values()) + 1
+            for j in range(len(self.patterns)):
+                solver.Add(x[j] <= M * y[j])
+
+            # Add setup cost to objective
+            total_setup_cost = solver.Sum(
+                y[j] * PATTERN_SETUP_COST for j in range(len(self.patterns))
+            )
+            objective += total_setup_cost
+
+        solver.Minimize(objective)
 
         status = solver.Solve()
         if status not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
@@ -330,35 +349,44 @@ class RollOptimize:
                 pattern_dict = self.patterns[j]
                 prod_seq += 1
                 
-                db_widths, db_group_nos = [], []
+                db_widths, db_group_nos, db_lengths = [], [], []
                 for group_no, num in pattern_dict.items():
                     width = self.item_info[group_no]
+                    length = self.length_info.get(group_no, 0)
                     db_widths.extend([width] * num)
                     db_group_nos.extend([group_no] * num)
+                    db_lengths.extend([length] * num)
                     production_counts[group_no] += int(round(count)) * num
                 
                 pattern_str = ', '.join(map(str, sorted(db_widths, reverse=True)))
                 total_width = sum(db_widths)
                 loss = self.max_width - total_width
+                
+                pattern_length = db_lengths[0] if db_lengths and db_lengths[0] is not None else 0
 
                 result_patterns.append({
                     'pattern': pattern_str,
                     'pattern_width': total_width,
                     'loss_per_roll': loss,
                     'count': int(round(count)),
-                    'prod_seq': prod_seq
+                    'prod_seq': prod_seq,
+                    'rs_gubun': 'R',
+                    'pattern_length': pattern_length
                 })
                 pattern_details_for_db.append({
                     'widths': (db_widths + [0] * 8)[:8],
                     'group_nos': (db_group_nos + [''] * 8)[:8],
                     'count': int(round(count)),
-                    'prod_seq': prod_seq
+                    'prod_seq': prod_seq,
+                    'rs_gubun': 'R',
+                    'pattern_length': pattern_length
                 })
                 
                 roll_seq_counter = 0
                 for i in range(len(db_widths)):
                     roll_width = db_widths[i]
                     group_no = db_group_nos[i]
+                    roll_length = self.length_info.get(group_no, 0)
                     roll_seq_counter += 1
                     
                     new_widths = [0] * 8
@@ -369,11 +397,13 @@ class RollOptimize:
                     
                     pattern_roll_details_for_db.append({
                         'rollwidth': roll_width,
+                        'pattern_length': roll_length,
                         'widths': new_widths,
                         'group_nos': new_group_nos,
                         'count': int(round(count)),
                         'prod_seq': prod_seq,
-                        'roll_seq': roll_seq_counter
+                        'roll_seq': roll_seq_counter,
+                        'rs_gubun': 'R'
                     })
 
                     cut_seq_counter = 0
@@ -386,16 +416,17 @@ class RollOptimize:
                             'seq': total_cut_seq_counter,
                             'roll_seq': roll_seq_counter,
                             'cut_seq': cut_seq_counter,
+                            'rs_gubun': 'R',
                             'width': roll_width,
                             'group_no': group_no,
                             'weight': 0,  # Weight calculation might be needed here
-                            'total_length': 0, # Length calculation might be needed here
+                            'pattern_length': roll_length,
                             'count': int(round(count))
                         })
 
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
-            df_patterns = df_patterns[['pattern', 'pattern_width', 'count', 'loss_per_roll']]
+            df_patterns = df_patterns[['pattern', 'pattern_width', 'count', 'loss_per_roll', 'pattern_length']]
 
         df_demand = pd.DataFrame.from_dict(self.demands, orient='index', columns=['필요롤수'])
         df_demand.index.name = 'group_order_no'

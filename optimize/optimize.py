@@ -195,12 +195,14 @@ class Optimize:
                     'pattern': pattern_str,
                     'pattern_width': total_width,
                     'count': int(round(count)),
-                    'loss_per_roll': loss
+                    'loss_per_roll': loss,
+                    'rs_gubun': 'R'
                 })
                 pattern_details_for_db.append({
                     'count': int(round(count)),
                     'widths': (db_widths + [0] * 8)[:8],
-                    'group_nos': (db_group_nos + [''] * 8)[:8]
+                    'group_nos': (db_group_nos + [''] * 8)[:8],
+                    'rs_gubun': 'R'
                 })
 
         df_patterns = pd.DataFrame(result_patterns)

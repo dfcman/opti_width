@@ -751,12 +751,13 @@ class SheetOptimize:
 
                     pattern_roll_details_for_db.append({
                         'rollwidth': composite_width,
-                        'roll_production_length': self.sheet_roll_length,
+                        'pattern_length': self.sheet_roll_length,
                         'widths': (base_widths_for_item + [0] * 7)[:7],
                         'group_nos': (base_group_nos_for_item + [''] * 7)[:7],
                         'count': roll_count, # Changed from 1
                         'prod_seq': prod_seq_counter,
-                        'roll_seq': roll_seq_counter
+                        'roll_seq': roll_seq_counter,
+                        'rs_gubun': 'S',
                     })
 
                     cut_seq_counter = 0
@@ -778,16 +779,18 @@ class SheetOptimize:
                                 'width': width,
                                 'group_no': group_no,
                                 'weight': weight,
-                                'total_length': self.sheet_roll_length,
+                                'pattern_length': self.sheet_roll_length,
                                 'count': roll_count, # Changed from len(...)
+                                'rs_gubun': 'S',
                             })
 
             pattern_details_for_db.append({
-                'roll_production_length': self.sheet_roll_length,
+                'pattern_length': self.sheet_roll_length,
                 'count': roll_count,
                 'widths': (composite_widths_for_db + [0] * 8)[:8],
                 'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
                 'prod_seq': prod_seq_counter,
+                'rs_gubun': 'S',
             })
 
             # Batch update demand tracker
