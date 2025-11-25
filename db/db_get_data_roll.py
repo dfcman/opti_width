@@ -9,7 +9,8 @@ class RollGetters:
             #
             sql_query = """
                 SELECT
-                    plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no 
+                    plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no,
+                    core, dia, pattern
                 FROM
                     h3t_production_order
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -20,7 +21,7 @@ class RollGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no = row
+                plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no, core, dia, pattern = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -33,7 +34,10 @@ class RollGetters:
                     '주문톤': float(order_ton_cnt),
                     '롤길이': int(roll_length),
                     '등급': quality_grade,
-                    '수출내수': export_type
+                    '수출내수': export_type,
+                    'core': core,
+                    'dia': dia,
+                    'order_pattern': pattern
                 })
             print(f"Successfully fetched {len(raw_orders)} roll orders for lot {paper_prod_seq}")
             return raw_orders

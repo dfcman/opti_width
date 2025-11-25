@@ -1,15 +1,15 @@
 import pandas as pd
 from ortools.linear_solver import pywraplp
 
-OVER_PROD_PENALTY = 200.0
+OVER_PROD_PENALTY = 1000000.0
 UNDER_PROD_PENALTY = 10000.0
 PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6
 CG_MAX_ITERATIONS = 200
 CG_NO_IMPROVEMENT_LIMIT = 25
 CG_SUBPROBLEM_TOP_N = 3
 SMALL_PROBLEM_THRESHOLD = 10
-FINAL_MIP_TIME_LIMIT_MS = 60000
-PATTERN_SETUP_COST = 300.0 # 새로운 패턴 종류를 1개 사용할 때마다 500mm의 손실과 동일한 페널티
+FINAL_MIP_TIME_LIMIT_MS = 120000
+PATTERN_SETUP_COST = 50000.0 # 새로운 패턴 종류를 1개 사용할 때마다 50000mm의 손실과 동일한 페널티
 
 class RollOptimize:
     
@@ -123,7 +123,7 @@ class RollOptimize:
                 else:
                     self._add_pattern({item: 1})
 
-    def _solve_master_problem(self, is_final_mip=False):
+    def _solve_master_problem(self, is_final_mip=False, max_patterns=None):
         solver_name = 'SCIP' if is_final_mip else 'GLOP'
         solver = pywraplp.Solver.CreateSolver(solver_name)
         if not solver:
@@ -148,10 +148,15 @@ class RollOptimize:
                 f'demand_{item}'
             )
 
-        total_over_penalty = solver.Sum(OVER_PROD_PENALTY * self.item_info[item] * over_prod_vars[item]
+        # Dynamic penalty calculation based on the number of UNIQUE widths
+        # This ensures penalty > potential pattern reduction savings
+        unique_widths_count = len(set(self.item_info.values()))
+        dynamic_over_prod_penalty = max(OVER_PROD_PENALTY, PATTERN_SETUP_COST * unique_widths_count * 20)
+
+        total_over_penalty = solver.Sum(dynamic_over_prod_penalty * over_prod_vars[item]
                                         for item in self.demands)
         
-        objective = total_trim_loss + total_over_penalty
+        objective = total_over_penalty
 
         if is_final_mip:
             # y_j = 1 if pattern j is used, 0 otherwise
@@ -167,6 +172,9 @@ class RollOptimize:
                 y[j] * PATTERN_SETUP_COST for j in range(len(self.patterns))
             )
             objective += total_setup_cost
+
+            # if max_patterns is not None:
+            #     solver.Add(solver.Sum(y[j] for j in range(len(self.patterns))) <= max_patterns)
 
         solver.Minimize(objective)
 
@@ -252,7 +260,7 @@ class RollOptimize:
     def _generate_all_patterns(self):
         all_patterns = []
         seen_patterns = set()
-        item_list = list(self.items)
+        item_list = sorted(list(self.items), key=lambda item: self.item_info[item], reverse=True)
 
         def add_pattern_from_state(pattern):
             if not pattern:
@@ -284,6 +292,45 @@ class RollOptimize:
         find_combinations_recursive(0, {}, 0, 0)
         self.patterns = [dict(p) for p in all_patterns]
         self._rebuild_pattern_cache()
+
+    def _minimize_pattern_count(self, current_solution):
+        """
+        주어진 해에서 패턴 수를 1~2개 줄여보려고 시도하고,
+        비용(Objective Value)이 가장 낮은 해를 선택합니다.
+        """
+        best_solution = current_solution
+        min_objective = current_solution['objective']
+        
+        current_pattern_count = sum(1 for count in current_solution['pattern_counts'].values() if count > 0.99)
+        
+        print(f"Initial pattern count: {current_pattern_count}, Objective: {min_objective}")
+
+        # Try to reduce by 1, then by 2
+        for i in range(1, 3):
+            target_pattern_count = current_pattern_count - i
+            if target_pattern_count <= 0:
+                break
+
+            print(f"Trying to reduce pattern count to {target_pattern_count}...")
+            
+            new_solution = self._solve_master_problem(is_final_mip=True, max_patterns=target_pattern_count)
+            
+            if new_solution:
+                print(f"Success! Found feasible solution with {target_pattern_count} patterns. Objective: {new_solution['objective']}")
+                
+                # If the new solution's cost is lower, update the best solution
+                if new_solution['objective'] < min_objective:
+                    print(f"  -> New best solution found! (Cost reduced: {min_objective} -> {new_solution['objective']})")
+                    best_solution = new_solution
+                    min_objective = new_solution['objective']
+                else:
+                    print(f"  -> Cost is not lower than best (Current: {new_solution['objective']} >= Best: {min_objective}). Keeping best.")
+            else:
+                print(f"Failed to find solution with {target_pattern_count} patterns.")
+
+        final_count = sum(1 for count in best_solution['pattern_counts'].values() if count > 0.99)
+        print(f"Final selected pattern count: {final_count}, Final Objective: {min_objective}")
+        return best_solution
 
     def run_optimize(self, start_prod_seq=0):
         if len(self.items) <= SMALL_PROBLEM_THRESHOLD:
@@ -332,6 +379,9 @@ class RollOptimize:
         final_solution = self._solve_master_problem(is_final_mip=True)
         if not final_solution:
             return {"error": f"최종 해를 찾을 수 없습니다. {self.min_width}mm 이상을 충족하는 주문이 부족했을 수 있습니다."}
+
+        # Try to minimize pattern count further
+        # final_solution = self._minimize_pattern_count(final_solution)
 
         return self._format_results(final_solution, start_prod_seq)
 
