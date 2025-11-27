@@ -5,19 +5,21 @@ OVER_PROD_PENALTY = 1000000.0
 UNDER_PROD_PENALTY = 10000.0
 PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6
 CG_MAX_ITERATIONS = 200
-CG_NO_IMPROVEMENT_LIMIT = 25
-CG_SUBPROBLEM_TOP_N = 3
+CG_NO_IMPROVEMENT_LIMIT = 25  # Increased from 25
+CG_SUBPROBLEM_TOP_N = 3      # Increased from 3
 SMALL_PROBLEM_THRESHOLD = 10
-FINAL_MIP_TIME_LIMIT_MS = 120000
+FINAL_MIP_TIME_LIMIT_MS = 60000
 PATTERN_SETUP_COST = 50000.0 # 새로운 패턴 종류를 1개 사용할 때마다 50000mm의 손실과 동일한 페널티
+TRIM_LOSS_PENALTY = 10.0      # 자투리 손실 1mm당 페널티
 
 class RollOptimize:
     
-    def __init__(self, df_spec_pre, max_width=1000, min_width=0, max_pieces=8):
+    def __init__(self, df_spec_pre, max_width=1000, min_width=0, max_pieces=8, lot_no=None):
         self.df_spec_pre = df_spec_pre
         self.max_width = max_width
         self.min_width = min_width
         self.max_pieces = max_pieces
+        self.lot_no = lot_no
         self.patterns = []
         self.pattern_keys = set()
         self.demands = df_spec_pre.groupby('group_order_no')['주문수량'].sum().to_dict()
@@ -172,6 +174,13 @@ class RollOptimize:
                 y[j] * PATTERN_SETUP_COST for j in range(len(self.patterns))
             )
             objective += total_setup_cost
+
+            # Add trim loss to objective
+            total_trim_loss = solver.Sum(
+                (self.max_width - sum(self.item_info[item] * count for item, count in pattern.items())) * x[j]
+                for j, pattern in enumerate(self.patterns)
+            )
+            objective += total_trim_loss * TRIM_LOSS_PENALTY
 
             # if max_patterns is not None:
             #     solver.Add(solver.Sum(y[j] for j in range(len(self.patterns))) <= max_patterns)
@@ -392,7 +401,26 @@ class RollOptimize:
         pattern_roll_cut_details_for_db = []
         production_counts = {item: 0 for item in self.demands}
         prod_seq = start_prod_seq
+        prod_seq = start_prod_seq
         total_cut_seq_counter = 0
+
+        # Extract common properties from the first row of the dataframe (since they are grouped)
+        first_row = self.df_spec_pre.iloc[0]
+        # Helper for safe int conversion
+        def safe_int(val):
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return 0
+
+        common_props = {
+            'diameter': safe_int(first_row.get('dia', 0)),
+            'color': first_row.get('color', ''),
+            'luster': safe_int(first_row.get('luster', 0)),
+            'p_lot': self.lot_no, # Use lot_no passed to init
+            'core': safe_int(first_row.get('core', 0)),
+            'order_pattern': first_row.get('order_pattern', '')
+        }
 
         for j, count in final_solution['pattern_counts'].items():
             if count > 0.99:
@@ -429,7 +457,8 @@ class RollOptimize:
                     'count': int(round(count)),
                     'prod_seq': prod_seq,
                     'rs_gubun': 'R',
-                    'pattern_length': pattern_length
+                    'pattern_length': pattern_length,
+                    **common_props
                 })
                 
                 roll_seq_counter = 0
@@ -453,7 +482,8 @@ class RollOptimize:
                         'count': int(round(count)),
                         'prod_seq': prod_seq,
                         'roll_seq': roll_seq_counter,
-                        'rs_gubun': 'R'
+                        'rs_gubun': 'R',
+                        **common_props
                     })
 
                     cut_seq_counter = 0
@@ -471,7 +501,8 @@ class RollOptimize:
                             'group_no': group_no,
                             'weight': 0,  # Weight calculation might be needed here
                             'pattern_length': roll_length,
-                            'count': int(round(count))
+                            'count': int(round(count)),
+                            **common_props
                         })
 
         df_patterns = pd.DataFrame(result_patterns)

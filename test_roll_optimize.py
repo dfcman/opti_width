@@ -42,7 +42,7 @@ def test_roll_optimization():
     optimizer2 = RollOptimize(
         df_spec_pre=df_spec_pre2,
         max_width=4880, # Changed from 1000 to 4880
-        min_width=900,
+        min_width=4500,
         max_pieces=10
     )
     

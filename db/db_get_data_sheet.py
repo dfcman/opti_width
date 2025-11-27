@@ -18,7 +18,7 @@ class SheetGetters:
 
             sql_query = """
                 SELECT
-                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no
+                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color
                 FROM
                     h3t_production_order
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -30,7 +30,7 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -41,7 +41,8 @@ class SheetGetters:
                     '세로': int(length),
                     '주문톤': float(order_ton_cnt),
                     '등급': quality_grade,
-                    '수출내수': export_type
+                    '수출내수': export_type,
+                    'color': color
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders
@@ -69,7 +70,7 @@ class SheetGetters:
 
             sql_query = """
                 SELECT
-                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no
+                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color
                 FROM
                     hsfp_st.h3t_production_order@hsfp_st_rlink
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -82,7 +83,7 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -93,7 +94,8 @@ class SheetGetters:
                     '세로': int(length),
                     '주문톤': float(order_ton_cnt),
                     '등급': quality_grade,
-                    '수출내수': export_type
+                    '수출내수': export_type,
+                    'color': color
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders
@@ -121,7 +123,7 @@ class SheetGetters:
 
             sql_query = """
                 SELECT
-                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no
+                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color
                 FROM
                     h3t_production_order@hsfp_ca_rlink
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -133,7 +135,7 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -144,7 +146,8 @@ class SheetGetters:
                     '세로': int(length),
                     '주문톤': float(order_ton_cnt),
                     '등급': quality_grade,
-                    '수출내수': export_type
+                    '수출내수': export_type,
+                    'color': color
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders

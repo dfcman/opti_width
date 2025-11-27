@@ -34,6 +34,114 @@ def process_roll_lot(
     df_orders['lot_no'] = lot_no
     df_orders['version'] = version
 
+    group_cols = ['지폭', '롤길이', '등급', 'core', 'dia']
+    for col in ['지폭', '롤길이']:
+        df_orders[col] = pd.to_numeric(df_orders[col])
+    df_orders['등급'] = df_orders['등급'].astype(str)
+    
+    df_groups = df_orders.groupby(group_cols).agg(
+        대표오더번호=('오더번호', 'first')
+    ).reset_index()
+    df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
+    
+    df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
+    last_group_order_no = start_group_order_no + len(df_groups)
+    
+    df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
+
+    logging.info(f"--- Lot {lot_no} 원본 주문 정보 (그룹오더 포함) ---")
+    logging.info(df_orders.to_string())
+    logging.info("\n")
+
+    all_results = {
+        "pattern_result": [],
+        "pattern_details_for_db": [],
+        "pattern_roll_details_for_db": [],
+        "pattern_roll_cut_details_for_db": [],
+        "fulfillment_summary": []
+    }
+    
+    # 엔진 수행 그룹핑 기준 컬럼 설정
+    grouping_cols = ['롤길이', 'core', 'dia']
+    unique_groups = df_orders[grouping_cols].drop_duplicates()
+    prod_seq_counter = start_prod_seq
+
+    for _, row in unique_groups.iterrows():
+        roll_length = row['롤길이']
+        core = row['core']
+        dia = row['dia']
+        
+        logging.info(f"\n--- 롤길이 그룹 {roll_length}, Core {core}, Dia {dia}에 대한 최적화 시작 ---")
+        
+        df_subset = df_orders[
+            (df_orders['롤길이'] == roll_length) & 
+            (df_orders['core'] == core) & 
+            (df_orders['dia'] == dia)
+        ].copy()
+
+        if df_subset.empty:
+            continue
+
+        optimizer = RollOptimize(
+            df_spec_pre=df_subset,
+            max_width=int(re_max_width),
+            min_width=int(re_min_width),
+
+            max_pieces=int(re_max_pieces),
+            lot_no=lot_no
+        )
+        results = optimizer.run_optimize(start_prod_seq=prod_seq_counter)
+
+        if "error" in results:
+            logging.error(f"[에러] Lot {lot_no}, 롤길이 {roll_length}, Core {core}, Dia {dia} 최적화 실패: {results['error']}")
+            continue
+        
+        prod_seq_counter = results.get('last_prod_seq', prod_seq_counter)
+
+        logging.info(f"--- 롤길이 그룹 {roll_length}, Core {core}, Dia {dia} 최적화 성공 ---")
+        all_results["pattern_result"].append(results["pattern_result"])
+        all_results["pattern_details_for_db"].extend(results["pattern_details_for_db"])
+        all_results["pattern_roll_details_for_db"].extend(results.get("pattern_roll_details_for_db", []))
+        all_results["pattern_roll_cut_details_for_db"].extend(results.get("pattern_roll_cut_details_for_db", []))
+        all_results["fulfillment_summary"].append(results["fulfillment_summary"])
+
+    if not all_results["pattern_details_for_db"]:
+        logging.error(f"[에러] Lot {lot_no} 롤지 최적화 결과가 없습니다.")
+        return None, None, start_prod_seq, start_group_order_no
+
+    final_results = {
+        "pattern_result": pd.concat(all_results["pattern_result"], ignore_index=True),
+        "pattern_details_for_db": all_results["pattern_details_for_db"],
+        "pattern_roll_details_for_db": all_results["pattern_roll_details_for_db"],
+        "pattern_roll_cut_details_for_db": all_results["pattern_roll_cut_details_for_db"],
+        "fulfillment_summary": pd.concat(all_results["fulfillment_summary"], ignore_index=True)
+    }
+
+    logging.info("\n--- 롤지 최적화 성공. ---")
+    return final_results, df_orders, prod_seq_counter, last_group_order_no
+
+
+def process_roll_lot_ca(
+        db, plant, pm_no, schedule_unit, lot_no, version, re_min_width, re_max_width, re_max_pieces, paper_type, b_wgt,
+        start_prod_seq=0, start_group_order_no=0
+):
+    """롤지 lot에 대한 전체 최적화 프로세스를 처리하고 결과를 반환합니다."""
+    logging.info(f"\n{'='*60}")
+    logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Roll Lot: {lot_no} (Version: {version}) 처리 시작")
+    logging.info(f"적용 파라미터: min_width={re_min_width}, max_width={re_max_width}, max_pieces={re_max_pieces}")
+    logging.info(f"시작 시퀀스 번호: prod_seq={start_prod_seq}, group_order_no={start_group_order_no}")
+    logging.info(f"{'='*60}")
+
+    raw_orders = db.get_roll_orders_from_db(paper_prod_seq=lot_no)
+
+    if not raw_orders:
+        logging.error(f"[에러] Lot {lot_no}의 롤지 오더를 가져오지 못했습니다.")
+        return None, None, start_prod_seq, start_group_order_no
+
+    df_orders = pd.DataFrame(raw_orders)
+    df_orders['lot_no'] = lot_no
+    df_orders['version'] = version
+
     group_cols = ['지폭', '롤길이', '등급', '오더번호']
     for col in ['지폭', '롤길이']:
         df_orders[col] = pd.to_numeric(df_orders[col])
@@ -131,7 +239,7 @@ def process_roll_sl_lot(
     df_orders['lot_no'] = lot_no
     df_orders['version'] = version
 
-    group_cols = ['지폭', '롤길이', '등급']
+    group_cols = ['지폭', '롤길이', '등급', 'core', 'dia', 'luster', 'color', 'order_pattern']
     df_orders['지폭'] = pd.to_numeric(df_orders['지폭'])
     df_orders['롤길이'] = pd.to_numeric(df_orders['롤길이'])
     df_orders['등급'] = df_orders['등급'].astype(str)
@@ -153,7 +261,9 @@ def process_roll_sl_lot(
         b_wgt=float(b_wgt),
         sl_trim=sl_trim_size,
         min_sl_width=min_sl_width,
-        max_sl_width=max_sl_width
+
+        max_sl_width=max_sl_width,
+        lot_no=lot_no
     )
     try:
         results = optimizer.run_optimize(start_prod_seq=start_prod_seq)

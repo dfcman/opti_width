@@ -7,7 +7,7 @@ class DataInserters:
             connection = self.pool.acquire()
             cursor = connection.cursor()
             # 데몬용 쿼리 복원
-            query = "UPDATE th_versions_manager SET calc_successful = :status WHERE lot_no = :lot_no and version = :version"
+            query = "update th_versions_manager set calc_successful = :status where lot_no = :lot_no and version = :version"
             cursor.execute(query, status=status, lot_no=lot_no, version=version)
             connection.commit()
             print(f"Successfully updated lot {lot_no} to status {status}")
@@ -26,17 +26,32 @@ class DataInserters:
         cursor = connection.cursor()
 
         insert_query = """
-            INSERT INTO th_pattern_sequence (
+            insert into th_pattern_sequence (
                 module, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt,
                 lot_no, version, prod_seq, unit_no, seq, length, pok_cnt, 
-                wd_width, spool_no, spool_seq, rs_gubun,
+                diameter, cut_cnt, color, luster, p_lot, p_type, p_wgt, core, pattern,
+                wd_width, 
+                wd_trim, 
+                cut_width, 
+                cut_trim, 
+                prod_amt, 
+                prod_wgt, 
+                prod_yn, 
+                spool_no, spool_seq, rs_gubun, p_machine,
                 rollwidth1, rollwidth2, rollwidth3, rollwidth4, rollwidth5, rollwidth6, rollwidth7, rollwidth8,
                 groupno1, groupno2, groupno3, groupno4, groupno5, groupno6, groupno7, groupno8
-            ) VALUES (
+            ) values (
                 'C', :plant, :pm_no, :schedule_unit, :max_width, :paper_type, :b_wgt,
                 :lot_no, :version, :prod_seq, :unit_no, :seq, :length, :pok_cnt,
+                :diameter, :cut_cnt, :color, :luster, :p_lot, :p_type, :p_wgt, :core, :pattern,
                 :w1 + :w2 + :w3 + :w4 + :w5 + :w6 + :w7 + :w8,
-                :spool_no, :spool_seq, :rs_gubun,
+                :max_width - :w1 - :w2 - :w3 - :w4 - :w5 - :w6 - :w7 - :w8, 
+                :w1 + :w2 + :w3 + :w4 + :w5 + :w6 + :w7 + :w8,
+                :max_width - :w1 - :w2 - :w3 - :w4 - :w5 - :w6 - :w7 - :w8, 
+                round(:b_wgt * (:w1 + :w2 + :w3 + :w4 + :w5 + :w6 + :w7 + :w8) * :length / 1000000, 0),
+                round(:b_wgt * (:w1 + :w2 + :w3 + :w4 + :w5 + :w6 + :w7 + :w8) * :length / 1000000, 1),
+                'N',
+                :spool_no, :spool_seq, :rs_gubun, :p_machine,
                 :w1, :w2, :w3, :w4, :w5, :w6, :w7, :w8,
                 :g1, :g2, :g3, :g4, :g5, :g6, :g7, :g8
             )
@@ -57,9 +72,20 @@ class DataInserters:
                     'unit_no': prod_seq, 'seq': seq + 1,
                     'length': pattern.get('pattern_length', 0),
                     'pok_cnt': pok_cnt_value,
-                    'spool_no': prod_seq, 'spool_seq': seq + 1,
+                    'diameter': int(pattern.get('diameter', 0)), 
+                    'cut_cnt': 1,
+                    'color': str(pattern.get('color', '')),
+                    'luster': int(pattern.get('luster', 0)),
+                    'p_lot': str(pattern.get('p_lot', '')), 
+                    'p_type': paper_type,
+                    'p_wgt': b_wgt, 
+                    'core': int(pattern.get('core', 0)),
+                    'pattern': str(pattern.get('order_pattern', '')),
+                    'spool_no': prod_seq, 
+                    'spool_seq': seq + 1,
                     # 'rs_gubun': self._get_rs_gubun(pattern),
                     'rs_gubun': pattern['rs_gubun'],
+                    'p_machine': pm_no, 
                     'w1': pattern['widths'][0], 'w2': pattern['widths'][1],
                     'w3': pattern['widths'][2], 'w4': pattern['widths'][3],
                     'w5': pattern['widths'][4], 'w6': pattern['widths'][5],
@@ -81,16 +107,20 @@ class DataInserters:
         cursor = connection.cursor()
 
         insert_query = """
-            INSERT INTO th_roll_sequence (
+            insert into  th_roll_sequence (
                 module, plant, pm_no, schedule_unit, paper_type, b_wgt,
                 lot_no, version, prod_seq, unit_no, seq, roll_seq, pok_cnt,
                 rollwidth, length, spool_no, spool_seq, rs_gubun,
+                dia, weight, 
+                cut_cnt, color, luster, core, pattern, p_lot, p_type, p_wgt, p_machine, 
                 width1, width2, width3, width4, width5, width6, width7,
                 group1, group2, group3, group4, group5, group6, group7
-            ) VALUES (
+            ) values (
                 'C', :plant, :pm_no, :schedule_unit, :paper_type, :b_wgt,
                 :lot_no, :version, :prod_seq, :unit_no, :seq, :roll_seq, :pok_cnt,
                 :rollwidth, :length, :spool_no, :spool_seq, :rs_gubun,
+                :dia, round(:b_wgt * :rollwidth * :length / 1000000,1), 
+                :cut_cnt, :color, :luster, :core, :pattern, :p_lot, :p_type, :p_wgt, :p_machine, 
                 :w1, :w2, :w3, :w4, :w5, :w6, :w7,
                 :g1, :g2, :g3, :g4, :g5, :g6, :g7
             )
@@ -112,6 +142,16 @@ class DataInserters:
                     'length': roll_detail['pattern_length'],
                     'spool_no': prod_seq, 
                     'spool_seq': seq + 1,
+                    'dia': int(roll_detail.get('diameter', 0)), 
+                    'cut_cnt': 1,
+                    'color': str(roll_detail.get('color', '')),
+                    'luster': int(roll_detail.get('luster', 0)),
+                    'core': int(roll_detail.get('core', 0)),
+                    'pattern': str(roll_detail.get('order_pattern', '')),
+                    'p_lot': lot_no,
+                    'p_type': paper_type,
+                    'p_wgt': b_wgt,  
+                    'p_machine': pm_no,
                     # 'rs_gubun': self._get_rs_gubun(roll_detail),
                     'rs_gubun': roll_detail['rs_gubun'],
                     'w1': roll_detail['widths'][0], 'w2': roll_detail['widths'][1],
@@ -135,16 +175,20 @@ class DataInserters:
         cursor = connection.cursor()
 
         insert_query = """
-            INSERT INTO th_cut_sequence (
-                MODULE, PLANT, PM_NO, SCHEDULE_UNIT, LOT_NO, VERSION, 
-                PROD_SEQ, UNIT_NO, SEQ, ROLL_SEQ, CUT_SEQ, WIDTH, GROUP_NO, 
-                SPOOL_NO, SPOOL_SEQ,
-                WEIGHT, TOTAL_LENGTH, CUT_CNT, PAPER_TYPE, B_WGT
-            ) VALUES (
+            insert into th_cut_sequence (
+                module, plant, pm_no, schedule_unit, lot_no, version, 
+                prod_seq, unit_no, seq, roll_seq, cut_seq, width, group_no, 
+                weight,
+                spool_no, spool_seq, p_machine,
+                total_length, cut_cnt, paper_type, b_wgt,
+                color, luster, p_lot, p_type, p_wgt
+            ) values (
                 'C', :plant, :pm_no, :schedule_unit, :lot_no, :version, 
                 :prod_seq, :unit_no, :seq, :roll_seq, :cut_seq, :width, :group_no, 
-                :spool_no, :spool_seq,
-                :weight, :total_length, :cut_cnt, :paper_type, :b_wgt
+                round(:b_wgt * :width * :total_length / 1000000,1),
+                :spool_no, :spool_seq, :p_machine,
+                :total_length, :cut_cnt, :paper_type, :b_wgt,
+                :color, :luster, :p_lot, :p_type, :p_wgt
             )
         """
 
@@ -159,15 +203,20 @@ class DataInserters:
                     'seq': seq + 1, 
                     'spool_no': cut_detail['prod_seq'], 
                     'spool_seq': seq + 1,
+                    'p_machine': pm_no,
                     'roll_seq': cut_detail['roll_seq'],
                     'cut_seq': cut_detail['cut_seq'], 
                     'width': cut_detail['width'],
                     'group_no': cut_detail['group_no'], 
-                    'weight': cut_detail['weight'],
                     'total_length': cut_detail['pattern_length'],
                     'cut_cnt': 1, 
                     'paper_type': paper_type,
-                    'b_wgt': b_wgt
+                    'b_wgt': b_wgt,
+                    'color': str(cut_detail.get('color', '')),
+                    'luster': int(cut_detail.get('luster', 0)),
+                    'p_lot': lot_no,
+                    'p_type': paper_type,
+                    'p_wgt': b_wgt
                 }
                 bind_vars_list.append(bind_vars)
 
@@ -193,22 +242,22 @@ class DataInserters:
             'a_version': version
         })
 
-        # # Create a variable for the IN OUT cursor parameter
-        # out_cursor = cursor.var(oracledb.DB_TYPE_CURSOR)
+        # Create a variable for the IN OUT cursor parameter
+        out_cursor = cursor.var(oracledb.DB_TYPE_CURSOR)
 
-        # # Call the stored procedure with named parameters to ensure correctness
-        # cursor.callproc("PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO", keyword_parameters={
-        #     'P_PLANT': plant,
-        #     'P_SCHEDULE_UNIT': schedule_unit,
-        #     'P_LOT_NO': lot_no,
-        #     'P_VERSION': version,
-        #     'C_SN': out_cursor
-        # })
+        # Call the stored procedure with named parameters to ensure correctness
+        cursor.callproc("PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO", keyword_parameters={
+            'P_PLANT': plant,
+            'P_SCHEDULE_UNIT': schedule_unit,
+            'P_LOT_NO': lot_no,
+            'P_VERSION': version,
+            'C_SN': out_cursor
+        })
 
         # You can now fetch results from the out_cursor if needed, for example:
-        # result_cursor = out_cursor.getvalue()
-        # for row in result_cursor:
-        #     print(row)
+        result_cursor = out_cursor.getvalue()
+        for row in result_cursor:
+            print(row)
 
         print(f"Prepared sheet sequences for transaction by calling PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO.")
 
@@ -219,9 +268,9 @@ class DataInserters:
         cursor = connection.cursor()
 
         insert_query = """
-            INSERT INTO th_order_group (
+            insert into th_order_group (
                 plant, pm_no, schedule_unit, lot_no, version, group_no, order_no
-            ) VALUES (
+            ) values (
                 :plant, :pm_no, :schedule_unit, :lot_no, :version, :group_no, :order_no
             )
         """
@@ -240,6 +289,17 @@ class DataInserters:
         
         # DB에 저장할 최종 컬럼 목록을 선택합니다.
         final_cols = ['lot_no', 'version', 'plant', 'pm_no', 'schedule_unit', 'group_no', 'order_no']
+        
+        print(f"Before drop_duplicates: {len(df_to_insert)} rows")
+        # 중복 제거 (PK 위반 방지)
+        df_to_insert = df_to_insert.drop_duplicates(subset=final_cols)
+        print(f"After drop_duplicates: {len(df_to_insert)} rows")
+        
+        # Check for remaining duplicates (should be 0)
+        dups = df_to_insert[df_to_insert.duplicated(subset=final_cols, keep=False)]
+        if not dups.empty:
+            print(f"WARNING: Duplicates found after drop_duplicates:\n{dups}")
+
         bind_vars_list = df_to_insert[final_cols].to_dict('records')
 
         if bind_vars_list:

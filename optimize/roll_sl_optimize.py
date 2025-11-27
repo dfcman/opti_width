@@ -23,6 +23,7 @@ MIXED_COMPOSITE_PENALTY = 500.0  # 서로 다른 규격 조합 복합롤에 대�
 
 
 class RollSLOptimize:
+
     def __init__(
         self,
         df_spec_pre,
@@ -39,6 +40,7 @@ class RollSLOptimize:
         pattern_complexity_penalty=PATTERN_COMPLEXITY_PENALTY,
         small_width_limit=SMALL_WIDTH_LIMIT,
         max_small_width_per_pattern=MAX_SMALL_WIDTH_PER_PATTERN,
+        lot_no=None
     ):
         self.df_spec_pre = df_spec_pre.copy()
         self.max_width = int(max_width)
@@ -54,6 +56,7 @@ class RollSLOptimize:
         self.pattern_complexity_penalty = float(pattern_complexity_penalty)
         self.small_width_limit = int(small_width_limit)
         self.max_small_width_per_pattern = int(max_small_width_per_pattern)
+        self.lot_no = lot_no
 
         demand_col_candidates = ['주문수량', '주문롤수', 'order_roll_cnt']
         self.demand_column = next((c for c in demand_col_candidates if c in self.df_spec_pre.columns), None)
@@ -673,6 +676,24 @@ class RollSLOptimize:
         production_counts = {item: 0 for item in self.demands}
         prod_seq = start_prod_seq
 
+        # Extract common properties from the first row of the dataframe
+        first_row = self.df_spec_pre.iloc[0]
+        # Helper for safe int conversion
+        def safe_int(val):
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return 0
+
+        common_props = {
+            'diameter': safe_int(first_row.get('dia', 0)),
+            'color': first_row.get('color', ''),
+            'luster': safe_int(first_row.get('luster', 0)),
+            'p_lot': self.lot_no,
+            'core': safe_int(first_row.get('core', 0)),
+            'order_pattern': first_row.get('order_pattern', '')
+        }
+
         for j, count in final_solution['pattern_counts'].items():
             if count < 0.99:
                 continue
@@ -732,6 +753,7 @@ class RollSLOptimize:
                         'prod_seq': prod_seq,
                         'roll_seq': roll_seq_counter,
                         'rs_gubun': 'R',
+                        **common_props
                     })
 
             loss = self.max_width - total_width
@@ -743,6 +765,7 @@ class RollSLOptimize:
                 'count': roll_count,
                 'prod_seq': prod_seq,
                 'rs_gubun': 'R',
+                **common_props
             })
 
             pattern_details_for_db.append({
@@ -752,6 +775,7 @@ class RollSLOptimize:
                 'prod_seq': prod_seq,
                 'composite_map': composite_meta_for_db,
                 'rs_gubun': 'R',
+                **common_props
             })
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:

@@ -197,6 +197,24 @@ class SheetOptimizeCa:
         prod_seq_counter = start_prod_seq
         total_cut_seq_counter = 0
 
+        # Helper for safe int conversion
+        def safe_int(val):
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return 0
+
+        # Extract common properties from the first row of the dataframe
+        first_row = self.df_orders.iloc[0]
+        common_props = {
+            'diameter': 0, # Sheet orders don't use diameter
+            'color': first_row.get('color', ''),
+            'luster': safe_int(first_row.get('luster', 0)),
+            'p_lot': self.lot_no,
+            'core': 0, # Sheet orders don't use core
+            'order_pattern': first_row.get('order_pattern', '')
+        }
+
         for j, count in final_solution['pattern_counts'].items():
             if count < 0.99:
                 continue
@@ -288,7 +306,8 @@ class SheetOptimizeCa:
                         'count': roll_count,
                         'prod_seq': prod_seq_counter,
                         'roll_seq': roll_seq_counter,
-                        'rs_gubun': 'S'
+                        'rs_gubun': 'S',
+                        **common_props
                     })
 
                     cut_seq_counter = 0
@@ -314,6 +333,7 @@ class SheetOptimizeCa:
                                 'count': roll_count,
                                 'cut_cnt': roll_count,
                                 'rs_gubun': 'S',
+                                **common_props
                             })
 
             pattern_details_for_db.append({
