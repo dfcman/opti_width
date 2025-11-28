@@ -6,14 +6,15 @@ class RollGetters:
         try:
             connection = self.pool.acquire()
             cursor = connection.cursor()
-            #
+            # nvl(b.jipok_group, a.quality_grade) as quality_grade
             sql_query = """
                 SELECT
-                    plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no,
+                    a.plant, pm_no, schedule_unit, width, length, roll_length, a.quality_grade, order_roll_cnt, order_ton_cnt, export_yn, a.order_no,
                     core, dia, nvl(pattern, ' ') as pattern, luster, color
                 FROM
-                    h3t_production_order
-                WHERE paper_prod_seq = :p_paper_prod_seq
+                    h3t_production_order a, h3t_production_order_param b
+                WHERE a.order_no = b.order_no(+)
+                and paper_prod_seq = :p_paper_prod_seq
                   AND rs_gubun = 'R'
                 ORDER BY roll_length, width, dia, core
             """
@@ -27,7 +28,7 @@ class RollGetters:
                     'plant': plant,
                     'pm_no': pm_no,
                     'schedule_unit': schedule_unit,
-                    '오더번호': order_no,
+                    'order_no': order_no,
                     '지폭': int(width),
                     '가로': int(length),
                     '주문수량': int(order_roll_cnt),
@@ -77,7 +78,7 @@ class RollGetters:
                     'plant': plant,
                     'pm_no': pm_no,
                     'schedule_unit': schedule_unit,
-                    '오더번호': order_no,
+                    'order_no': order_no,
                     '지폭': int(width),
                     '롤길이': int(roll_length),
                     '주문수량': int(order_roll_cnt),

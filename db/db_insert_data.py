@@ -281,7 +281,6 @@ class DataInserters:
 
         # DataFrame 컬럼 이름을 DB 컬럼에 맞게 매핑합니다.
         rename_map = {
-            '오더번호': 'order_no',
             'group_order_no': 'group_no'
         }
         
@@ -300,9 +299,20 @@ class DataInserters:
         if not dups.empty:
             print(f"WARNING: Duplicates found after drop_duplicates:\n{dups}")
 
+        # 데이터 타입 변환 (DB_TYPE_NUMBER 오류 방지)
+        # plant, lot_no, group_no 등이 숫자로 된 문자열일 경우 숫자로 변환 시도
+        # version, schedule_unit, order_no 도 추가
+        for col in ['plant', 'lot_no', 'group_no', 'version', 'schedule_unit', 'order_no']:
+            if col in df_to_insert.columns:
+                try:
+                    df_to_insert[col] = pd.to_numeric(df_to_insert[col])
+                except Exception:
+                    pass # 변환 실패 시 원래 값 유지 (문자열이 필요한 컬럼일 수도 있음)
+
         bind_vars_list = df_to_insert[final_cols].to_dict('records')
 
         if bind_vars_list:
+            print(f"DEBUG: First record to insert: {bind_vars_list[0]}")
             cursor.executemany(insert_query, bind_vars_list)
             print(f"Prepared {len(bind_vars_list)} new order group records for transaction.")
 

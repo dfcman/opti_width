@@ -52,7 +52,7 @@ class VersionGetters:
 
             query = """
                 select 
-                    a.plant, pm_no, a.schedule_unit, a.lot_no, '05' as version, a.min_width, a.roll_max_width, 
+                    a.plant, pm_no, a.schedule_unit, a.lot_no, version, a.min_width, a.roll_max_width, 
                     a.sheet_max_width, a.max_re_count as max_pieces, 4 as sheet_max_pieces,
                     a.paper_type, a.b_wgt,
                     1000 as min_sc_width, a.max_sc_width, a.sheet_trim_size, sheet_length_re,
@@ -62,7 +62,7 @@ class VersionGetters:
                 where a.plant = b.plant
                 and a.paper_type = b.paper_type
                 and a.b_wgt = b.b_wgt 
-                and lot_no = '3250900068' and version = '01'
+                and lot_no = '3250900073' and version = '01'
             """
 
             # query = """

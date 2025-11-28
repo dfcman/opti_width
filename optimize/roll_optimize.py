@@ -1,16 +1,17 @@
 import pandas as pd
 from ortools.linear_solver import pywraplp
 
-OVER_PROD_PENALTY = 1000000.0
+OVER_PROD_PENALTY = 100000000.0
 UNDER_PROD_PENALTY = 10000.0
 PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6
 CG_MAX_ITERATIONS = 200
-CG_NO_IMPROVEMENT_LIMIT = 25  # Increased from 25
-CG_SUBPROBLEM_TOP_N = 3      # Increased from 3
+CG_NO_IMPROVEMENT_LIMIT = 50  # Increased from 25
+CG_SUBPROBLEM_TOP_N = 10      # Increased from 3
 SMALL_PROBLEM_THRESHOLD = 10
-FINAL_MIP_TIME_LIMIT_MS = 60000
+FINAL_MIP_TIME_LIMIT_MS = 120000
 PATTERN_SETUP_COST = 50000.0 # 새로운 패턴 종류를 1개 사용할 때마다 50000mm의 손실과 동일한 페널티
 TRIM_LOSS_PENALTY = 10.0      # 자투리 손실 1mm당 페널티
+NUM_THREADS = 6
 
 class RollOptimize:
     
@@ -48,10 +49,11 @@ class RollOptimize:
             return
 
         sorted_by_demand = sorted(self.items, key=lambda item: self.demands.get(item, 0), reverse=True)
+        sorted_by_demand_asc = sorted(self.items, key=lambda item: self.demands.get(item, 0))
         sorted_by_width_desc = sorted(self.items, key=lambda item: self.item_info.get(item, 0), reverse=True)
         sorted_by_width_asc = sorted(self.items, key=lambda item: self.item_info.get(item, 0))
 
-        heuristics = [sorted_by_demand, sorted_by_width_desc, sorted_by_width_asc]
+        heuristics = [sorted_by_demand, sorted_by_width_desc, sorted_by_width_asc, sorted_by_demand_asc]
 
         for sorted_items in heuristics:
             for item in sorted_items:
@@ -132,6 +134,10 @@ class RollOptimize:
             return None
         if is_final_mip and hasattr(solver, 'SetTimeLimit'):
             solver.SetTimeLimit(FINAL_MIP_TIME_LIMIT_MS)
+        
+        # Enable multi-threading
+        if hasattr(solver, 'SetNumThreads'):
+            solver.SetNumThreads(NUM_THREADS)
 
         x = {j: (solver.IntVar if is_final_mip else solver.NumVar)(0, solver.infinity(), f'P_{j}')
              for j in range(len(self.patterns))}

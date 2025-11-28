@@ -27,15 +27,16 @@ def test_roll_optimization():
         print("Optimization Successful!")
         print(results['pattern_result'])
         print(f"Total Patterns Used: {len(results['pattern_result'])}")
+        print(results['fulfillment_summary'])
 
     # Test Case 2: Scenario where pattern reduction is critical
     # Many small orders that could be combined in many ways, but we want few patterns
     print("\n--- Test Case 2: Pattern Reduction Scenario ---")
     data2 = {
-        'group_order_no': ['O1', 'O2', 'O3', 'O4', 'O5', 'O6', 'O7', 'O8', 'O9', '10'],
-        '지폭': [606, 606, 667, 706, 706, 727, 788, 909, 970, 1091],
-        '주문수량': [6, 8, 7, 7, 14, 7, 8, 5, 10, 4],
-        '롤길이': [2050, 2050, 2050, 2050, 2050, 2050, 2050, 2050, 2050, 2050]
+        'group_order_no': ['O1', 'O2', 'O3', 'O4', 'O5', 'O6', 'O7', 'O8'],
+        '지폭': [606, 667, 706, 727, 788, 909, 970, 1091],
+        '주문수량': [14, 7, 21, 7, 8, 5, 10, 4],
+        '롤길이': [2050, 2050, 2050, 2050, 2050, 2050, 2050, 2050]
     }
     df_spec_pre2 = pd.DataFrame(data2)
     
@@ -54,6 +55,9 @@ def test_roll_optimization():
         print("Optimization Successful!")
         print(results2['pattern_result'])
         print(f"Total Patterns Used: {len(results2['pattern_result'])}")
+        print(results2['fulfillment_summary'])
+
+    
 
 if __name__ == "__main__":
     test_roll_optimization()

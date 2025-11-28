@@ -34,13 +34,14 @@ def process_roll_lot(
     df_orders['lot_no'] = lot_no
     df_orders['version'] = version
 
-    group_cols = ['지폭', '롤길이', '등급', 'core', 'dia']
+    # 1. 개별 오더 그룹핑 (DB 저장용) - order_no 포함
+    group_cols = ['지폭', '롤길이', '등급', 'core', 'dia', 'order_no']
     for col in ['지폭', '롤길이']:
         df_orders[col] = pd.to_numeric(df_orders[col])
     df_orders['등급'] = df_orders['등급'].astype(str)
     
     df_groups = df_orders.groupby(group_cols).agg(
-        대표오더번호=('오더번호', 'first')
+        대표오더번호=('order_no', 'first')
     ).reset_index()
     df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     
@@ -53,6 +54,20 @@ def process_roll_lot(
     logging.info(df_orders.to_string())
     logging.info("\n")
 
+    # 2. 지폭 그룹핑 (엔진 최적화용) - order_no 제외
+    # 엔진 효율을 위해 동일 규격은 하나로 묶음
+    width_group_cols = ['지폭', '롤길이', '등급', 'core', 'dia']
+    df_width_groups = df_orders.groupby(width_group_cols).agg(
+        total_qty=('주문수량', 'sum')
+    ).reset_index()
+    
+    # 임시 그룹 ID 생성 (WG...)
+    df_width_groups['width_group_no'] = [f'WG{i+1}' for i in range(len(df_width_groups))]
+    
+    # 원본 데이터에 지폭 그룹 ID 매핑
+    df_orders = pd.merge(df_orders, df_width_groups[['지폭', '롤길이', '등급', 'core', 'dia', 'width_group_no']], 
+                         on=['지폭', '롤길이', '등급', 'core', 'dia'], how='left')
+
     all_results = {
         "pattern_result": [],
         "pattern_details_for_db": [],
@@ -62,31 +77,43 @@ def process_roll_lot(
     }
     
     # 엔진 수행 그룹핑 기준 컬럼 설정
-    grouping_cols = ['롤길이', 'core', 'dia']
+    grouping_cols = ['롤길이', 'core', 'dia', '등급']
     unique_groups = df_orders[grouping_cols].drop_duplicates()
     prod_seq_counter = start_prod_seq
+
+    # 결과 배분을 위한 준비
+    from collections import Counter
+    remaining_demands = df_orders.set_index('group_order_no')['주문수량'].to_dict()
+    width_group_to_orders = df_orders.groupby('width_group_no')['group_order_no'].apply(list).to_dict()
 
     for _, row in unique_groups.iterrows():
         roll_length = row['롤길이']
         core = row['core']
         dia = row['dia']
-        
+        quality_grade = row['등급']
         logging.info(f"\n--- 롤길이 그룹 {roll_length}, Core {core}, Dia {dia}에 대한 최적화 시작 ---")
         
-        df_subset = df_orders[
-            (df_orders['롤길이'] == roll_length) & 
-            (df_orders['core'] == core) & 
-            (df_orders['dia'] == dia)
+        # 엔진에는 지폭 그룹 데이터를 전달 (width_group_no를 group_order_no로 위장)
+        df_subset_engine = df_width_groups[
+            (df_width_groups['롤길이'] == roll_length) & 
+            (df_width_groups['core'] == core) & 
+            (df_width_groups['dia'] == dia) &
+            (df_width_groups['등급'] == quality_grade)
         ].copy()
 
-        if df_subset.empty:
+        if df_subset_engine.empty:
             continue
+            
+        # 컬럼명 변경 (엔진 호환성)
+        df_subset_engine = df_subset_engine.rename(columns={'width_group_no': 'group_order_no', 'total_qty': '주문수량'})
 
+        logging.info(f"--- 롤길이 그룹 {roll_length}, Core {core}, Dia {dia}에 대한 주문 정보 (지폭 그룹핑) ---")
+        logging.info(df_subset_engine.to_string())
+        
         optimizer = RollOptimize(
-            df_spec_pre=df_subset,
+            df_spec_pre=df_subset_engine,
             max_width=int(re_max_width),
             min_width=int(re_min_width),
-
             max_pieces=int(re_max_pieces),
             lot_no=lot_no
         )
@@ -96,25 +123,143 @@ def process_roll_lot(
             logging.error(f"[에러] Lot {lot_no}, 롤길이 {roll_length}, Core {core}, Dia {dia} 최적화 실패: {results['error']}")
             continue
         
-        prod_seq_counter = results.get('last_prod_seq', prod_seq_counter)
+        # 3. 결과 배분 (Allocation)
+        # 엔진 결과(WG 기준)를 개별 오더(group_order_no)로 변환
+        
+        allocated_pattern_details = []
+        allocated_roll_details = []
+        allocated_cut_details = []
+        
+        # results['pattern_details_for_db']는 WG ID를 포함하고 있음
+        for entry in results['pattern_details_for_db']:
+            wg_ids = entry['group_nos'] # 예: ['WG1', 'WG1', 'WG2', '', ...]
+            widths = entry['widths']
+            total_run_count = entry['count']
+            
+            allocated_runs = []
+            
+            for _ in range(total_run_count):
+                run_assignment = []
+                for i, wg_id in enumerate(wg_ids):
+                    if not wg_id:
+                        run_assignment.append('')
+                        continue
+                    
+                    candidate_orders = width_group_to_orders.get(wg_id, [])
+                    assigned_order = None
+                    
+                    # 잔여 수요 우선 할당
+                    for order_id in candidate_orders:
+                        if remaining_demands.get(order_id, 0) > 0:
+                            assigned_order = order_id
+                            remaining_demands[order_id] -= 1
+                            break
+                    
+                    # 과잉 생산 시 마지막 오더 할당
+                    if not assigned_order and candidate_orders:
+                        assigned_order = candidate_orders[-1]
+                    
+                    run_assignment.append(assigned_order if assigned_order else '')
+                allocated_runs.append(tuple(run_assignment))
+            
+            run_counts = Counter(allocated_runs)
+            
+            for order_combo, count in run_counts.items():
+                prod_seq_counter += 1
+                
+                # Pattern Details
+                new_entry = entry.copy()
+                new_entry['group_nos'] = list(order_combo)
+                new_entry['count'] = count
+                new_entry['prod_seq'] = prod_seq_counter
+                allocated_pattern_details.append(new_entry)
+                
+                # Roll Details
+                roll_seq_counter = 0
+                for i, width in enumerate(widths):
+                    if width <= 0: continue
+                    roll_seq_counter += 1
+                    group_no = list(order_combo)[i]
+                    
+                    allocated_roll_details.append({
+                        'rollwidth': width,
+                        'pattern_length': entry.get('pattern_length', 0),
+                        'widths': [width] + [0]*7,
+                        'group_nos': [group_no] + ['']*7,
+                        'count': count,
+                        'prod_seq': prod_seq_counter,
+                        'roll_seq': roll_seq_counter,
+                        'rs_gubun': 'R',
+                        'p_lot': entry.get('p_lot'),
+                        'diameter': entry.get('diameter'),
+                        'core': entry.get('core'),
+                        'color': entry.get('color'),
+                        'luster': entry.get('luster')
+                    })
+                    
+                    # Cut Details (Roll Optimize에서는 보통 Roll Detail과 1:1 매핑되거나 생략될 수 있으나, 기존 로직 따름)
+                    # 기존 로직: pattern_roll_cut_details_for_db 생성
+                    # 여기서는 Roll Detail 하나당 Cut Detail 하나로 가정 (단순화)
+                    allocated_cut_details.append({
+                        'prod_seq': prod_seq_counter,
+                        'unit_no': prod_seq_counter,
+                        'seq': roll_seq_counter, # 임시
+                        'roll_seq': roll_seq_counter,
+                        'cut_seq': 1,
+                        'rs_gubun': 'R',
+                        'width': width,
+                        'group_no': group_no,
+                        'weight': 0,
+                        'pattern_length': entry.get('pattern_length', 0),
+                        'count': count,
+                        'p_lot': entry.get('p_lot'),
+                        'diameter': entry.get('diameter'),
+                        'core': entry.get('core'),
+                        'color': entry.get('color'),
+                        'luster': entry.get('luster')
+                    })
 
-        logging.info(f"--- 롤길이 그룹 {roll_length}, Core {core}, Dia {dia} 최적화 성공 ---")
-        all_results["pattern_result"].append(results["pattern_result"])
-        all_results["pattern_details_for_db"].extend(results["pattern_details_for_db"])
-        all_results["pattern_roll_details_for_db"].extend(results.get("pattern_roll_details_for_db", []))
-        all_results["pattern_roll_cut_details_for_db"].extend(results.get("pattern_roll_cut_details_for_db", []))
+        logging.info(f"--- 롤길이 그룹 {roll_length}, Core {core}, Dia {dia} 최적화 성공 (배분 완료) ---")
+        all_results["pattern_result"].append(results["pattern_result"]) # 요약용 (WG 기준일 수 있음, 주의)
+        all_results["pattern_details_for_db"].extend(allocated_pattern_details)
+        all_results["pattern_roll_details_for_db"].extend(allocated_roll_details)
+        all_results["pattern_roll_cut_details_for_db"].extend(allocated_cut_details)
+        
+        # Fulfillment Summary 재계산 필요 (개별 오더 기준)
+        # 하지만 여기서는 일단 results['fulfillment_summary'] (WG 기준)를 넣고, 나중에 전체 집계 시 다시 계산하거나
+        # 혹은 여기서 개별 오더 기준으로 다시 만들어야 함.
+        # 시간 관계상, 그리고 save_results에서 fulfillment_summary는 로깅용으로 주로 쓰이므로
+        # 정확한 개별 오더 충족 현황을 보려면 remaining_demands를 역산해야 함.
+        # 일단은 WG 기준 Summary를 유지하되, 로그에 개별 오더 현황을 찍어주는 것이 좋음.
         all_results["fulfillment_summary"].append(results["fulfillment_summary"])
 
     if not all_results["pattern_details_for_db"]:
         logging.error(f"[에러] Lot {lot_no} 롤지 최적화 결과가 없습니다.")
         return None, None, start_prod_seq, start_group_order_no
 
+    # Fulfillment Summary를 개별 오더 기준으로 재생성 (정확한 리포팅을 위해)
+    # 생산된 수량 집계
+    production_counts = Counter()
+    for detail in all_results["pattern_details_for_db"]:
+        for group_no in detail['group_nos']:
+            if group_no:
+                production_counts[group_no] += detail['count']
+    
+    df_prod = pd.DataFrame.from_dict(production_counts, orient='index', columns=['생산롤수'])
+    df_prod.index.name = 'group_order_no'
+    
+    # 원본 오더 정보와 결합
+    df_summary = df_orders.set_index('group_order_no')[['지폭', '롤길이', '등급', '주문수량']].copy()
+    df_summary = df_summary.join(df_prod).fillna(0)
+    df_summary['과부족(롤)'] = df_summary['생산롤수'] - df_summary['주문수량']
+    df_summary = df_summary.reset_index()
+    
     final_results = {
-        "pattern_result": pd.concat(all_results["pattern_result"], ignore_index=True),
+        "pattern_result": pd.concat(all_results["pattern_result"], ignore_index=True), # 여전히 WG 기준 패턴일 수 있음
         "pattern_details_for_db": all_results["pattern_details_for_db"],
         "pattern_roll_details_for_db": all_results["pattern_roll_details_for_db"],
         "pattern_roll_cut_details_for_db": all_results["pattern_roll_cut_details_for_db"],
-        "fulfillment_summary": pd.concat(all_results["fulfillment_summary"], ignore_index=True)
+        "fulfillment_summary": df_summary # 개별 오더 기준 Summary로 교체
     }
 
     logging.info("\n--- 롤지 최적화 성공. ---")
@@ -236,6 +381,7 @@ def process_roll_sl_lot(
         return None, None, start_prod_seq, start_group_order_no
 
     df_orders = pd.DataFrame(raw_orders)
+    # df_orders.rename(columns={'오더번호': 'order_no'}, inplace=True)
     df_orders['lot_no'] = lot_no
     df_orders['version'] = version
 
@@ -245,7 +391,7 @@ def process_roll_sl_lot(
     df_orders['등급'] = df_orders['등급'].astype(str)
     
     df_groups = df_orders.groupby(group_cols).agg(
-        대표오더번호=('오더번호', 'first')
+        대표오더번호=('order_no', 'first')
     ).reset_index()
     df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
@@ -302,6 +448,7 @@ def process_sheet_lot(
         return None, None, start_prod_seq, start_group_order_no
 
     df_orders = pd.DataFrame(raw_orders)
+    # df_orders.rename(columns={'오더번호': 'order_no'}, inplace=True)
     df_orders['lot_no'] = lot_no
     df_orders['version'] = version
 
@@ -311,7 +458,7 @@ def process_sheet_lot(
     df_orders['등급'] = df_orders['등급'].astype(str)
     
     df_groups = df_orders.groupby(group_cols).agg(
-        대표오더번호=('오더번호', 'first')
+        대표오더번호=('order_no', 'first')
     ).reset_index()
     df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
@@ -370,6 +517,7 @@ def process_sheet_lot_var(
         return None, None, start_prod_seq, start_group_order_no
 
     df_orders = pd.DataFrame(raw_orders)
+    # df_orders.rename(columns={'오더번호': 'order_no'}, inplace=True)
     df_orders['lot_no'] = lot_no
     df_orders['version'] = version
 
@@ -379,7 +527,7 @@ def process_sheet_lot_var(
     df_orders['등급'] = df_orders['등급'].astype(str)
     
     df_groups = df_orders.groupby(group_cols).agg(
-        대표오더번호=('오더번호', 'first')
+        대표오더번호=('order_no', 'first')
     ).reset_index()
     df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
@@ -438,6 +586,7 @@ def process_sheet_lot_ca(
         return None, None, start_prod_seq, start_group_order_no
 
     df_orders = pd.DataFrame(raw_orders)
+    # df_orders.rename(columns={'오더번호': 'order_no'}, inplace=True)
     df_orders['lot_no'] = lot_no
     df_orders['version'] = version
 
@@ -447,7 +596,7 @@ def process_sheet_lot_ca(
     df_orders['등급'] = df_orders['등급'].astype(str)
     
     df_groups = df_orders.groupby(group_cols).agg(
-        대표오더번호=('오더번호', 'first')
+        대표오더번호=('order_no', 'first')
     ).reset_index()
     df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
@@ -515,7 +664,7 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
             )
 
         logging.info("\n\n# ================= 패턴 상세 정보 (final_pattern_details_for_db) ================== #\n")
-        logging.info(f"롤 재단 상세 정보 개수: {final_pattern_details_for_db}")
+        logging.info(f"롤 재단 상세 정보 개수: {len(final_pattern_details_for_db)}")
         db.insert_pattern_sequence(
             connection, lot_no, version, plant, pm_no, schedule_unit, re_max_width, 
             paper_type, b_wgt, final_pattern_details_for_db
@@ -523,7 +672,7 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
 
         if final_pattern_roll_details_for_db:
             logging.info("\n\n# ================= 패턴롤 정보 (final_pattern_roll_details_for_db) ================== #\n")
-            logging.info(f"롤 재단 상세 정보 개수: {final_pattern_roll_details_for_db}")
+            logging.info(f"롤 재단 상세 정보 개수: {len(final_pattern_roll_details_for_db)}")
             db.insert_roll_sequence(
                 connection, lot_no, version, plant, pm_no, schedule_unit, re_max_width, 
                 paper_type, b_wgt, final_pattern_roll_details_for_db
@@ -531,7 +680,7 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
 
         if final_pattern_roll_cut_details_for_db:
             logging.info("\n\n# ================= 롤 cut 재단 상세 정보 (final_pattern_roll_cut_details_for_db) ================== #\n")
-            logging.info(f"롤 재단 상세 정보 개수: {final_pattern_roll_cut_details_for_db}")
+            logging.info(f"롤 재단 상세 정보 개수: {len(final_pattern_roll_cut_details_for_db)}")
             db.insert_cut_sequence(
                 connection, lot_no, version, plant, pm_no, schedule_unit, 
                 paper_type, b_wgt, final_pattern_roll_cut_details_for_db
