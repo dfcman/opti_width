@@ -67,7 +67,7 @@ class DataInserters:
 
                 bind_vars = {
                     'plant': plant, 'pm_no': pm_no, 'schedule_unit': schedule_unit,
-                    'max_width': max_width, 'paper_type': paper_type, 'b_wgt': b_wgt,
+                    'max_width': pattern.get('max_width', max_width), 'paper_type': paper_type, 'b_wgt': b_wgt,
                     'lot_no': lot_no, 'version': version, 'prod_seq': prod_seq,
                     'unit_no': prod_seq, 'seq': seq + 1,
                     'length': pattern.get('pattern_length', 0),
@@ -99,6 +99,7 @@ class DataInserters:
         
         if bind_vars_list:
             cursor.executemany(insert_query, bind_vars_list)
+            print(f"[DEBUG] Inserted {len(bind_vars_list)} rows into th_pattern_sequence.")
             
         print(f"Prepared {total_seq} new pattern sequences for transaction.")
 
@@ -167,6 +168,7 @@ class DataInserters:
         
         if bind_vars_list:
             cursor.executemany(insert_query, bind_vars_list)
+            print(f"[DEBUG] Inserted {len(bind_vars_list)} rows into th_roll_sequence.")
 
         print(f"Prepared {len(bind_vars_list)} new roll sequences for transaction.")
 
@@ -226,7 +228,7 @@ class DataInserters:
         print(f"Prepared {len(bind_vars_list)} new cut sequences for transaction.")
 
 
-    def insert_sheet_sequence(self, connection, lot_no, version, plant, schedule_unit):
+    def insert_sheet_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit):
         cursor = connection.cursor()
         
         # As per the user's request, this function will call a stored procedure.
@@ -236,7 +238,7 @@ class DataInserters:
         cursor.callproc("SP_JP_GEN_SHEETINFO_BUF", keyword_parameters={
             'a_module': 'C',
             'a_plant': plant,
-            'a_pm_no': ' ',
+            'a_pm_no': pm_no,
             'a_schedule_unit': schedule_unit,
             'a_lot_no': lot_no,
             'a_version': version
@@ -260,6 +262,8 @@ class DataInserters:
             print(row)
 
         print(f"Prepared sheet sequences for transaction by calling PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO.")
+        print(f"Prepared sheet sequences for transaction by calling PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO.")
+        print(f"[DEBUG] Sheet sequence generation procedure called for Lot {lot_no}, Version {version}, PM {pm_no}.")
 
     def insert_order_group(self, connection, lot_no, version, plant, pm_no, schedule_unit, df_orders):
         """

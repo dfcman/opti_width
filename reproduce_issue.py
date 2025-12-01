@@ -1,48 +1,79 @@
+
 import pandas as pd
-from optimize.roll_optimize import RollOptimize
-import logging
+import numpy as np
+from optimize.sheet_optimize import SheetOptimize
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Mock data based on user sample
+# 70 303250900073071 NaN NaN A NaN 2 0 550.0 910.0 내수 2.803 2.803 0.0 2.0
+# Width: 550, Length: 910, Grade: A, Type: 내수, OrderTons: 2.803
+# Needed Rolls: 2
 
-# Define the demands based on the user's log/description
-# 606: 14, 667: 7, 706: 21, 727: 7, 788: 8, 909: 5, 970: 10, 1091: 4
-data = [
-    {'group_order_no': 'O1', '지폭': 606, '주문수량': 14, '롤길이': 2050},
-    {'group_order_no': 'O2', '지폭': 667, '주문수량': 7, '롤길이': 2050},
-    {'group_order_no': 'O3', '지폭': 706, '주문수량': 21, '롤길이': 2050},
-    {'group_order_no': 'O4', '지폭': 727, '주문수량': 7, '롤길이': 2050},
-    {'group_order_no': 'O5', '지폭': 788, '주문수량': 8, '롤길이': 2050},
-    {'group_order_no': 'O6', '지폭': 909, '주문수량': 5, '롤길이': 2050},
-    {'group_order_no': 'O7', '지폭': 970, '주문수량': 10, '롤길이': 2050},
-    {'group_order_no': 'O8', '지폭': 1091, '주문수량': 4, '롤길이': 2050},
-]
-
+data = {
+    'plant': ['3000'],
+    'pm_no': ['1'],
+    'schedule_unit': ['1'],
+    'order_no': ['ORD001'],
+    '가로': [550],
+    '세로': [910],
+    '주문톤': [2.803],
+    '등급': ['A'],
+    '수출내수': ['내수'],
+    'color': [''],
+    'luster': [0],
+    'order_pattern': ['']
+}
 df_orders = pd.DataFrame(data)
+df_orders['group_order_no'] = '303250900073071'
 
-print("--- Demands ---")
-print(df_orders)
+# Parameters
+# Assuming min_width is large enough to potentially cause issues, or small enough to work.
+# User sample: Needed=2, Prod=0 (maybe).
+# Let's try to reproduce Prod=0 first.
+re_max_width = 5000
+re_min_width = 2800 # If 550*4 = 2200 < 2800, it might fail if max_pieces=4
+re_max_pieces = 4
+b_wgt = 100.0
+sheet_length_re = 10000
+sheet_trim_size = 0
+min_sc_width = 500
+max_sc_width = 2000
 
-optimizer = RollOptimize(
-    df_spec_pre=df_orders,
-    max_width=4900,
-    min_width=4500, # Assuming some min width, user didn't specify but usually it's around 2000-3000 or 0. Log said "min_width=2050" maybe? No, roll length is 2050.
-    # Let's check log for min_width. "min_width=..." is in the log but value is not clear.
-    # User's patterns sums: 4584, 4867, 4867, 4727, 4867.
-    # Max width 4900.
-    # Let's assume min_width is small enough.
-    max_pieces=8
+print("--- Running SheetOptimize with mock data ---")
+optimizer = SheetOptimize(
+    df_spec_pre=df_orders.copy(),
+    max_width=re_max_width,
+    min_width=re_min_width,
+    max_pieces=re_max_pieces,
+    b_wgt=b_wgt,
+    sheet_roll_length=sheet_length_re,
+    sheet_trim=sheet_trim_size,
+    min_sc_width=min_sc_width,
+    max_sc_width=max_sc_width,
+    lot_no='TEST',
+    version='1'
 )
 
 results = optimizer.run_optimize()
 
 if "error" in results:
-    print(f"Error: {results['error']}")
+    print(f"Optimization failed: {results['error']}")
 else:
-    print("\n--- Optimization Results ---")
-    print(results['pattern_result'])
-    print(f"\nTotal Patterns: {len(results['pattern_result'])}")
+    print("Optimization success")
+    summary = results['fulfillment_summary']
+    print("\nFulfillment Summary Columns:", summary.columns.tolist())
+    print("\nFulfillment Summary Content:")
+    print(summary.to_string())
     
-    # Check fulfillment
-    print("\n--- Fulfillment ---")
-    print(results['fulfillment_summary'])
+    # Check for NaNs
+    if summary.isnull().values.any():
+        print("\nWARNING: NaNs found in summary!")
+        print(summary[summary.isnull().any(axis=1)])
+    else:
+        print("\nNo NaNs in summary.")
+
+    # Check specific order
+    row = summary[summary['group_order_no'] == '303250900073071']
+    if not row.empty:
+        print("\nTarget Order Row:")
+        for col in summary.columns:
+            print(f"{col}: {row[col].values[0]}")

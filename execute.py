@@ -56,7 +56,7 @@ def process_roll_lot(
 
     # 2. 지폭 그룹핑 (엔진 최적화용) - order_no 제외
     # 엔진 효율을 위해 동일 규격은 하나로 묶음
-    width_group_cols = ['지폭', '롤길이', '등급', 'core', 'dia']
+    width_group_cols = ['지폭', '롤길이', '등급', 'core', 'dia', '수출내수']
     df_width_groups = df_orders.groupby(width_group_cols).agg(
         total_qty=('주문수량', 'sum')
     ).reset_index()
@@ -65,8 +65,8 @@ def process_roll_lot(
     df_width_groups['width_group_no'] = [f'WG{i+1}' for i in range(len(df_width_groups))]
     
     # 원본 데이터에 지폭 그룹 ID 매핑
-    df_orders = pd.merge(df_orders, df_width_groups[['지폭', '롤길이', '등급', 'core', 'dia', 'width_group_no']], 
-                         on=['지폭', '롤길이', '등급', 'core', 'dia'], how='left')
+    df_orders = pd.merge(df_orders, df_width_groups[['지폭', '롤길이', '등급', 'core', 'dia', '수출내수', 'width_group_no']], 
+                         on=['지폭', '롤길이', '등급', 'core', 'dia', '수출내수'], how='left')
 
     all_results = {
         "pattern_result": [],
@@ -221,6 +221,8 @@ def process_roll_lot(
 
         logging.info(f"--- 롤길이 그룹 {roll_length}, Core {core}, Dia {dia} 최적화 성공 (배분 완료) ---")
         all_results["pattern_result"].append(results["pattern_result"]) # 요약용 (WG 기준일 수 있음, 주의)
+        for detail in allocated_pattern_details:
+            detail['max_width'] = int(re_max_width)
         all_results["pattern_details_for_db"].extend(allocated_pattern_details)
         all_results["pattern_roll_details_for_db"].extend(allocated_roll_details)
         all_results["pattern_roll_cut_details_for_db"].extend(allocated_cut_details)
@@ -340,6 +342,8 @@ def process_roll_lot_ca(
 
         logging.info(f"--- 롤길이 그룹 {roll_length} 최적화 성공 ---")
         all_results["pattern_result"].append(results["pattern_result"])
+        for detail in results["pattern_details_for_db"]:
+            detail['max_width'] = int(re_max_width)
         all_results["pattern_details_for_db"].extend(results["pattern_details_for_db"])
         all_results["pattern_roll_details_for_db"].extend(results.get("pattern_roll_details_for_db", []))
         all_results["pattern_roll_cut_details_for_db"].extend(results.get("pattern_roll_cut_details_for_db", []))
@@ -424,8 +428,64 @@ def process_roll_sl_lot(
         logging.error(f"[에러] Lot {lot_no} 롤-슬리터 최적화 실패: {error_msg}.")
         return None, None, start_prod_seq, start_group_order_no
     
+    if results and "pattern_details_for_db" in results:
+        for detail in results["pattern_details_for_db"]:
+            detail['max_width'] = int(re_max_width)
+    
     logging.info("롤-슬리터 최적화 성공.")
     return results, df_orders, prod_seq_counter, last_group_order_no
+
+def apply_sheet_grouping(df_orders, start_group_order_no, lot_no):
+    """
+    쉬트지 오더 그룹핑 로직을 적용하고 group_order_no를 생성합니다.
+    """
+    def get_group_key(row):
+        # 1. 내수
+        if row['수출내수'] == '내수':
+            # 내수이고 export_yn이 N이면 오더번호별로 그룹오더생성
+            return f"DOM_{row['order_no']}"
+        
+        # 2. 수출
+        else: # 수출내수 == '수출'
+            # 수출이고 export_yn이 Y이면 order_gubun 값이 A 이면 오더번호 별로 그룹오더 생성
+            if row.get('order_gubun') == 'A':
+                return f"EXP_A_{row['order_no']}"
+            else:
+                # 그 외에는 오더정보의 length 가 450~549, 550~699, 700 이상, 이 그룹으로 그룹오더 생성
+                length = row['세로']
+                if 450 <= length <= 549:
+                    return "EXP_L_450_549"
+                elif 550 <= length <= 699:
+                    return "EXP_L_550_699"
+                elif length >= 700:
+                    return "EXP_L_700_PLUS"
+                else:
+                    return f"EXP_L_OTHER_{length}"
+
+    df_orders['_group_key'] = df_orders.apply(get_group_key, axis=1)
+    
+    # 그룹핑 기준: 가로, 등급, _group_key
+    group_cols = ['가로', '등급', '_group_key']
+    
+    df_groups = df_orders.groupby(group_cols).agg(
+        대표오더번호=('order_no', 'first')
+    ).reset_index()
+    
+    # 정렬 (가로, 등급 순)
+    df_groups = df_groups.sort_values(by=['가로', '등급']).reset_index(drop=True)
+    
+    # Group Order No 생성
+    df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
+    last_group_order_no = start_group_order_no + len(df_groups)
+    
+    # 원본 데이터에 병합
+    df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
+    
+    # 임시 컬럼 제거
+    if '_group_key' in df_orders.columns:
+        df_orders = df_orders.drop(columns=['_group_key'])
+        
+    return df_orders, df_groups, last_group_order_no
 
 def process_sheet_lot(
         db, plant, pm_no, schedule_unit, lot_no, version, 
@@ -452,19 +512,13 @@ def process_sheet_lot(
     df_orders['lot_no'] = lot_no
     df_orders['version'] = version
 
-    group_cols = ['가로', '세로', '등급']
     df_orders['가로'] = pd.to_numeric(df_orders['가로'])
     df_orders['세로'] = pd.to_numeric(df_orders['세로'])
     df_orders['등급'] = df_orders['등급'].astype(str)
     
-    df_groups = df_orders.groupby(group_cols).agg(
-        대표오더번호=('order_no', 'first')
-    ).reset_index()
-    df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
-    df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
-    last_group_order_no = start_group_order_no + len(df_groups)
+    # --- [New Grouping Logic] ---
+    df_orders, df_groups, last_group_order_no = apply_sheet_grouping(df_orders, start_group_order_no, lot_no)
     
-    df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
     logging.info(f"--- Lot {df_groups.to_string()} 그룹마스터 정보 ---")
 
     logging.info("--- 쉬트지 최적화 시작 ---")
@@ -492,6 +546,10 @@ def process_sheet_lot(
         logging.error(f"[에러] Lot {lot_no} 쉬트지 최적화 실패: {error_msg}.")
         return None, None, start_prod_seq, start_group_order_no
     
+    if results and "pattern_details_for_db" in results:
+        for detail in results["pattern_details_for_db"]:
+            detail['max_width'] = int(re_max_width)
+
     logging.info("쉬트지 최적화 성공.")
     return results, df_orders, prod_seq_counter, last_group_order_no
 
@@ -561,6 +619,10 @@ def process_sheet_lot_var(
         logging.error(f"[에러] Lot {lot_no} 쉬트지(Var) 최적화 실패: {error_msg}.")
         return None, None, start_prod_seq, start_group_order_no
     
+    if results and "pattern_details_for_db" in results:
+        for detail in results["pattern_details_for_db"]:
+            detail['max_width'] = int(re_max_width)
+
     logging.info("쉬트지(Var) 최적화 성공.")
     return results, df_orders, prod_seq_counter, last_group_order_no
 
@@ -630,6 +692,10 @@ def process_sheet_lot_ca(
         logging.error(f"[에러] Lot {lot_no} 쉬트지(CA) 최적화 실패: {error_msg}.")
         return None, None, start_prod_seq, start_group_order_no
     
+    if results and "pattern_details_for_db" in results:
+        for detail in results["pattern_details_for_db"]:
+            detail['max_width'] = int(re_max_width)
+
     logging.info("쉬트지(CA) 최적화 성공.")
     return results, df_orders, prod_seq_counter, last_group_order_no
 
@@ -649,10 +715,33 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
 
     logging.info("최적화 결과 (패턴별 생산량):")
     logging.info("\n" + final_pattern_result.to_string())
+
+    # logging.info("패턴 상세 정보 (final_pattern_details_for_db):")
+    # # Ensure full output without truncation
+    # pd.set_option('display.max_rows', None)
+    # pd.set_option('display.max_columns', None)
+    # pd.set_option('display.width', 1000)
+    # pd.set_option('display.max_colwidth', None)
+    # logging.info("\n" + pd.DataFrame(final_pattern_details_for_db).to_string())
+    
+    # Fill NaNs for better logging
+    final_fulfillment_summary = final_fulfillment_summary.fillna(0)
+    
     logging.info("\n# ================= 주문 충족 현황 ================== #\n")
     logging.info("\n" + final_fulfillment_summary.to_string())
     logging.info("\n")
     logging.info("최적화 성공. 이제 결과를 DB에 저장합니다.")
+    
+    # [DEBUG] Check for NaNs in fulfillment summary
+    if final_fulfillment_summary.isnull().values.any():
+        logging.warning("[경고] Fulfillment Summary에 NaN 값이 포함되어 있습니다!")
+        nan_rows = final_fulfillment_summary[final_fulfillment_summary.isnull().any(axis=1)]
+        logging.warning(f"NaN Rows:\n{nan_rows.to_string()}")
+    
+    # [DEBUG] Log pattern details count
+    logging.info(f"[DEBUG] Saving {len(final_pattern_details_for_db)} pattern details to DB.")
+    if len(final_pattern_details_for_db) > 0:
+        logging.info(f"[DEBUG] First pattern detail sample: {final_pattern_details_for_db[0]}")
 
     connection = None
     try:
@@ -688,7 +777,7 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
 
         logging.info("\n\n# ================= 쉬트 재단 상세 정보 ================== #\n")
         db.insert_sheet_sequence(
-            connection, lot_no, version, plant, schedule_unit
+            connection, lot_no, version, plant, pm_no, schedule_unit
         )
 
         connection.commit()
@@ -696,7 +785,8 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
 
         output_dir = 'results'
         os.makedirs(output_dir, exist_ok=True)
-        output_filename = f"{lot_no}_{version}.csv"
+        timestamp = time.strftime('%y%m%d%H%M%S')
+        output_filename = f"{timestamp}_{lot_no}_{version}.csv"
         output_path = os.path.join(output_dir, output_filename)
         final_pattern_result.to_csv(output_path, index=False, encoding='utf-8-sig')
         logging.info(f"\n[성공] 요약 결과가 다음 파일에 저장되었습니다: {output_path}")
@@ -723,7 +813,8 @@ def setup_logging(lot_no, version):
     """로그 설정을 초기화합니다."""
     log_dir = 'results'
     os.makedirs(log_dir, exist_ok=True)
-    log_filename = f"{lot_no}_{version}.log"
+    timestamp = time.strftime('%y%m%d%H%M%S')
+    log_filename = f"{timestamp}_{lot_no}_{version}.log"
     log_path = os.path.join(log_dir, log_filename)
 
     logging.basicConfig(

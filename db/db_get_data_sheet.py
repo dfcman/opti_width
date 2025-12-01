@@ -18,7 +18,11 @@ class SheetGetters:
 
             sql_query = """
                 SELECT
-                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color
+                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun,
+                    CASE WHEN export_yn = 'N' AND width <= 600
+                            THEN '2' --내수, SHEET 지폭 600이하는 무조건 SKID_TYPE으로, 2012.10.05, LSY
+                            ELSE NVL(pt_gubun,'1')
+                    END PT_GUBUN
                 FROM
                     h3t_production_order
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -30,7 +34,7 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun  = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -42,7 +46,9 @@ class SheetGetters:
                     '주문톤': float(order_ton_cnt),
                     '등급': quality_grade,
                     '수출내수': export_type,
-                    'color': color
+                    'color': color,
+                    'order_gubun': order_gubun,
+                    'pt_gubun': pt_gubun
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders
@@ -70,7 +76,7 @@ class SheetGetters:
 
             sql_query = """
                 SELECT
-                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color
+                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun
                 FROM
                     hsfp_st.h3t_production_order@hsfp_st_rlink
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -83,7 +89,7 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -95,7 +101,9 @@ class SheetGetters:
                     '주문톤': float(order_ton_cnt),
                     '등급': quality_grade,
                     '수출내수': export_type,
-                    'color': color
+                    'color': color,
+                    'order_gubun': order_gubun,
+                    'pt_gubun': pt_gubun
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders
@@ -123,7 +131,7 @@ class SheetGetters:
 
             sql_query = """
                 SELECT
-                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color
+                    plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun
                 FROM
                     h3t_production_order@hsfp_ca_rlink
                 WHERE paper_prod_seq = :p_paper_prod_seq
@@ -135,7 +143,7 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -147,7 +155,9 @@ class SheetGetters:
                     '주문톤': float(order_ton_cnt),
                     '등급': quality_grade,
                     '수출내수': export_type,
-                    'color': color
+                    'color': color,
+                    'order_gubun': order_gubun,
+                    'pt_gubun': pt_gubun
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders

@@ -1,16 +1,19 @@
 import pandas as pd
 from ortools.linear_solver import pywraplp
+import random
 
 OVER_PROD_PENALTY = 100000000.0
 UNDER_PROD_PENALTY = 10000.0
 PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6
 CG_MAX_ITERATIONS = 200
-CG_NO_IMPROVEMENT_LIMIT = 50  # Increased from 25
-CG_SUBPROBLEM_TOP_N = 10      # Increased from 3
+CG_NO_IMPROVEMENT_LIMIT = 100  # Increased from 25
+CG_SUBPROBLEM_TOP_N = 20      # Increased from 3
 SMALL_PROBLEM_THRESHOLD = 10
 FINAL_MIP_TIME_LIMIT_MS = 120000
 PATTERN_SETUP_COST = 50000.0 # 새로운 패턴 종류를 1개 사용할 때마다 50000mm의 손실과 동일한 페널티
 TRIM_LOSS_PENALTY = 10.0      # 자투리 손실 1mm당 페널티
+MIXING_PENALTY = 1000.0       # 수출/내수 혼합 시 페널티 (자투리 100mm 손실과 동일하게 설정)
+
 NUM_THREADS = 6
 
 class RollOptimize:
@@ -27,6 +30,12 @@ class RollOptimize:
         self.items = list(self.demands.keys())
         self.item_info = df_spec_pre.set_index('group_order_no')['지폭'].to_dict()
         self.length_info = df_spec_pre.set_index('group_order_no')['롤길이'].to_dict()
+        
+        # 수출/내수 정보 저장 (없으면 '내수'로 가정)
+        if '수출내수' in df_spec_pre.columns:
+            self.export_info = df_spec_pre.set_index('group_order_no')['수출내수'].to_dict()
+        else:
+            self.export_info = {item: '내수' for item in self.items}
 
     def _clear_patterns(self):
         self.patterns = []
@@ -53,7 +62,23 @@ class RollOptimize:
         sorted_by_width_desc = sorted(self.items, key=lambda item: self.item_info.get(item, 0), reverse=True)
         sorted_by_width_asc = sorted(self.items, key=lambda item: self.item_info.get(item, 0))
 
-        heuristics = [sorted_by_demand, sorted_by_width_desc, sorted_by_width_asc, sorted_by_demand_asc]
+        # New Heuristics
+        # 1. Width * Demand (Area proxy)
+        # sorted_by_area_desc = sorted(self.items, key=lambda item: self.item_info.get(item, 0) * self.demands.get(item, 0), reverse=True)
+        
+        # 2. Random Shuffles (add multiple to increase diversity)
+        random_shuffles = []
+        for _ in range(5):
+            items_copy = list(self.items)
+            random.shuffle(items_copy)
+            random_shuffles.append(items_copy)
+
+        heuristics = [
+            sorted_by_demand, 
+            sorted_by_width_desc, 
+            sorted_by_width_asc, 
+            sorted_by_demand_asc
+        ] + random_shuffles
 
         for sorted_items in heuristics:
             for item in sorted_items:
@@ -182,11 +207,20 @@ class RollOptimize:
             objective += total_setup_cost
 
             # Add trim loss to objective
-            total_trim_loss = solver.Sum(
-                (self.max_width - sum(self.item_info[item] * count for item, count in pattern.items())) * x[j]
-                for j, pattern in enumerate(self.patterns)
-            )
-            objective += total_trim_loss * TRIM_LOSS_PENALTY
+            # total_trim_loss = solver.Sum(
+            #     (self.max_width - sum(self.item_info[item] * count for item, count in pattern.items())) * x[j]
+            #     for j, pattern in enumerate(self.patterns)
+            # )
+            # objective += total_trim_loss * TRIM_LOSS_PENALTY
+
+            # # Add mixing penalty (Export/Domestic)
+            # total_mixing_penalty = 0
+            # for j, pattern in enumerate(self.patterns):
+            #     export_types = {self.export_info[item] for item in pattern}
+            #     if len(export_types) > 1: # Mixed pattern
+            #         total_mixing_penalty += x[j] * MIXING_PENALTY
+            
+            # objective += total_mixing_penalty
 
             # if max_patterns is not None:
             #     solver.Add(solver.Sum(y[j] for j in range(len(self.patterns))) <= max_patterns)
@@ -207,70 +241,99 @@ class RollOptimize:
         return solution
 
     def _solve_subproblem(self, duals):
-        width_limit = self.max_width
-        piece_limit = self.max_pieces
-        item_details = []
-        for item in self.items:
-            item_width = self.item_info[item]
-            item_value = duals.get(item, 0)
-            if item_value <= 0:
-                continue
-            item_details.append((item, item_width, item_value))
-        if not item_details:
-            return []
-
-        dp_value = [[float('-inf')] * (width_limit + 1) for _ in range(piece_limit + 1)]
-        dp_parent = [[None] * (width_limit + 1) for _ in range(piece_limit + 1)]
-        dp_value[0][0] = 0.0
-
-        for pieces in range(piece_limit + 1):
-            for width in range(width_limit + 1):
-                current_value = dp_value[pieces][width]
-                if current_value == float('-inf'):
+        def run_dp(candidate_items):
+            width_limit = self.max_width
+            piece_limit = self.max_pieces
+            item_details = []
+            for item in candidate_items:
+                item_width = self.item_info[item]
+                item_value = duals.get(item, 0)
+                if item_value <= 0:
                     continue
-                for item_name, item_width, item_value in item_details:
-                    next_pieces = pieces + 1
-                    next_width = width + item_width
-                    if next_pieces > piece_limit or next_width > width_limit:
+                item_details.append((item, item_width, item_value))
+            if not item_details:
+                return []
+
+            dp_value = [[float('-inf')] * (width_limit + 1) for _ in range(piece_limit + 1)]
+            dp_parent = [[None] * (width_limit + 1) for _ in range(piece_limit + 1)]
+            dp_value[0][0] = 0.0
+
+            for pieces in range(piece_limit + 1):
+                for width in range(width_limit + 1):
+                    current_value = dp_value[pieces][width]
+                    if current_value == float('-inf'):
                         continue
-                    new_value = current_value + item_value
-                    if new_value > dp_value[next_pieces][next_width] + 1e-9:
-                        dp_value[next_pieces][next_width] = new_value
-                        dp_parent[next_pieces][next_width] = (pieces, width, item_name)
+                    for item_name, item_width, item_value in item_details:
+                        next_pieces = pieces + 1
+                        next_width = width + item_width
+                        if next_pieces > piece_limit or next_width > width_limit:
+                            continue
+                        new_value = current_value + item_value
+                        if new_value > dp_value[next_pieces][next_width] + 1e-9:
+                            dp_value[next_pieces][next_width] = new_value
+                            dp_parent[next_pieces][next_width] = (pieces, width, item_name)
 
-        candidate_patterns = []
-        seen_patterns = set()
-        for pieces in range(1, piece_limit + 1):
-            for width in range(self.min_width, width_limit + 1):
-                value = dp_value[pieces][width]
-                if value <= PATTERN_VALUE_THRESHOLD:
-                    continue
-                parent = dp_parent[pieces][width]
-                if not parent:
-                    continue
-                pattern = {}
-                cur_pieces, cur_width = pieces, width
-                while cur_pieces > 0:
-                    parent_info = dp_parent[cur_pieces][cur_width]
-                    if not parent_info:
-                        pattern = None
-                        break
-                    prev_pieces, prev_width, item_name = parent_info
-                    pattern[item_name] = pattern.get(item_name, 0) + 1
-                    cur_pieces, cur_width = prev_pieces, prev_width
-                if not pattern or cur_pieces != 0 or cur_width != 0:
-                    continue
-                key = frozenset(pattern.items())
-                if key in seen_patterns:
-                    continue
-                total_width = sum(self.item_info[name] * count for name, count in pattern.items())
-                if total_width < self.min_width or total_width > self.max_width:
-                    continue
-                seen_patterns.add(key)
-                candidate_patterns.append({'pattern': pattern, 'value': value, 'width': total_width, 'pieces': pieces})
+            local_candidates = []
+            seen_patterns = set()
+            for pieces in range(1, piece_limit + 1):
+                for width in range(self.min_width, width_limit + 1):
+                    value = dp_value[pieces][width]
+                    if value <= PATTERN_VALUE_THRESHOLD:
+                        continue
+                    parent = dp_parent[pieces][width]
+                    if not parent:
+                        continue
+                    pattern = {}
+                    cur_pieces, cur_width = pieces, width
+                    while cur_pieces > 0:
+                        parent_info = dp_parent[cur_pieces][cur_width]
+                        if not parent_info:
+                            pattern = None
+                            break
+                        prev_pieces, prev_width, item_name = parent_info
+                        pattern[item_name] = pattern.get(item_name, 0) + 1
+                        cur_pieces, cur_width = prev_pieces, prev_width
+                    if not pattern or cur_pieces != 0 or cur_width != 0:
+                        continue
+                    key = frozenset(pattern.items())
+                    if key in seen_patterns:
+                        continue
+                    total_width = sum(self.item_info[name] * count for name, count in pattern.items())
+                    if total_width < self.min_width or total_width > self.max_width:
+                        continue
+                    seen_patterns.add(key)
+                    local_candidates.append({'pattern': pattern, 'value': value, 'width': total_width, 'pieces': pieces})
+            return local_candidates
 
-        candidate_patterns.sort(key=lambda x: x['value'], reverse=True)
-        return candidate_patterns[:CG_SUBPROBLEM_TOP_N]
+        # 1. Run DP for ALL items (standard)
+        all_candidates = run_dp(self.items)
+        
+        # 2. Run DP for Export items only
+        export_items = [item for item in self.items if self.export_info.get(item) == '수출']
+        if export_items:
+            all_candidates.extend(run_dp(export_items))
+            
+        # 3. Run DP for Domestic items only
+        domestic_items = [item for item in self.items if self.export_info.get(item) == '내수']
+        if domestic_items:
+            all_candidates.extend(run_dp(domestic_items))
+
+        # Sort by value and return top N
+        # Note: Mixed patterns from step 1 might have high 'value' (dual sum) but will be penalized in Master.
+        # Pure patterns from step 2/3 will have lower 'value' potentially but no penalty in Master.
+        # We should return enough candidates to let Master decide.
+        
+        # Remove duplicates based on pattern content
+        unique_candidates = []
+        seen_keys = set()
+        for cand in all_candidates:
+            key = frozenset(cand['pattern'].items())
+            if key not in seen_keys:
+                seen_keys.add(key)
+                unique_candidates.append(cand)
+
+        unique_candidates.sort(key=lambda x: x['value'], reverse=True)
+        return unique_candidates[:CG_SUBPROBLEM_TOP_N * 3] # Return more candidates to cover different types
 
     def _generate_all_patterns(self):
         all_patterns = []
