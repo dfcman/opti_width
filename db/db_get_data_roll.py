@@ -8,21 +8,27 @@ class RollGetters:
             cursor = connection.cursor()
             # nvl(b.jipok_group, a.quality_grade) as quality_grade
             sql_query = """
-                SELECT
-                    a.plant, pm_no, schedule_unit, width, length, roll_length, a.quality_grade, order_roll_cnt, order_ton_cnt, export_yn, a.order_no,
-                    core, dia, nvl(pattern, ' ') as pattern, luster, color
-                FROM
-                    h3t_production_order a, h3t_production_order_param b
-                WHERE a.order_no = b.order_no(+)
+                select
+                    a.plant, a.pm_no, a.schedule_unit, a.width, a.length, a.roll_length, 
+                    a.quality_grade as quality_grade, a.order_roll_cnt, 
+                    a.order_ton_cnt, a.export_yn, a.order_no,
+                    a.core, a.dia, nvl(a.pattern, ' ') as pattern, a.luster, a.color, c.addchart, d.gen_hcode
+                from
+                    h3t_production_order a, h3t_production_order_param b, batch_master@paper33_link c, th_mst_commoncode d
+                where a.order_no = b.order_no(+)
                 and paper_prod_seq = :p_paper_prod_seq
-                  AND rs_gubun = 'R'
-                ORDER BY roll_length, width, dia, core
+                  and rs_gubun = 'R'
+                  and a.material_no = c.matnr(+)
+                  and a.batch_no = c.batch_no(+)
+                  and d.gen_type(+) = 'DJ_NK'
+                  and c.addchart = d.gen_code(+)
+                order by roll_length, width, dia, core
             """
             cursor.execute(sql_query, p_paper_prod_seq=paper_prod_seq)
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no, core, dia, pattern, luster, color = row
+                plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no, core, dia, pattern, luster, color, addchart, gen_hcode = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -40,7 +46,9 @@ class RollGetters:
                     'dia': dia,
                     'luster': luster,
                     'color': color,
-                    'order_pattern': pattern
+                    'order_pattern': pattern,
+                    'addchart': addchart,
+                    'gen_hcode': gen_hcode
                 })
             print(f"Successfully fetched {len(raw_orders)} roll orders for lot {paper_prod_seq}")
             return raw_orders

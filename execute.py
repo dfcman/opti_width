@@ -521,37 +521,78 @@ def process_sheet_lot(
     
     logging.info(f"--- Lot {df_groups.to_string()} 그룹마스터 정보 ---")
 
-    logging.info("--- 쉬트지 최적화 시작 ---")
-    optimizer = SheetOptimize(
-        df_spec_pre=df_orders,
-        max_width=int(re_max_width),
-        min_width=int(re_min_width),
-        max_pieces=int(re_max_pieces),
-        b_wgt=float(b_wgt),
-        sheet_roll_length=sheet_length_re,
-        sheet_trim=sheet_trim_size,
-        min_sc_width=min_sc_width,
-        max_sc_width=max_sc_width
-    )
-    try:
-        results = optimizer.run_optimize(start_prod_seq=start_prod_seq)
-        prod_seq_counter = results.get('last_prod_seq', start_prod_seq)
-    except Exception as e:
-        import traceback
-        logging.error(traceback.format_exc())
-        raise e
-
-    if not results or "error" in results:
-        error_msg = results['error'] if results and 'error' in results else "No solution found"
-        logging.error(f"[에러] Lot {lot_no} 쉬트지 최적화 실패: {error_msg}.")
-        return None, None, start_prod_seq, start_group_order_no
+    all_results = {
+        "pattern_result": [],
+        "pattern_details_for_db": [],
+        "pattern_roll_details_for_db": [],
+        "pattern_roll_cut_details_for_db": [],
+        "fulfillment_summary": []
+    }
     
-    if results and "pattern_details_for_db" in results:
-        for detail in results["pattern_details_for_db"]:
-            detail['max_width'] = int(re_max_width)
+    unique_grades = df_orders['등급'].unique()
+    prod_seq_counter = start_prod_seq
+    
+    for grade in unique_grades:
+        logging.info(f"\n--- 등급 {grade}에 대한 쉬트지 최적화 시작 ---")
+        df_subset = df_orders[df_orders['등급'] == grade].copy()
+        
+        if df_subset.empty:
+            continue
 
-    logging.info("쉬트지 최적화 성공.")
-    return results, df_orders, prod_seq_counter, last_group_order_no
+        optimizer = SheetOptimize(
+            df_spec_pre=df_subset,
+            max_width=int(re_max_width),
+            min_width=int(re_min_width),
+            max_pieces=int(re_max_pieces),
+            b_wgt=float(b_wgt),
+            sheet_roll_length=sheet_length_re,
+            sheet_trim=sheet_trim_size,
+            min_sc_width=min_sc_width,
+            max_sc_width=max_sc_width
+        )
+        
+        try:
+            results = optimizer.run_optimize(start_prod_seq=prod_seq_counter)
+            
+            if not results or "error" in results:
+                error_msg = results['error'] if results and 'error' in results else "No solution found"
+                logging.error(f"[에러] Lot {lot_no}, 등급 {grade} 쉬트지 최적화 실패: {error_msg}")
+                continue
+                
+            prod_seq_counter = results.get('last_prod_seq', prod_seq_counter)
+            
+            if "pattern_details_for_db" in results:
+                for detail in results["pattern_details_for_db"]:
+                    detail['max_width'] = int(re_max_width)
+            
+            all_results["pattern_result"].append(results["pattern_result"])
+            all_results["pattern_details_for_db"].extend(results["pattern_details_for_db"])
+            all_results["pattern_roll_details_for_db"].extend(results.get("pattern_roll_details_for_db", []))
+            all_results["pattern_roll_cut_details_for_db"].extend(results.get("pattern_roll_cut_details_for_db", []))
+            all_results["fulfillment_summary"].append(results["fulfillment_summary"])
+            
+            logging.info(f"--- 등급 {grade} 쉬트지 최적화 성공 ---")
+            
+        except Exception as e:
+            import traceback
+            logging.error(f"[에러] Lot {lot_no}, 등급 {grade} 처리 중 예외 발생")
+            logging.error(traceback.format_exc())
+            continue
+
+    if not all_results["pattern_details_for_db"]:
+        logging.error(f"[에러] Lot {lot_no} 쉬트지 최적화 결과가 없습니다 (모든 등급 실패).")
+        return None, None, start_prod_seq, start_group_order_no
+
+    final_results = {
+        "pattern_result": pd.concat(all_results["pattern_result"], ignore_index=True) if all_results["pattern_result"] else pd.DataFrame(),
+        "pattern_details_for_db": all_results["pattern_details_for_db"],
+        "pattern_roll_details_for_db": all_results["pattern_roll_details_for_db"],
+        "pattern_roll_cut_details_for_db": all_results["pattern_roll_cut_details_for_db"],
+        "fulfillment_summary": pd.concat(all_results["fulfillment_summary"], ignore_index=True) if all_results["fulfillment_summary"] else pd.DataFrame()
+    }
+
+    logging.info("쉬트지 최적화 성공 (전체 등급 완료).")
+    return final_results, df_orders, prod_seq_counter, last_group_order_no
 
 def process_sheet_lot_var(
         db, plant, pm_no, schedule_unit, lot_no, version, 

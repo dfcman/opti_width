@@ -6,19 +6,20 @@ import random
 
 # --- 최적화 설정 상수 ---
 # 페널티 값
-OVER_PROD_PENALTY = 200.0    # 과생산에 대한 페널티
-UNDER_PROD_PENALTY = 500.0  # 부족생산에 대한 페널티
+OVER_PROD_PENALTY = 5000.0    # 과생산에 대한 페널티
+UNDER_PROD_PENALTY = 5000.0  # 부족생산에 대한 페널티
 PATTERN_COMPLEXITY_PENALTY = 0.01  # 패턴 복잡성에 대한 페널티
+PIECE_COUNT_PENALTY = 10         # 패턴 내 롤(piece) 개수에 대한 페널티 (적은 롤 선호)
 
 # 알고리즘 파라미터
 MIN_PIECES_PER_PATTERN = 2      # 패턴에 포함될 수 있는 최소 폭(piece)의 수
 SMALL_PROBLEM_THRESHOLD = 8     # 전체 탐색을 수행할 최대 주문 지폭 종류 수
-SOLVER_TIME_LIMIT_MS = 60000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
-CG_MAX_ITERATIONS = 100         # 열 생성(Column Generation) 최대 반복 횟수
+SOLVER_TIME_LIMIT_MS = 120000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
+CG_MAX_ITERATIONS = 200         # 열 생성(Column Generation) 최대 반복 횟수
 CG_NO_IMPROVEMENT_LIMIT = 100    # 개선 없는 경우, 열 생성 조기 종료 조건
-CG_SUBPROBLEM_TOP_N = 3         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
+CG_SUBPROBLEM_TOP_N = 20         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
 
-NUM_THREADS = 6
+NUM_THREADS = 4
 
 class SheetOptimize:
     def __init__(
@@ -80,6 +81,30 @@ class SheetOptimize:
             current_level = self.width_constraints.get(width, 0)
             self.width_constraints[width] = max(current_level, constraint_level)
 
+        # 지폭별 최대 롤지폭 제약조건 계산 (New)
+        self.width_max_constraints = {}
+        for _, row in self.df_orders.iterrows():
+            width = row['가로']
+            length = row['세로']
+            dir_gubun = str(row.get('dir_gubun', ''))
+            
+            # 기본값: 설비 최대폭 (또는 매우 큰 값)
+            max_allowed = self.original_max_width
+            
+            if dir_gubun == 'ZARL':
+                max_allowed = 2450
+            else:
+                if length < 500:
+                    max_allowed = 1680
+                elif 500 <= length < 600:
+                    max_allowed = 2186
+                elif length >= 600:
+                    max_allowed = 2874
+            
+            # 동일 지폭 내에서 가장 엄격한(작은) 값 적용
+            current_max = self.width_max_constraints.get(width, self.original_max_width)
+            self.width_max_constraints[width] = min(current_max, max_allowed)
+
         self.items, self.item_info, self.item_composition = self._prepare_items(min_sc_width, max_sc_width)
 
         self.max_width = max_width
@@ -112,6 +137,12 @@ class SheetOptimize:
                     if i not in [2, 4]: continue
 
                 base_width = width * i + self.sheet_trim
+                
+                # 최대 롤지폭 제약조건 체크 (New)
+                max_allowed_width = self.width_max_constraints.get(width, self.original_max_width)
+                if base_width > max_allowed_width:
+                    continue
+
                 if not (min_sc_width <= base_width <= max_sc_width):
                     continue
 
@@ -204,10 +235,28 @@ class SheetOptimize:
             key=lambda i: self.demands_in_rolls.get(list(self.item_composition[i].keys())[0], 0),
             reverse=True
         )
+        sorted_by_demand_asc = sorted(
+            self.items,
+            key=lambda i: self.demands_in_rolls.get(list(self.item_composition[i].keys())[0], 0),
+            reverse=False
+        )
         sorted_by_width_desc = sorted(self.items, key=lambda i: self.item_info[i], reverse=True)
         sorted_by_width_asc = sorted(self.items, key=lambda i: self.item_info[i], reverse=False)
 
-        heuristics = [sorted_by_demand, sorted_by_width_desc, sorted_by_width_asc]
+        # 2. Random Shuffles (add multiple to increase diversity)
+        random.seed(41) # Ensure determinism
+        random_shuffles = []
+        for _ in range(3):
+            items_copy = list(self.items)
+            random.shuffle(items_copy)
+            random_shuffles.append(items_copy)
+
+        heuristics = [
+            sorted_by_demand, 
+            sorted_by_width_desc, 
+            sorted_by_width_asc, 
+            sorted_by_demand_asc
+        ] + random_shuffles
         
         # 2. 각 휴리스틱에 대해 First-Fit과 유사한 패턴 생성
         for sorted_items in heuristics:
@@ -310,6 +359,12 @@ class SheetOptimize:
                     else:
                         # 동적으로 생성 및 유효성 검사
                         composite_width = width * i + self.sheet_trim
+                        
+                        # 최대 롤지폭 제약조건 체크 (New)
+                        max_allowed_width = self.width_max_constraints.get(width, self.original_max_width)
+                        if composite_width > max_allowed_width:
+                            continue
+
                         if (self.min_sc_width <= composite_width <= self.max_sc_width) and \
                            (composite_width <= self.original_max_width):
                             # 유효하면 아이템 정보에 추가
@@ -410,6 +465,11 @@ class SheetOptimize:
                            current_total_pieces + num_to_use <= self.max_pieces and \
                            current_total_width + item_width * num_to_use <= self.max_width:
                             
+                            # 최대 롤지폭 제약조건 체크 (New)
+                            max_allowed_width = self.width_max_constraints.get(base_width, self.original_max_width)
+                            if item_width > max_allowed_width:
+                                continue
+
                             new_pattern[item_name] = new_pattern.get(item_name, 0) + num_to_use
                             current_total_width += item_width * num_to_use
                             current_total_pieces += num_to_use
@@ -466,7 +526,20 @@ class SheetOptimize:
         total_under_prod_penalty = solver.Sum(UNDER_PROD_PENALTY * var for var in under_prod_vars.values())
         total_complexity_penalty = solver.Sum(PATTERN_COMPLEXITY_PENALTY * len(self.patterns[j]) * x[j] for j in range(len(self.patterns)))
         
-        solver.Minimize(total_rolls + total_over_prod_penalty + total_under_prod_penalty + total_complexity_penalty)
+        # 패턴 내 총 롤(piece) 개수에 대한 페널티 추가 (Quadratic: 제곱 비례)
+        # 롤 개수가 많을수록 페널티가 급격히 증가하여, 적은 롤 개수의 패턴을 선호하게 함
+        # 패턴 내 총 롤(piece) 개수에 대한 페널티 추가 (Quadratic: 제곱 비례)
+        # 롤 개수가 많을수록 페널티가 급격히 증가하여, 적은 롤 개수의 패턴을 선호하게 함
+        # 수정: item_composition의 values sum(쉬트 수)이 아니라, item 자체의 수(부모 롤 수)를 기준으로 페널티 부과
+        total_piece_penalty = solver.Sum(
+            PIECE_COUNT_PENALTY * (sum(
+                count 
+                for item, count in self.patterns[j].items()
+            ) ** 2) * x[j] 
+            for j in range(len(self.patterns))
+        )
+
+        solver.Minimize(total_rolls + total_over_prod_penalty + total_under_prod_penalty + total_complexity_penalty + total_piece_penalty)
         
         status = solver.Solve()
         if status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
@@ -492,7 +565,11 @@ class SheetOptimize:
             item_width = self.item_info[item_name]
             # duals 값을 이용하여 item_value 계산
             item_value = sum(count * duals.get(width, 0) for width, count in self.item_composition[item_name].items())
+            
             # item_value가 양수인 경우에만 item_details에 추가
+            # DP 탐색 시에는 순수 Dual Sum만 사용하고, 페널티는 나중에 적용
+            if item_value <= 0:
+                continue
             if item_value <= 0:
                 continue
             item_details.append((item_name, item_width, item_value))
@@ -571,8 +648,14 @@ class SheetOptimize:
                     # 패턴이 너비 제약 조건을 충족하지 못하면 건너뛰기
                     continue
 
+                # Reduced Cost 계산 (Quadratic Penalty 적용)
+                # Reduced Cost = Dual_Sum - (1 + Penalty * pieces^2)
+                # DP value는 Dual Sum을 담고 있음
+                reduced_cost = value - (1.0 + PIECE_COUNT_PENALTY * (pieces ** 2))
+
                 seen_patterns.add(pattern_key)
-                candidate_patterns.append({'pattern': pattern, 'value': value, 'width': total_width, 'pieces': pieces})
+                # value를 reduced_cost로 업데이트하여 정렬 시 사용
+                candidate_patterns.append({'pattern': pattern, 'value': reduced_cost, 'width': total_width, 'pieces': pieces})
 
         if not candidate_patterns:
             return []
@@ -664,6 +747,10 @@ class SheetOptimize:
             return {"error": "유효한 패턴을 생성할 수 없습니다."}
 
         print(f"\n--- 총 {len(self.patterns)}개의 패턴으로 최종 최적화를 수행합니다. ---")
+        
+        # 최종 최적화 전에 패턴 통합(Consolidation) 한 번 더 수행
+        self._consolidate_patterns()
+
         final_solution = self._solve_master_problem_ilp(is_final_mip=True)        
         if not final_solution:
             return {"error": "최종 해를 찾을 수 없습니다."}

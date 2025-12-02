@@ -1,6 +1,8 @@
 import pandas as pd
 from ortools.linear_solver import pywraplp
 import random
+import logging
+import time
 
 OVER_PROD_PENALTY = 100000000.0
 UNDER_PROD_PENALTY = 10000.0
@@ -14,7 +16,7 @@ PATTERN_SETUP_COST = 50000.0 # 새로운 패턴 종류를 1개 사용할 때마�
 TRIM_LOSS_PENALTY = 10.0      # 자투리 손실 1mm당 페널티
 MIXING_PENALTY = 1000.0       # 수출/내수 혼합 시 페널티 (자투리 100mm 손실과 동일하게 설정)
 
-NUM_THREADS = 6
+NUM_THREADS = 4
 
 class RollOptimize:
     
@@ -67,8 +69,9 @@ class RollOptimize:
         # sorted_by_area_desc = sorted(self.items, key=lambda item: self.item_info.get(item, 0) * self.demands.get(item, 0), reverse=True)
         
         # 2. Random Shuffles (add multiple to increase diversity)
+        random.seed(41) # Ensure determinism
         random_shuffles = []
-        for _ in range(5):
+        for _ in range(3):
             items_copy = list(self.items)
             random.shuffle(items_copy)
             random_shuffles.append(items_copy)
@@ -333,7 +336,39 @@ class RollOptimize:
                 unique_candidates.append(cand)
 
         unique_candidates.sort(key=lambda x: x['value'], reverse=True)
-        return unique_candidates[:CG_SUBPROBLEM_TOP_N * 3] # Return more candidates to cover different types
+        return unique_candidates[:CG_SUBPROBLEM_TOP_N * 3] # Return more candidates to cover different types    
+
+    def _filter_patterns_by_lp(self, keep_top_n=300):
+        # 1. Solve LP relaxation
+        lp_solution = self._solve_master_problem(is_final_mip=False)
+        if not lp_solution or 'duals' not in lp_solution:
+            return
+
+        duals = lp_solution['duals']
+        kept_indices = set()
+
+        # 2. Keep Basis patterns (x > 0)
+        for j, count in lp_solution['pattern_counts'].items():
+            if count > 1e-6:
+                kept_indices.add(j)
+
+        # 3. Score patterns by "implied value" (sum of duals)
+        # We want patterns that cover high-value demands (high duals).
+        patterns_data = []
+        for j, pattern in enumerate(self.patterns):
+            if j in kept_indices:
+                continue
+            val = sum(duals.get(item, 0) * count for item, count in pattern.items())
+            patterns_data.append({'index': j, 'val': val})
+
+        # 4. Keep Top N by score
+        patterns_data.sort(key=lambda x: x['val'], reverse=True)
+        for i in range(min(keep_top_n, len(patterns_data))):
+            kept_indices.add(patterns_data[i]['index'])
+
+        # 5. Filter patterns
+        self.patterns = [self.patterns[j] for j in kept_indices]
+        self._rebuild_pattern_cache()
 
     def _generate_all_patterns(self):
         all_patterns = []
@@ -370,50 +405,21 @@ class RollOptimize:
         find_combinations_recursive(0, {}, 0, 0)
         self.patterns = [dict(p) for p in all_patterns]
         self._rebuild_pattern_cache()
-
-    def _minimize_pattern_count(self, current_solution):
-        """
-        주어진 해에서 패턴 수를 1~2개 줄여보려고 시도하고,
-        비용(Objective Value)이 가장 낮은 해를 선택합니다.
-        """
-        best_solution = current_solution
-        min_objective = current_solution['objective']
-        
-        current_pattern_count = sum(1 for count in current_solution['pattern_counts'].values() if count > 0.99)
-        
-        print(f"Initial pattern count: {current_pattern_count}, Objective: {min_objective}")
-
-        # Try to reduce by 1, then by 2
-        for i in range(1, 3):
-            target_pattern_count = current_pattern_count - i
-            if target_pattern_count <= 0:
-                break
-
-            print(f"Trying to reduce pattern count to {target_pattern_count}...")
-            
-            new_solution = self._solve_master_problem(is_final_mip=True, max_patterns=target_pattern_count)
-            
-            if new_solution:
-                print(f"Success! Found feasible solution with {target_pattern_count} patterns. Objective: {new_solution['objective']}")
-                
-                # If the new solution's cost is lower, update the best solution
-                if new_solution['objective'] < min_objective:
-                    print(f"  -> New best solution found! (Cost reduced: {min_objective} -> {new_solution['objective']})")
-                    best_solution = new_solution
-                    min_objective = new_solution['objective']
-                else:
-                    print(f"  -> Cost is not lower than best (Current: {new_solution['objective']} >= Best: {min_objective}). Keeping best.")
-            else:
-                print(f"Failed to find solution with {target_pattern_count} patterns.")
-
-        final_count = sum(1 for count in best_solution['pattern_counts'].values() if count > 0.99)
-        print(f"Final selected pattern count: {final_count}, Final Objective: {min_objective}")
-        return best_solution
-
+        logging.info(f"Generated {len(self.patterns)} patterns in _generate_all_patterns")
+ 
     def run_optimize(self, start_prod_seq=0):
+        logging.info(f"Starting run_optimize with {len(self.items)} items")
+        start_time = time.time()
+        
         if len(self.items) <= SMALL_PROBLEM_THRESHOLD:
+            logging.info("Using _generate_all_patterns (Small Problem)")
             self._generate_all_patterns()
+                       
+            # filter_start = time.time()
+            # self._filter_patterns_by_lp(keep_top_n=600) # Optimize by filtering patterns
+            # logging.info(f"Pattern filtering took {time.time() - filter_start:.4f}s. Remaining patterns: {len(self.patterns)}")
         else:
+            logging.info("Using Column Generation (Large Problem)")
             self._generate_initial_patterns()
             if not self.patterns:
                 return {"error": "초기 유효 패턴을 생성하지 못했습니다."}
@@ -458,8 +464,6 @@ class RollOptimize:
         if not final_solution:
             return {"error": f"최종 해를 찾을 수 없습니다. {self.min_width}mm 이상을 충족하는 주문이 부족했을 수 있습니다."}
 
-        # Try to minimize pattern count further
-        # final_solution = self._minimize_pattern_count(final_solution)
 
         return self._format_results(final_solution, start_prod_seq)
 
