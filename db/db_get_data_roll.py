@@ -12,7 +12,7 @@ class RollGetters:
                     a.plant, a.pm_no, a.schedule_unit, a.width, a.length, a.roll_length, 
                     a.quality_grade as quality_grade, a.order_roll_cnt, 
                     a.order_ton_cnt, a.export_yn, a.order_no,
-                    a.core, a.dia, nvl(a.pattern, ' ') as pattern, a.luster, a.color, c.addchart, d.gen_hcode
+                    a.core, a.dia, nvl(a.pattern, ' ') as pattern, a.luster, a.color, c.addchart, d.gen_hcode as sep_qt
                 from
                     h3t_production_order a, h3t_production_order_param b, batch_master@paper33_link c, th_mst_commoncode d
                 where a.order_no = b.order_no(+)
@@ -28,7 +28,7 @@ class RollGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no, core, dia, pattern, luster, color, addchart, gen_hcode = row
+                plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no, core, dia, pattern, luster, color, addchart, sep_qt = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -48,7 +48,7 @@ class RollGetters:
                     'color': color,
                     'order_pattern': pattern,
                     'addchart': addchart,
-                    'gen_hcode': gen_hcode
+                    'sep_qt': sep_qt
                 })
             print(f"Successfully fetched {len(raw_orders)} roll orders for lot {paper_prod_seq}")
             return raw_orders

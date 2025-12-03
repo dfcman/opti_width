@@ -6,8 +6,8 @@ import random
 
 # --- 최적화 설정 상수 ---
 # 페널티 값
-OVER_PROD_PENALTY = 5000.0    # 과생산에 대한 페널티
-UNDER_PROD_PENALTY = 5000.0  # 부족생산에 대한 페널티
+OVER_PROD_PENALTY = 50000.0    # 과생산에 대한 페널티
+UNDER_PROD_PENALTY = 250000.0  # 부족생산에 대한 페널티 (과생산보다 우선순위 높임)
 PATTERN_COMPLEXITY_PENALTY = 0.01  # 패턴 복잡성에 대한 페널티
 PIECE_COUNT_PENALTY = 10         # 패턴 내 롤(piece) 개수에 대한 페널티 (적은 롤 선호)
 
@@ -104,6 +104,29 @@ class SheetOptimize:
             # 동일 지폭 내에서 가장 엄격한(작은) 값 적용
             current_max = self.width_max_constraints.get(width, self.original_max_width)
             self.width_max_constraints[width] = min(current_max, max_allowed)
+
+        # 정확한 생산량 준수(Exact Match)가 필요한 지폭 식별
+        # 조건 1: 해당 지폭의 총 주문량(톤)이 20톤 이하
+        # 조건 2: 해당 지폭의 오더 중 regular_gubun이 '2'인 경우
+        self.exact_match_widths = set()
+        
+        # 지폭별 Group Order(가로, 세로, 등급)별 주문량 계산
+        # 사용자 요청: "가로 동일한 725*905 와 725*565는 ... 따로 체크를 해줘야 돼."
+        # 로직: 해당 지폭에 속한 "모든 Group Order"가 5톤 이하일 때만 Exact Match 적용.
+        #      하나라도 5톤을 초과하는 대량 주문이 있다면, 그 주문으로 과생산을 흡수할 수 있으므로 Exact Match 미적용.
+        
+        # group_order_tons = self.df_orders.groupby(['가로', '세로', '등급'])['주문톤'].sum().reset_index()
+        
+        # # 지폭별로 "가장 큰 Group Order의 톤수"를 계산
+        # width_max_group_ton = group_order_tons.groupby('가로')['주문톤'].max()
+
+        # for width in self.order_widths:
+        #     max_group_ton = width_max_group_ton.get(width, 0)
+            
+        #     # 해당 지폭의 어떤 Group Order도 5톤을 넘지 않으면 (모두 소량이면) Exact Match 적용
+        #     if max_group_ton <= 8:
+        #         self.exact_match_widths.add(width)
+        #         print(f"  -> 지폭 {width}mm: Exact Match 적용 (최대 Group Order 톤수: {max_group_ton:.1f})")
 
         self.items, self.item_info, self.item_composition = self._prepare_items(min_sc_width, max_sc_width)
 
@@ -246,7 +269,7 @@ class SheetOptimize:
         # 2. Random Shuffles (add multiple to increase diversity)
         random.seed(41) # Ensure determinism
         random_shuffles = []
-        for _ in range(3):
+        for _ in range(10):
             items_copy = list(self.items)
             random.shuffle(items_copy)
             random_shuffles.append(items_copy)
@@ -417,7 +440,7 @@ class SheetOptimize:
                     print(f"    - 지폭 {width}mm에 대한 순수 패턴을 구성하지 못했습니다.")
 
         # --- 5. 생성된 패턴들을 후처리하여 작은 복합폭들을 통합 ---
-        self._consolidate_patterns()
+        # self._consolidate_patterns() # 사용자 요청: 초기 생성 시에는 통합하지 않음
 
         print(f"--- 총 {len(self.patterns)}개의 초기 패턴 생성됨 ---")
         print(self.patterns)
@@ -452,6 +475,25 @@ class SheetOptimize:
             for base_width in sorted_base_widths:
                 remaining_base_count = base_width_counts[base_width]
                 
+                # Special Case: If we have exactly 4 sheets, prefer 2x 2-up over 1x 3-up + 1x 1-up
+                # This reduces setup time in the cutter process.
+                if remaining_base_count == 4:
+                    item_name_2up = f"{base_width}x2"
+                    if item_name_2up in self.item_info:
+                        item_width_2up = self.item_info[item_name_2up]
+                        max_allowed_width = self.width_max_constraints.get(base_width, self.original_max_width)
+                        
+                        # Check constraints for 2-up
+                        if item_width_2up <= max_allowed_width and \
+                           current_total_pieces + 2 <= self.max_pieces and \
+                           current_total_width + item_width_2up * 2 <= self.max_width:
+                            
+                            new_pattern[item_name_2up] = new_pattern.get(item_name_2up, 0) + 2
+                            current_total_width += item_width_2up * 2
+                            current_total_pieces += 2
+                            remaining_base_count -= 4
+                            continue # Skip the normal loop for this base_width
+
                 for i in range(4, 0, -1):
                     if remaining_base_count < i:
                         continue
@@ -519,6 +561,13 @@ class SheetOptimize:
                 for j in range(len(self.patterns))
             )
             constraints[width] = solver.Add(production_for_width + under_prod_vars[width] == required_rolls + over_prod_vars[width], f'demand_{width}')
+
+            # Exact Match 제약조건 적용
+            if width in self.exact_match_widths:
+                # 과생산 금지 (UB = 0) -> 1로 완화 (정수해 불가능성 대비)
+                over_prod_vars[width].SetBounds(0.0, 1.0)
+                # 부족생산 금지 (UB = 0) -> 강제 맞춤
+                under_prod_vars[width].SetBounds(0.0, 0.0)
 
         # 목적함수: 총 롤 수 + 페널티 최소화
         total_rolls = solver.Sum(x.values())
@@ -899,7 +948,10 @@ class SheetOptimize:
                                 else:
                                     fallback_indices = demand_tracker[demand_tracker['지폭'] == base_width].index
                                     if not fallback_indices.empty:
-                                        assigned_group_no = demand_tracker.loc[fallback_indices.min(), 'group_order_no']
+                                        # target_idx = fallback_indices[0] # Use min index to be consistent or just first
+                                        target_idx = fallback_indices[0]
+                                        assigned_group_no = demand_tracker.loc[target_idx, 'group_order_no']
+                                        demand_tracker.loc[target_idx, 'fulfilled'] += 1
                                 
                                 base_widths_for_item.append(base_width)
                                 base_group_nos_for_item.append(assigned_group_no)
@@ -939,11 +991,7 @@ class SheetOptimize:
             grouped_batches = []
             for key, group in itertools.groupby(all_rolls_data, key=get_group_key):
                 batch_rolls = list(group)
-                # DEBUG: Trace batch creation
-                # print(f"[DEBUG] Batch created. Count: {len(batch_rolls)}. Key Group Nos: {key[1]}")
-                if any(str(g) in ['303250900073070', '303250900073071'] for g in key[1]):
-                     print(f"[DEBUG] Batch created for target orders. Count: {len(batch_rolls)}. Group Nos: {key[1]}")
-
+                
                 grouped_batches.append({
                     'count': len(batch_rolls),
                     'data': batch_rolls[0] # Representative data

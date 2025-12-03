@@ -23,7 +23,7 @@ class SheetGetters:
                             THEN '2' --내수, SHEET 지폭 600이하는 무조건 SKID_TYPE으로, 2012.10.05, LSY
                             ELSE NVL(a.pt_gubun,'1')
                     END PT_GUBUN,
-                    d.gen_hcode, f.dir_gubun
+                    d.gen_hcode, f.dir_gubun, e.regular_gubun
                 FROM
                     h3t_production_order a, h3t_production_order_param b, batch_master@paper33_link c, th_mst_commoncode d, sapd12t_tmp e, sapd11t_tmp f
                 WHERE a.order_no = b.order_no(+)
@@ -42,7 +42,7 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun, gen_hcode, dir_gubun  = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun, gen_hcode, dir_gubun, regular_gubun  = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -58,7 +58,8 @@ class SheetGetters:
                     'order_gubun': order_gubun,
                     'pt_gubun': pt_gubun,
                     'gen_hcode': gen_hcode,
-                    'dir_gubun': dir_gubun
+                    'dir_gubun': dir_gubun,
+                    'regular_gubun': regular_gubun
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders

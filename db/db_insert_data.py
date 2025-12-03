@@ -262,7 +262,6 @@ class DataInserters:
             print(row)
 
         print(f"Prepared sheet sequences for transaction by calling PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO.")
-        print(f"Prepared sheet sequences for transaction by calling PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO.")
         print(f"[DEBUG] Sheet sequence generation procedure called for Lot {lot_no}, Version {version}, PM {pm_no}.")
 
     def insert_order_group(self, connection, lot_no, version, plant, pm_no, schedule_unit, df_orders):
