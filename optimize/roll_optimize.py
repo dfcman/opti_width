@@ -4,8 +4,15 @@ import random
 import logging
 import time
 
+"""
+[파일 설명: roll_optimize.py]
+롤(Roll) 제품의 생산 최적화를 위한 핵심 모듈입니다.
+Column Generation(열 생성) 알고리즘을 기반으로 하여, 주문 요구사항(지폭, 수량)을 만족시키면서
+폐기물(Trim Loss)과 패턴 교체 비용을 최소화하는 최적의 절단 패턴을 산출합니다.
+"""
+
 OVER_PROD_PENALTY = 100000000.0
-UNDER_PROD_PENALTY = 10000.0
+UNDER_PROD_PENALTY = 100000.0
 PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6
 CG_MAX_ITERATIONS = 200
 CG_NO_IMPROVEMENT_LIMIT = 100  # Increased from 25
@@ -14,11 +21,40 @@ SMALL_PROBLEM_THRESHOLD = 10
 FINAL_MIP_TIME_LIMIT_MS = 120000
 PATTERN_SETUP_COST = 50000.0 # 새로운 패턴 종류를 1개 사용할 때마다 50000mm의 손실과 동일한 페널티
 TRIM_LOSS_PENALTY = 10.0      # 자투리 손실 1mm당 페널티
-MIXING_PENALTY = 1000.0       # 수출/내수 혼합 시 페널티 (자투리 100mm 손실과 동일하게 설정)
+MIXING_PENALTY = 100000.0       # 공백이 1개 섞인 경우는 페널티 비용 팬턴 생성비용과 비교
 
 NUM_THREADS = 4
 
 class RollOptimize:
+    """
+    [RollOptimize 클래스 분석 및 기능 요약]
+
+    이 클래스는 롤(Roll) 제품의 생산 최적화를 담당합니다.
+    주어진 원지(Jumbo Roll) 폭과 설비 제약 조건을 고려하여, 주문받은 규격(지폭)을 
+    가장 효율적으로 생산할 수 있는 절단 패턴(Cutting Pattern)과 생산 수량을 산출합니다.
+
+    핵심 기능 및 알고리즘:
+    1.  **초기화 (__init__)**:
+        -   주문 데이터(df_spec_pre)를 로드하고, 지폭별 수요량(demands) 및 제약 조건(최대/최소 폭, 최대 조수 등)을 설정합니다.
+
+    2.  **초기 패턴 생성 (_generate_initial_patterns)**:
+        -   Column Generation의 시작점이 될 초기 패턴 집합을 생성합니다.
+        -   다양한 휴리스틱(수요순, 너비순 정렬 등)과 무작위 섞기를 결합한 First-Fit 알고리즘을 사용합니다.
+        -   모든 주문을 커버할 수 있도록 단일 품목 패턴 및 폴백(Fallback) 로직도 포함합니다.
+
+    3.  **열 생성법 (Column Generation) 기반 최적화 (run_optimize)**:
+        -   대규모 조합 최적화 문제를 효율적으로 풀기 위해 반복적인 과정을 수행합니다.
+        -   **Master Problem (_solve_master_problem)**: 
+            현재 확보된 패턴들을 조합하여 비용(과생산, 폐기물, 패턴 교체 비용 등)을 최소화하는 해를 찾습니다. 
+            (초기에는 LP로 완화하여 풀고, 마지막에 MIP로 정수해를 구합니다.)
+        -   **Sub Problem (_solve_subproblem)**: 
+            Master Problem의 Dual Value(잠재 가격)를 활용하여, 현재 해를 개선할 수 있는(Reduced Cost > 0) 
+            새로운 유망 패턴(Knapsack Problem 해)을 동적 계획법(DP)으로 찾아냅니다.
+    
+    4.  **결과 생성 (_format_results)**:
+        -   최적화된 패턴별 생산 수량을 바탕으로 구체적인 작업 지시 데이터(생산 순서, 롤별 구성 등)를 생성합니다.
+        -   과생산/부족생산 및 로스율 등의 지표를 집계하여 요약 정보를 제공합니다.
+    """
     
     def __init__(self, df_spec_pre, max_width=1000, min_width=0, max_pieces=8, lot_no=None):
         self.df_spec_pre = df_spec_pre
@@ -33,11 +69,11 @@ class RollOptimize:
         self.item_info = df_spec_pre.set_index('group_order_no')['지폭'].to_dict()
         self.length_info = df_spec_pre.set_index('group_order_no')['롤길이'].to_dict()
         
-        # 수출/내수 정보 저장 (없으면 '내수'로 가정)
-        if '수출내수' in df_spec_pre.columns:
-            self.export_info = df_spec_pre.set_index('group_order_no')['수출내수'].to_dict()
+        # sep_qt 정보 저장 (없으면 빈 문자열로 가정)
+        if 'sep_qt' in df_spec_pre.columns:
+            self.sep_qt_info = df_spec_pre.set_index('group_order_no')['sep_qt'].to_dict()
         else:
-            self.export_info = {item: '내수' for item in self.items}
+            self.sep_qt_info = {item: '' for item in self.items}
 
     def _clear_patterns(self):
         self.patterns = []
@@ -71,7 +107,7 @@ class RollOptimize:
         # 2. Random Shuffles (add multiple to increase diversity)
         random.seed(41) # Ensure determinism
         random_shuffles = []
-        for _ in range(3):
+        for _ in range(5):
             items_copy = list(self.items)
             random.shuffle(items_copy)
             random_shuffles.append(items_copy)
@@ -156,6 +192,19 @@ class RollOptimize:
                     self._add_pattern({item: 1})
 
     def _solve_master_problem(self, is_final_mip=False, max_patterns=None):
+        """
+        마스터 문제(Master Problem)를 선형계획법(LP) 또는 정수계획법(MIP)으로 해결합니다.
+        
+        목적 함수:
+        1. 과생산 페널티 최소화 (주문량 준수)
+        2. 패턴 교체 비용(Setup Cost) 최소화
+        3. 폐기물(Trim Loss) 최소화 (옵션)
+        4. 혼합 생산(Mixing) 페널티 최소화 (동일 패턴 내 이질적인 제품 혼합 지양)
+        
+        Args:
+            is_final_mip (bool): True이면 정수해(Integer Solution)를 구하고, 
+                               False이면 열 생성을 위한 실수해(Relaxed LP)와 Dual Value를 구합니다.
+        """
         solver_name = 'SCIP' if is_final_mip else 'GLOP'
         solver = pywraplp.Solver.CreateSolver(solver_name)
         if not solver:
@@ -216,14 +265,28 @@ class RollOptimize:
             # )
             # objective += total_trim_loss * TRIM_LOSS_PENALTY
 
-            # # Add mixing penalty (Export/Domestic)
-            # total_mixing_penalty = 0
-            # for j, pattern in enumerate(self.patterns):
-            #     export_types = {self.export_info[item] for item in pattern}
-            #     if len(export_types) > 1: # Mixed pattern
-            #         total_mixing_penalty += x[j] * MIXING_PENALTY
+            # Add mixing penalty (sep_qt)
+            total_mixing_penalty = 0
+            for j, pattern in enumerate(self.patterns):
+                # Get all non-empty sep_qts in this pattern
+                sep_qts = [self.sep_qt_info[item] for item in pattern for _ in range(pattern[item]) if self.sep_qt_info[item].strip()]
+                unique_sep_qts = set(sep_qts)
+                
+                # Case 1: Mixing different non-empty sep_qts (e.g. 'A' and 'B') -> High Penalty
+                if len(unique_sep_qts) > 1:
+                    total_mixing_penalty += x[j] * MIXING_PENALTY * 100 # Strong avoidance
+                
+                # Case 2: Mixing sep_qt with empty sep_qt
+                elif len(unique_sep_qts) == 1:
+                    # Count items with empty sep_qt
+                    empty_count = sum(count for item, count in pattern.items() if not self.sep_qt_info[item].strip())
+                    
+                    if empty_count > 0:
+                        # Penalty increases with the number of empty items
+                        # User said "1 is suboptimal, 2 is worse".
+                        total_mixing_penalty += x[j] * MIXING_PENALTY * empty_count
             
-            # objective += total_mixing_penalty
+            objective += total_mixing_penalty
 
             # if max_patterns is not None:
             #     solver.Add(solver.Sum(y[j] for j in range(len(self.patterns))) <= max_patterns)
@@ -244,6 +307,13 @@ class RollOptimize:
         return solution
 
     def _solve_subproblem(self, duals):
+        """
+        서브 문제(Sub-problem)를 동적 계획법(Dynamic Programming, Knapsack-like)으로 해결합니다.
+        
+        Master Problem에서 얻은 Dual Value(잠재 가격)를 가치(Value)로 간주하여, 
+        제한된 원지 폭(Knapsack Capacity) 내에서 가치 합이 최대가 되는 새로운 패턴을 찾습니다.
+        (Reduced Cost가 양수인 패턴을 찾아 Master Problem에 추가)
+        """
         def run_dp(candidate_items):
             width_limit = self.max_width
             piece_limit = self.max_pieces
@@ -311,15 +381,13 @@ class RollOptimize:
         # 1. Run DP for ALL items (standard)
         all_candidates = run_dp(self.items)
         
-        # 2. Run DP for Export items only
-        export_items = [item for item in self.items if self.export_info.get(item) == '수출']
-        if export_items:
-            all_candidates.extend(run_dp(export_items))
-            
-        # 3. Run DP for Domestic items only
-        domestic_items = [item for item in self.items if self.export_info.get(item) == '내수']
-        if domestic_items:
-            all_candidates.extend(run_dp(domestic_items))
+        # 2. Run DP for each sep_qt group
+        # This encourages generating pure patterns for each sep_qt type
+        unique_sep_qts = set(self.sep_qt_info.values())
+        for qt in unique_sep_qts:
+             qt_items = [item for item in self.items if self.sep_qt_info.get(item) == qt]
+             if qt_items:
+                 all_candidates.extend(run_dp(qt_items))
 
         # Sort by value and return top N
         # Note: Mixed patterns from step 1 might have high 'value' (dual sum) but will be penalized in Master.

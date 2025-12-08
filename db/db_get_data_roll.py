@@ -12,7 +12,7 @@ class RollGetters:
                     a.plant, a.pm_no, a.schedule_unit, a.width, a.length, a.roll_length, 
                     a.quality_grade as quality_grade, a.order_roll_cnt, 
                     a.order_ton_cnt, a.export_yn, a.order_no,
-                    a.core, a.dia, nvl(a.pattern, ' ') as pattern, a.luster, a.color, c.addchart, d.gen_hcode as sep_qt
+                    a.core, a.dia, nvl(a.pattern, ' ') as pattern, a.luster, a.color, c.addchart, nvl(d.gen_hcode, ' ') as sep_qt
                 from
                     h3t_production_order a, h3t_production_order_param b, batch_master@paper33_link c, th_mst_commoncode d
                 where a.order_no = b.order_no(+)

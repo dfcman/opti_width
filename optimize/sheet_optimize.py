@@ -4,6 +4,13 @@ from collections import Counter
 import math
 import random
 
+"""
+[파일 설명: sheet_optimize.py]
+쉬트(Sheet) 제품의 생산 최적화를 위한 핵심 모듈입니다.
+Column Generation(열 생성) 알고리즘을 기반으로 하여, 주문 요구사항(지폭, 길이, 수량)을 만족시키면서
+폐기물(Trim Loss)과 생산 비용을 최소화하는 최적의 절단 패턴을 산출합니다.
+"""
+
 # --- 최적화 설정 상수 ---
 # 페널티 값
 OVER_PROD_PENALTY = 50000.0    # 과생산에 대한 페널티
@@ -37,6 +44,43 @@ class SheetOptimize:
             lot_no=None,
             version=None
     ):
+        """
+        [SheetOptimize 클래스 분석 및 기능 요약]
+
+        이 클래스는 쉬트(Sheet) 제품의 생산 최적화를 담당합니다.
+        주어진 원지(Roll) 폭과 설비 제약 조건을 고려하여, 주문받은 규격(지폭, 길이)을 
+        가장 효율적으로 생산할 수 있는 절단 패턴(Cutting Pattern)과 생산 수량을 산출합니다.
+
+        핵심 기능 및 알고리즘:
+        1.  **수요 계산 (_calculate_demand_rolls)**:
+            -   입력된 주문의 중량(톤)을 바탕으로 생산에 필요한 원지 롤(Roll) 수를 계산합니다.
+        
+        2.  **복합폭 아이템 생성 (_prepare_items)**:
+            -   쉬트 생산 특성상 여러 장을 겹쳐서(예: 2매, 4매) 생산하므로, 
+                단일 지폭이 아닌 '지폭 x 배수' 형태의 복합 아이템을 정의합니다.
+            -   설비의 최소/최대 칼폭(Scissor Width) 제약을 고려합니다.
+
+        3.  **초기 패턴 생성 (_generate_initial_patterns)**:
+            -   Column Generation의 시작점이 될 초기 패턴 집합을 생성합니다.
+            -   다양한 휴리스틱(수요순, 너비순 정렬 등)과 무작위 섞기를 결합한 First-Fit 알고리즘을 사용합니다.
+            -   모든 주문을 커버할 수 있도록 폴백(Fallback) 로직도 포함합니다.
+
+        4.  **열 생성법 (Column Generation) 기반 최적화 (run_optimize)**:
+            -   대규모 조합 최적화 문제를 효율적으로 풀기 위해 반복적인 과정을 수행합니다.
+            -   **Master Problem (_solve_master_problem_ilp)**: 
+                현재 확보된 패턴들을 조합하여 비용(롤 수 + 페널티)을 최소화하는 해를 찾습니다. 
+                (초기에는 LP로 완화하여 풀고, 마지막에 MIP로 정수해를 구합니다.)
+            -   **Sub Problem (_solve_subproblem_dp)**: 
+                Master Problem의 Dual Value(잠재 가격)를 활용하여, 현재 해를 개선할 수 있는(Reduced Cost < 0) 
+                새로운 유망 패턴을 동적 계획법(DP)으로 찾아냅니다.
+        
+        5.  **패턴 통합 (_consolidate_patterns)**:
+            -   생산 효율성을 위해, 작은 배수의 아이템(예: 1매) 여러 개를 큰 배수(예: 2매)로 묶을 수 있는지 확인하고 병합합니다.
+
+        6.  **결과 생성 (_build_pattern_details, _format_results)**:
+            -   최적화된 패턴별 생산 수량을 바탕으로 구체적인 작업 지시 데이터(생산 순서, 롤별 구성 등)를 생성합니다.
+            -   과생산/부족생산 및 로스율 등의 지표를 집계합니다.
+        """
         df_spec_pre['지폭'] = df_spec_pre['가로']
 
         self.b_wgt = b_wgt
@@ -108,7 +152,7 @@ class SheetOptimize:
         # 정확한 생산량 준수(Exact Match)가 필요한 지폭 식별
         # 조건 1: 해당 지폭의 총 주문량(톤)이 20톤 이하
         # 조건 2: 해당 지폭의 오더 중 regular_gubun이 '2'인 경우
-        self.exact_match_widths = set()
+        # self.exact_match_widths = set()
         
         # 지폭별 Group Order(가로, 세로, 등급)별 주문량 계산
         # 사용자 요청: "가로 동일한 725*905 와 725*565는 ... 따로 체크를 해줘야 돼."
@@ -534,7 +578,18 @@ class SheetOptimize:
         print(f"--- 패턴 통합 완료: {original_count}개 -> {len(self.patterns)}개 패턴으로 정리됨 ---")
 
     def _solve_master_problem_ilp(self, is_final_mip=False):
-        """마스터 문제(Master Problem)를 정수계획법으로 해결합니다."""
+        """
+        마스터 문제(Master Problem)를 선형계획법(LP) 또는 정수계획법(MIP)으로 해결합니다.
+        
+        목적 함수:
+        1. 총 생산 롤 수 최소화
+        2. 과생산/부족생산 페널티 최소화
+        3. 패턴 복잡도 및 교체 비용 페널티 최소화
+        
+        Args:
+            is_final_mip (bool): True이면 정수해(Integer Solution)를 구하고, 
+                               False이면 열 생성을 위한 실수해(Relaxed LP)와 Dual Value를 구합니다.
+        """
         solver = pywraplp.Solver.CreateSolver('SCIP' if is_final_mip else 'GLOP')
         
         # Enable multi-threading
@@ -562,12 +617,12 @@ class SheetOptimize:
             )
             constraints[width] = solver.Add(production_for_width + under_prod_vars[width] == required_rolls + over_prod_vars[width], f'demand_{width}')
 
-            # Exact Match 제약조건 적용
-            if width in self.exact_match_widths:
-                # 과생산 금지 (UB = 0) -> 1로 완화 (정수해 불가능성 대비)
-                over_prod_vars[width].SetBounds(0.0, 1.0)
-                # 부족생산 금지 (UB = 0) -> 강제 맞춤
-                under_prod_vars[width].SetBounds(0.0, 0.0)
+            # # Exact Match 제약조건 적용
+            # if width in self.exact_match_widths:
+            #     # 과생산 금지 (UB = 0) -> 1로 완화 (정수해 불가능성 대비)
+            #     over_prod_vars[width].SetBounds(0.0, 1.0)
+            #     # 부족생산 금지 (UB = 0) -> 강제 맞춤
+            #     under_prod_vars[width].SetBounds(0.0, 0.0)
 
         # 목적함수: 총 롤 수 + 페널티 최소화
         total_rolls = solver.Sum(x.values())
@@ -604,7 +659,12 @@ class SheetOptimize:
         return None
 
     def _solve_subproblem_dp(self, duals):
-        """서브 문제(Sub-problem)를 무한 배낭 방식으로 풀어 새로운 패턴 후보를 찾는다."""
+        """
+        서브 문제(Sub-problem)를 동적 계획법(Dynamic Programming, Knapsack-like)으로 해결합니다.
+        
+        Master Problem에서 얻은 Dual Value(잠재 가격)를 활용하여, 
+        현재 해를 개선할 수 있는(Reduced Cost가 음수인) 새로운 유망 패턴 후보를 탐색합니다.
+        """
         width_limit = self.max_width
         piece_limit = self.max_pieces
 

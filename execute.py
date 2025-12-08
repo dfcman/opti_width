@@ -56,7 +56,7 @@ def process_roll_lot(
 
     # 2. 지폭 그룹핑 (엔진 최적화용) - order_no 제외
     # 엔진 효율을 위해 동일 규격은 하나로 묶음
-    width_group_cols = ['지폭', '롤길이', '등급', 'core', 'dia', '수출내수']
+    width_group_cols = ['지폭', '롤길이', '등급', 'core', 'dia', '수출내수', 'sep_qt']
     df_width_groups = df_orders.groupby(width_group_cols).agg(
         total_qty=('주문수량', 'sum')
     ).reset_index()
@@ -65,8 +65,8 @@ def process_roll_lot(
     df_width_groups['width_group_no'] = [f'WG{i+1}' for i in range(len(df_width_groups))]
     
     # 원본 데이터에 지폭 그룹 ID 매핑
-    df_orders = pd.merge(df_orders, df_width_groups[['지폭', '롤길이', '등급', 'core', 'dia', '수출내수', 'width_group_no']], 
-                         on=['지폭', '롤길이', '등급', 'core', 'dia', '수출내수'], how='left')
+    df_orders = pd.merge(df_orders, df_width_groups[['지폭', '롤길이', '등급', 'core', 'dia', '수출내수', 'sep_qt', 'width_group_no']], 
+                         on=['지폭', '롤길이', '등급', 'core', 'dia', '수출내수', 'sep_qt'], how='left')
 
     all_results = {
         "pattern_result": [],
