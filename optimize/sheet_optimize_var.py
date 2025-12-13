@@ -16,6 +16,7 @@ from collections import Counter
 import math
 import random
 import time
+import logging
 
 # --- 최적화 설정 상수 ---
 # 페널티 값
@@ -37,7 +38,7 @@ CG_SUBPROBLEM_TOP_N = 10         # 열 생성 시, 각 반복에서 추가할 �
 KNIFE_LOAD_K1 = 3
 KNIFE_LOAD_K2 = 4
 
-NUM_THREADS = 4
+
 
 
 class SheetOptimizeVar:
@@ -55,7 +56,8 @@ class SheetOptimizeVar:
             max_sc_width,
             db=None,
             lot_no=None,
-            version=None
+            version=None,
+            num_threads=4
     ):
         """
         초기화 메서드
@@ -72,6 +74,7 @@ class SheetOptimizeVar:
         """
         df_spec_pre['지폭'] = df_spec_pre['가로']
 
+        self.num_threads = num_threads
         self.b_wgt = b_wgt
         self.min_sheet_roll_length = min_sheet_roll_length
         self.max_sheet_roll_length = max_sheet_roll_length
@@ -99,7 +102,7 @@ class SheetOptimizeVar:
         self.db = db
         self.lot_no = lot_no
         self.version = version
-        print(f"--- 패턴 제약조건: 최소 {self.min_pieces}폭, 최대 {self.max_pieces}폭 ---")
+        logging.info(f"--- 패턴 제약조건: 최소 {self.min_pieces}폭, 최대 {self.max_pieces}폭 ---")
 
         self.patterns = []
 
@@ -175,9 +178,9 @@ class SheetOptimizeVar:
         demand_meters = df_copy.groupby('지폭')['meters'].sum().to_dict()
         order_sheet_lengths = df_copy.groupby('지폭')['세로'].first().to_dict()
 
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]")
-        print("--- 지폭별 필요 총 길이 ---")
-        print("--------------------------")
+        logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]")
+        logging.info("--- 지폭별 필요 총 길이 ---")
+        logging.info("--------------------------")
 
         return df_copy, demand_meters, order_sheet_lengths
 
@@ -196,7 +199,7 @@ class SheetOptimizeVar:
         if not self.patterns:
              return {"error": "초기 패턴 생성 실패. 제약조건 확인 필요."}
 
-        print(f"--- Column Generation 시작 (초기 패턴 {len(self.patterns)}개) ---")
+        logging.info(f"--- Column Generation 시작 (초기 패턴 {len(self.patterns)}개) ---")
         
         # 2. Column Generation Loop
         start_time = time.time()
@@ -204,7 +207,7 @@ class SheetOptimizeVar:
             # 2.1 Solve Master Problem (Relaxed LP)
             solution = self._solve_master_problem_ilp(is_final_mip=False)
             if not solution:
-                print("Master Problem(LP) 해를 찾을 수 없음.")
+                logging.info("Master Problem(LP) 해를 찾을 수 없음.")
                 break
                 
             duals = solution.get('duals', {})
@@ -213,7 +216,7 @@ class SheetOptimizeVar:
             new_patterns = self._solve_subproblem_dp(duals)
             
             if not new_patterns:
-                print(f"Iter {i}: 더 이상 개선 가능한 패턴 없음.")
+                logging.info(f"Iter {i}: 더 이상 개선 가능한 패턴 없음.")
                 break
                 
             # 2.3 Add new patterns
@@ -227,13 +230,13 @@ class SheetOptimizeVar:
                     added += 1
             
             if added == 0:
-                print(f"Iter {i}: 중복된 패턴만 생성됨. 종료.")
+                logging.info(f"Iter {i}: 중복된 패턴만 생성됨. 종료.")
                 break
                 
             # if i % 10 == 0:
             #     print(f"Iter {i}: 패턴 {added}개 추가됨 (Total {len(self.patterns)}). VP: {solution['objective']:.2f}")
 
-        print(f"--- CG 종료. 총 {len(self.patterns)}개 패턴으로 최종 MIP 수행 ---")
+        logging.info(f"--- CG 종료. 총 {len(self.patterns)}개 패턴으로 최종 MIP 수행 ---")
         
         # 3. Final MIP Solve
         final_solution = self._solve_master_problem_ilp(is_final_mip=True)
@@ -252,9 +255,9 @@ class SheetOptimizeVar:
 
         fulfillment_summary = self._build_fulfillment_summary(demand_tracker)
 
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]") 
-        print(f"--- 최적화 완료: 최종 패턴 {len(result_patterns)}개 사용 ---")
-        print("[주문 이행 요약 (그룹오더별)]")
+        logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]") 
+        logging.info(f"--- 최적화 완료: 최종 패턴 {len(result_patterns)}개 사용 ---")
+        logging.info("[주문 이행 요약 (그룹오더별)]")
 
         
         return {
@@ -496,7 +499,7 @@ class SheetOptimizeVar:
         초기 패턴 생성 (휴리스틱 + First Fit)
         sheet_optimize.py의 로직을 차용하되, 패턴 구조를 {'composition': {}, 'length': max_length} 형태로 저장합니다.
         """
-        print("--- 초기 패턴 생성 시작 ---")
+        logging.info("--- 초기 패턴 생성 시작 ---")
         seen_patterns = {frozenset(p['composition'].items()) for p in self.patterns}
 
         # 정렬 전략
@@ -560,7 +563,7 @@ class SheetOptimizeVar:
                         seen_patterns.add(pattern_comp_key)
                         break 
 
-        print(f"--- {len(self.patterns)}개의 초기 패턴 생성됨 ---")
+        logging.info(f"--- {len(self.patterns)}개의 초기 패턴 생성됨 ---")
 
     def _solve_master_problem_ilp(self, is_final_mip=False):
         """
@@ -582,7 +585,7 @@ class SheetOptimizeVar:
         if not solver: return None
 
         if hasattr(solver, 'SetNumThreads'):
-            solver.SetNumThreads(4)
+            solver.SetNumThreads(self.num_threads)
         
         if is_final_mip:
             solver.SetTimeLimit(SOLVER_TIME_LIMIT_MS)
@@ -659,7 +662,7 @@ class SheetOptimizeVar:
             
             return solution
         else:
-            print("Solver Failed to find solution")
+            logging.info("Solver Failed to find solution")
             return None
 
     def _solve_subproblem_dp(self, duals):

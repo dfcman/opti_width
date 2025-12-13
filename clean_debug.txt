@@ -1,0 +1,25 @@
+2025-12-13 22:24:50,758 - INFO - --- [DEBUG] 710mm Calc: total_ton=7.841, weight_g=158.47, sheets=49478.8, roll_len_mm=11440000.0, sheets_per_roll=12301, result_rolls=4
+2025-12-13 22:25:01,412 - INFO - --- [DEBUG] Solver received demand for 710mm: 4
+2025-12-13 22:25:01,413 - INFO - --- [DEBUG] Exact Match Widths: [np.int64(420), np.int64(460), np.int64(480), np.int64(500), np.int64(505), np.int64(510), np.int64(515), np.int64(535), np.int64(540), np.int64(545), np.int64(550), np.int64(580), np.int64(585), np.int64(597), np.int64(600), np.int64(610), np.int64(670), np.int64(680), np.int64(685), np.int64(715), np.int64(790), np.int64(800), np.int64(810), np.int64(820), np.int64(835), np.int64(850), np.int64(890), np.int64(900), np.int64(940), np.int64(945), np.int64(950), np.int64(960), np.int64(980), np.int64(1000), np.int64(1045), np.int64(1050), np.int64(1145), np.int64(1150), np.int64(1245), np.int64(1250), np.int64(1340), np.int64(1445), np.int64(1545), np.int64(1645), np.int64(1745), np.int64(1845)]
+2025-12-13 22:25:01,413 - INFO - --- [DEBUG] Demand for 710mm: 4
+2025-12-13 22:25:01,905 - INFO - --- [DEBUG] Solver Result for 710mm: Over=52.0, Under=0.0
+2025-12-13 22:25:01,906 - INFO - --- [DEBUG] Solver Pattern 115: {'1150x1': 1, '710x4': 1, '820x1': 1} (710x4), Count=1.0000
+2025-12-13 22:25:01,907 - INFO - --- [DEBUG] Solver Pattern 120: {'540x2': 1, '710x4': 1, '890x1': 1} (710x4), Count=1.0000
+2025-12-13 22:25:01,907 - INFO - --- [DEBUG] Solver Pattern 121: {'535x2': 1, '710x4': 1, '900x1': 1} (710x4), Count=1.0000
+2025-12-13 22:25:01,907 - INFO - --- [DEBUG] Solver Pattern 125: {'510x2': 1, '710x4': 1, '950x1': 1} (710x4), Count=1.0000
+2025-12-13 22:25:01,908 - INFO - --- [DEBUG] Solver Pattern 131: {'940x1': 1, '710x4': 1, '515x2': 1} (710x4), Count=1.0000
+2025-12-13 22:25:01,908 - INFO - --- [DEBUG] Solver Pattern 136: {'800x1': 1, '710x4': 1, '585x2': 1} (710x4), Count=1.0000
+2025-12-13 22:25:01,909 - INFO - --- [DEBUG] Solver Pattern 138: {'735x1': 1, '710x4': 1, '610x2': 1} (710x4), Count=1.0000
+2025-12-13 22:25:01,910 - INFO - --- [DEBUG] Solver Pattern 139: {'715x1': 1, '710x4': 1, '1250x1': 1} (710x4), Count=1.0000
+2025-12-13 22:25:01,910 - INFO - --- [DEBUG] Solver Pattern 271: {'500x2': 1, '710x3': 1, '720x1': 2} (710x3), Count=1.0000
+2025-12-13 22:25:01,911 - INFO - --- [DEBUG] Solver Pattern 275: {'1050x1': 1, '710x3': 1, '720x1': 2} (710x3), Count=1.0000
+2025-12-13 22:25:01,911 - INFO - --- [DEBUG] Solver Pattern 281: {'545x2': 1, '710x3': 1, '720x1': 2} (710x3), Count=1.0000
+2025-12-13 22:25:01,911 - INFO - --- [DEBUG] Solver Pattern 292: {'597x2': 1, '710x3': 1, '720x1': 2} (710x3), Count=1.0000
+2025-12-13 22:25:01,912 - INFO - --- [DEBUG] Solver Pattern 295: {'1145x1': 1, '710x3': 1, '720x1': 2} (710x3), Count=1.0000
+2025-12-13 22:25:01,912 - INFO - --- [DEBUG] Solver Pattern 304: {'600x2': 1, '710x3': 1, '720x1': 2} (710x3), Count=1.0000
+2025-12-13 22:25:01,913 - INFO - --- [DEBUG] Solver Pattern 321: {'550x2': 1, '710x3': 1, '720x1': 2} (710x3), Count=1.0000
+2025-12-13 22:25:01,913 - INFO - --- [DEBUG] Solver Pattern 331: {'945x1': 1, '710x3': 1, '720x1': 2} (710x3), Count=1.0000
+2025-12-13 22:25:01,913 - INFO - --- [DEBUG] Total 710mm Calculated from Solver Counts: 56.0
+2025-12-13 22:25:01,925 - INFO - --- [DEBUG] Building Pattern Details. Start Prod Seq: 0
+2025-12-13 22:25:01,961 - INFO - --- [DEBUG] Exact Match Widths: [np.int64(788)]
+2025-12-13 22:25:01,967 - INFO - --- [DEBUG] Building Pattern Details. Start Prod Seq: 0

@@ -47,6 +47,7 @@ from collections import Counter
 import math
 import random
 import time
+import logging
 
 # --- 최적화 설정 상수 ---
 # 비용 상수 (모든 목적 함수 항을 '비용'으로 통일하기 위해 사용)
@@ -64,15 +65,20 @@ DEFAULT_SINGLE_STRIP_PENALTY = 1000  # 지정되지 않은 단일폭은 기본�
 DISALLOWED_SINGLE_BASE_WIDTHS = {}  # 단일 사용을 금지할 주문 폭 집합
 
 # 솔버 멀티스레딩
+import configparser
+import os
+
 NUM_THREADS = 4
+
+
 
 # 알고리즘 파라미터
 MIN_PIECES_PER_PATTERN = 1      # 패턴에 포함될 수 있는 최소 폭(piece)의 수
 SMALL_PROBLEM_THRESHOLD = 8     # 전체 탐색을 수행할 최대 주문 지폭 종류 수
 SOLVER_TIME_LIMIT_MS = 180000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
 CG_MAX_ITERATIONS = 1000         # 열 생성(Column Generation) 최대 반복 횟수
-CG_NO_IMPROVEMENT_LIMIT = 100    # 개선 없는 경우, 열 생성 조기 종료 조건
-CG_SUBPROBLEM_TOP_N = 1         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
+CG_NO_IMPROVEMENT_LIMIT = 50    # 개선 없는 경우, 열 생성 조기 종료 조건
+CG_SUBPROBLEM_TOP_N = 10         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
 # 나이프 로드 제약: 패턴 생산 횟수는 k1*a + k2*b 형태여야 함 (a,b>=0 정수)
 KNIFE_LOAD_K1 = 1
 KNIFE_LOAD_K2 = 1
@@ -99,7 +105,8 @@ class SheetOptimizeCa:
             max_sc_width,
             db=None,
             lot_no=None,
-            version=None
+            version=None,
+            num_threads=4
     ):
         """
         SheetOptimizeCa 생성자.
@@ -124,6 +131,7 @@ class SheetOptimizeCa:
 
         # 평량 및 롤 길이 제약조건 저장
         self.b_wgt = b_wgt
+        self.num_threads = num_threads
         self.min_sheet_roll_length = min_sheet_roll_length
         self.max_sheet_roll_length = max_sheet_roll_length
         self.sheet_trim = sheet_trim  # 복합폭 계산 시 추가되는 트림 손실
@@ -154,7 +162,7 @@ class SheetOptimizeCa:
         self.db = db
         self.lot_no = lot_no
         self.version = version
-        print(f"--- 패턴 제약조건: 최소 {self.min_pieces}폭, 최대 {self.max_pieces}폭 ---")
+        logging.info(f"--- 패턴 제약조건: 최소 {self.min_pieces}폭, 최대 {self.max_pieces}폭 ---")
 
         # 패턴 저장소 초기화 (외부에서 패턴을 주입해야 함)
         self.patterns = []
@@ -290,9 +298,9 @@ class SheetOptimizeCa:
         # 지폭별 대표 세로 길이 (첫 번째 값 사용)
         order_sheet_lengths = df_copy.groupby('지폭')['세로'].first().to_dict()
 
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]")
-        print("--- 지폭별 필요 총 길이 ---")
-        print("--------------------------")
+        logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]")
+        logging.info("--- 지폭별 필요 총 길이 ---")
+        logging.info("--------------------------")
 
         return df_copy, demand_meters, order_sheet_lengths
 
@@ -347,7 +355,7 @@ class SheetOptimizeCa:
 
         find_combinations_recursive(0, {}, 0, 0)
         self.patterns = all_patterns
-        print(f"--- 전체 탐색으로 {len(self.patterns)}개의 패턴 생성됨 ---")
+        logging.info(f"--- 전체 탐색으로 {len(self.patterns)}개의 패턴 생성됨 ---")
 
     def _generate_initial_patterns(self):
         """
@@ -451,7 +459,7 @@ class SheetOptimizeCa:
                 
                 num_items -= 1
 
-        print(f"--- 총 {len(self.patterns)}개의 초기 패턴 생성됨 ---")
+        logging.info(f"--- 총 {len(self.patterns)}개의 초기 패턴 생성됨 ---")
 
     def _solve_master_problem_ilp(self, is_final_mip=False):
         """
@@ -470,7 +478,7 @@ class SheetOptimizeCa:
         solver = pywraplp.Solver.CreateSolver('SCIP' if is_final_mip else 'GLOP')
         
         if hasattr(solver, 'SetNumThreads'):
-            solver.SetNumThreads(NUM_THREADS)
+            solver.SetNumThreads(self.num_threads)
 
         if is_final_mip:
             solver.SetTimeLimit(SOLVER_TIME_LIMIT_MS)
@@ -672,10 +680,10 @@ class SheetOptimizeCa:
         # 패턴이 외부에서 주입되지 않은 경우 자체 생성
         if not self.patterns:
             if len(self.order_widths) <= SMALL_PROBLEM_THRESHOLD:
-                print(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 모든 패턴을 탐색합니다 (Small-scale) ---")
+                logging.info(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 모든 패턴을 탐색합니다 (Small-scale) ---")
                 self._generate_all_patterns()
             else:
-                print(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 열 생성 기법을 시작합니다 (Large-scale) ---")
+                logging.info(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 열 생성 기법을 시작합니다 (Large-scale) ---")
                 self._generate_initial_patterns()
                 
                 if not self.patterns:
@@ -711,13 +719,13 @@ class SheetOptimizeCa:
                         no_improvement_count += 1
                     
                     if no_improvement_count >= CG_NO_IMPROVEMENT_LIMIT:
-                        print(f"--- {CG_NO_IMPROVEMENT_LIMIT}번의 반복 동안 개선이 없어 수렴으로 간주하고 종료합니다 (반복 {iteration}). ---")
+                        logging.info(f"--- {CG_NO_IMPROVEMENT_LIMIT}번의 반복 동안 개선이 없어 수렴으로 간주하고 종료합니다 (반복 {iteration}). ---")
                         break
 
         if not self.patterns:
             return {"error": "유효한 패턴을 생성할 수 없습니다."}
 
-        print(f"--- 총 {len(self.patterns)}개의 패턴으로 최종 최적화를 수행합니다. ---")
+        logging.info(f"--- 총 {len(self.patterns)}개의 패턴으로 최종 최적화를 수행합니다. ---")
         final_solution = self._solve_master_problem_ilp(is_final_mip=True)
         if not final_solution:
             return {"error": "최종 해를 찾을 수 없습니다."}
@@ -755,8 +763,8 @@ class SheetOptimizeCa:
         # 주문 이행 요약 생성
         fulfillment_summary = self._build_fulfillment_summary(demand_tracker)
 
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]") 
-        print("[주문 이행 요약 (그룹오더별)]")
+        logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]") 
+        logging.info("[주문 이행 요약 (그룹오더별)]")
         
         return {
             "pattern_result": df_patterns.sort_values('count', ascending=False) if not df_patterns.empty else df_patterns,

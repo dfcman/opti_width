@@ -7,11 +7,23 @@ import logging
 import argparse
 import pprint
 from optimize.roll_optimize import RollOptimize
+# from optimize.roll_optimize_cpsat import RollOptimizeCpsat
 from optimize.roll_sl_optimize import RollSLOptimize
 from optimize.sheet_optimize import SheetOptimize
 from optimize.sheet_optimize_var import SheetOptimizeVar
 from optimize.sheet_optimize_ca import SheetOptimizeCa
 from db.db_connector import Database
+
+# Load configuration
+config = configparser.ConfigParser()
+config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'conf', 'config.ini')
+NUM_THREADS = 4
+if os.path.exists(config_path):
+    config.read(config_path)
+    NUM_THREADS = config.getint('optimization', 'num_threads', fallback=4)
+else:
+    # logging is not setup yet, so just print or simple log
+    print(f"Config file not found at {config_path}. Using default NUM_THREADS={NUM_THREADS}")
 
 def process_roll_lot(
         db, plant, pm_no, schedule_unit, lot_no, version, re_min_width, re_max_width, re_max_pieces, paper_type, b_wgt,
@@ -115,7 +127,10 @@ def process_roll_lot(
             max_width=int(re_max_width),
             min_width=int(re_min_width),
             max_pieces=int(re_max_pieces),
-            lot_no=lot_no
+            lot_no=lot_no,
+            db=db,
+            version=version,
+            num_threads=NUM_THREADS
         )
         results = optimizer.run_optimize(start_prod_seq=prod_seq_counter)
 
@@ -548,7 +563,8 @@ def process_sheet_lot(
             sheet_roll_length=sheet_length_re,
             sheet_trim=sheet_trim_size,
             min_sc_width=min_sc_width,
-            max_sc_width=max_sc_width
+            max_sc_width=max_sc_width,
+            num_threads=NUM_THREADS
         )
         
         try:
@@ -741,10 +757,15 @@ def process_sheet_lot_ca(
     return results, df_orders, prod_seq_counter, last_group_order_no
 
 def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width, paper_type, b_wgt, all_results, all_df_orders):
-    """최적화 결과를 DB에 저장하고 CSV파일로 출력합니다."""
+    """
+    최적화 결과를 DB에 저장하고 CSV파일로 출력합니다.
+    
+    Returns:
+        int: 상태 코드 (0: 모든 오더 충족, 1: 일부 오더 부족, 2: 에러)
+    """
     if not all_results:
         logging.warning(f"Lot {lot_no}에 대해 저장할 결과가 없습니다.")
-        return
+        return 2  # 결과가 없으면 에러
 
     final_pattern_result = pd.concat([res["pattern_result"] for res in all_results], ignore_index=True)
     final_fulfillment_summary = pd.concat([res["fulfillment_summary"] for res in all_results], ignore_index=True)
@@ -781,8 +802,8 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
     
     # [DEBUG] Log pattern details count
     logging.info(f"[DEBUG] Saving {len(final_pattern_details_for_db)} pattern details to DB.")
-    if len(final_pattern_details_for_db) > 0:
-        logging.info(f"[DEBUG] First pattern detail sample: {final_pattern_details_for_db[0]}")
+    # if len(final_pattern_details_for_db) > 0:
+    #     logging.info(f"[DEBUG] First pattern detail sample: {final_pattern_details_for_db[0]}")
 
     connection = None
     try:
@@ -831,7 +852,44 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
         output_path = os.path.join(output_dir, output_filename)
         final_pattern_result.to_csv(output_path, index=False, encoding='utf-8-sig')
         logging.info(f"\n[성공] 요약 결과가 다음 파일에 저장되었습니다: {output_path}")
-        db.update_lot_status(lot_no=lot_no, version=version, status=0)
+        
+        # 최적화 상태 결정: fulfillment_summary의 과부족 확인
+        # 과부족 컨럼이 없으면 기본적으로 성공(0)으로 간주
+        final_status = 0  # 기본값: 모든 오더 충족
+
+        # '롤길이' 컬럼이 없는 경우 (예: 쉬트지만 최적화 시) 0으로 초기화하여 에러 방지
+        if '롤길이' not in final_fulfillment_summary.columns:
+             final_fulfillment_summary['롤길이'] = 0
+        
+        # 롤 최적화 결과 확인 (과부족(롤) 컨럼이 있는 경우)
+        if '과부족(롤)' in final_fulfillment_summary.columns:
+            under_production_rolls = final_fulfillment_summary[
+                (final_fulfillment_summary['과부족(롤)'] != 0) & 
+                (final_fulfillment_summary['롤길이'] > 0)
+            ]
+            if not under_production_rolls.empty:
+                final_status = 1  # 일부 오더 초과(부족)
+                logging.warning(f"[경고] 초과(부족) 생산된 롤 오더가 있습니다:\n{under_production_rolls.to_string()}")
+
+        
+        # 쉬트 최적화 결과 확인 (과부족(톤) 컨럼이 있는 경우)
+        if '과부족(톤)' in final_fulfillment_summary.columns:
+            under_production_sheets = final_fulfillment_summary[
+                (final_fulfillment_summary['과부족(톤)'] < -2) & 
+                (final_fulfillment_summary['롤길이'] == 0)
+            ]  # 소수점 오차 고려
+            over_production_sheets = final_fulfillment_summary[
+                (final_fulfillment_summary['과부족(톤)'] > 2) & 
+                (final_fulfillment_summary['롤길이'] == 0)
+            ]  # 소수점 오차 고려
+            if not under_production_sheets.empty:
+                final_status = 1  # 일부 오더 초과(부족)
+                logging.warning(f"[경고] 부족 생산된 쉬트 오더가 있습니다:\n{under_production_sheets.to_string()}")
+            if not over_production_sheets.empty:
+                final_status = 1  # 일부 오더 초과(부족)
+                logging.warning(f"[경고] 초과 생산된 쉬트 오더가 있습니다:\n{over_production_sheets.to_string()}")
+        
+        return final_status
 
     except Exception as e:
         logging.error(f"[에러] 데이터 저장 중 오류 발생: {e}")
@@ -841,7 +899,8 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
             db.pool.release(connection)
             connection = None
         
-        db.update_lot_status(lot_no=lot_no, version=version, status=99)
+        db.update_lot_status(lot_no=lot_no, version=version, status=2)
+        return 2  # 에러 상태
 
     finally:
         if connection:
@@ -851,55 +910,127 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
         logging.info(f"{'='*60}")
 
 def setup_logging(lot_no, version):
-    """로그 설정을 초기화합니다."""
+    """로그 설정을 초기화합니다. 각 lot마다 새로운 로그 파일을 생성합니다."""
     log_dir = 'results'
     os.makedirs(log_dir, exist_ok=True)
     timestamp = time.strftime('%y%m%d%H%M%S')
     log_filename = f"{timestamp}_{lot_no}_{version}.log"
     log_path = os.path.join(log_dir, log_filename)
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_path, mode='w', encoding='utf-8'),
-            logging.StreamHandler()
-        ]
-    )
+    # 기존 핸들러 모두 제거 (이전 lot의 핸들러)
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # 기존 핸들러 제거
+    for handler in logger.handlers[:]:
+        handler.close()
+        logger.removeHandler(handler)
+    
+    # 새로운 핸들러 추가
+    file_handler = logging.FileHandler(log_path, mode='w', encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
 
 def main():
     """메인 실행 함수"""
     db = None
     lot_no = None
     version = None
+    parser = argparse.ArgumentParser(description='Optimization Executor')
+    parser.add_argument('--plant', type=str, default='3000', help='Plant Code (3000, 5000, 8000)')
+    args = parser.parse_args()
+    plant_arg = args.plant
+
+    db_section_map = {
+        '3000': 'database_dj',
+        '5000': 'database_ca',
+        '8000': 'database_st'
+    }
+    db_section = db_section_map.get(plant_arg, 'database_dj')
+    print(f"Connecting to DB Section: {db_section} for Plant: {plant_arg}")
+
     try:
         config = configparser.ConfigParser()
         config_path = os.path.join('conf', 'config.ini')
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"{config_path} 파일을 찾을 수 없습니다.")
         config.read(config_path, encoding='utf-8')
-        db_config = config['database']
+        
+        if db_section not in config:
+            raise KeyError(f"Config file does not contain section: {db_section}")
+        
+        db_config = config[db_section]
         
         db = Database(user=db_config['user'], password=db_config['password'], dsn=db_config['dsn'])
 
+        # Dynamic Patching of DataInserters based on Plant
+        # update_lot_status는 공통 모듈에서 가져오고, 나머지 insert 함수들은 공장별 모듈에서 가져옴
+        from db import db_insert_data as db_common_module
+        
+        if plant_arg == '5000':
+            from db import db_insert_data_ca as db_module
+        elif plant_arg == '8000':
+            from db import db_insert_data_st as db_module
+        else: # 3000 or default
+            from db import db_insert_data_dj as db_module
+
+        # update_lot_status는 공통 모듈에서 바인딩 (3개 공장 공통)
+        db.update_lot_status = db_common_module.DataInserters.update_lot_status.__get__(db, Database)
+        
+        # 나머지 insert 함수들은 공장별 모듈에서 바인딩
+        db.insert_pattern_sequence = db_module.DataInserters.insert_pattern_sequence.__get__(db, Database)
+        db.insert_roll_sequence = db_module.DataInserters.insert_roll_sequence.__get__(db, Database)
+        db.insert_cut_sequence = db_module.DataInserters.insert_cut_sequence.__get__(db, Database)
+        db.insert_sheet_sequence = db_module.DataInserters.insert_sheet_sequence.__get__(db, Database)
+        db.insert_order_group = db_module.DataInserters.insert_order_group.__get__(db, Database)
+
+        print(f"Applied common DataInserters from {db_common_module.__name__}")
+        print(f"Applied plant-specific DataInserters from {db_module.__name__}")
+
+
         while True:
-            ( 
-                plant, pm_no, schedule_unit, lot_no, version, min_width, 
-                max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
-                paper_type, b_wgt,
-                min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re,
-                sheet_order_cnt, roll_order_cnt
-            ) = db.get_target_lot()
+            # Plant에 따라 대상 Lot 조회 함수 분기
+            if plant_arg == '5000':
+                ( 
+                    plant, pm_no, schedule_unit, lot_no, version, min_width, 
+                    max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
+                    paper_type, b_wgt,
+                    min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re,
+                    sheet_order_cnt, roll_order_cnt
+                ) = db.get_target_lot_ca()
+            elif plant_arg == '8000':
+                 ( 
+                    plant, pm_no, schedule_unit, lot_no, version, min_width, 
+                    max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
+                    paper_type, b_wgt,
+                    min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re,
+                    sheet_order_cnt, roll_order_cnt
+                ) = db.get_target_lot_var()
+            else: # 3000 or default
+                ( 
+                    plant, pm_no, schedule_unit, lot_no, version, min_width, 
+                    max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
+                    paper_type, b_wgt,
+                    min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re,
+                    sheet_order_cnt, roll_order_cnt
+                ) = db.get_target_lot()
 
             if not lot_no:
-                print("처리할 Lot이 없습니다. 10초 후 다시 시도합니다.")
+                # print("처리할 Lot이 없습니다. 10초 후 다시 시도합니다.")
                 time.sleep(10)
                 continue
 
             setup_logging(lot_no, version)
-            
+            db.update_lot_status(lot_no=lot_no, version=version, status=8)
             db.delete_optimization_results(lot_no, version)
-            db.update_lot_status(lot_no=lot_no, version=version, status=1)
+            
 
             prod_seq_counter = 0
             group_order_no_counter = 0
@@ -975,15 +1106,18 @@ def main():
                     all_df_orders.append(sheet_df_orders)
 
             if all_results:
-                save_results(db, lot_no, version, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt, all_results, all_df_orders)
+                final_status = save_results(db, lot_no, version, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt, all_results, all_df_orders)
+                db.update_lot_status(lot_no=lot_no, version=version, status=final_status)
+                status_desc = {0: "모든 오더 충족", 1: "일부 오더 부족", 2: "에러"}.get(final_status, "알 수 없음")
+                logging.info(f"[상태 업데이트] Lot {lot_no} Version {version} -> status={final_status} ({status_desc})")
             else:
-                logging.error(f"[에러] Lot {lot_no}에 대한 최적화 결과가 없습니다. 상태를 99(에러)로 변경합니다.")
-                db.update_lot_status(lot_no=lot_no, version=version, status=99)
+                logging.error(f"[에러] Lot {lot_no}에 대한 최적화 결과가 없습니다. 상태를 2(에러)로 변경합니다.")
+                db.update_lot_status(lot_no=lot_no, version=version, status=2)
             
             logging.info(f"{'='*60}")
             logging.info(f"{'='*60}")
             logging.info(f"{'='*60}")
-            time.sleep(100)
+            time.sleep(60)
 
     except FileNotFoundError as e:        
         logging.error(f"[치명적 에러] 설정 파일을 찾을 수 없습니다: {e}")
@@ -994,7 +1128,7 @@ def main():
         logging.error(f"\n[치명적 에러] 실행 중 예외 발생: {e}")
         logging.error(traceback.format_exc())
         if db and lot_no and version:
-            db.update_lot_status(lot_no=lot_no, version=version, status=99)
+            db.update_lot_status(lot_no=lot_no, version=version, status=2)
     finally:
         if db:
             db.close_pool()

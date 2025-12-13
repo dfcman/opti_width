@@ -1,63 +1,57 @@
 import pandas as pd
 from ortools.linear_solver import pywraplp
+from ortools.sat.python import cp_model
 import random
 import logging
 import time
 
 """
-[파일 설명: roll_optimize.py]
+[파일 설명: roll_optimize_cpsat.py]
 롤(Roll) 제품의 생산 최적화를 위한 핵심 모듈입니다.
 Column Generation(열 생성) 알고리즘을 기반으로 하여, 주문 요구사항(지폭, 수량)을 만족시키면서
 폐기물(Trim Loss)과 패턴 교체 비용을 최소화하는 최적의 절단 패턴을 산출합니다.
+
+[솔버 변경 사항]
+- Column Generation 단계: 기존과 동일하게 GLOP (LP Solver) 사용 (Dual Value 확보용)
+- 최종 해 결정 단계: CP-SAT (Constraint Programming) 사용
+  * 개선사항: 부족(Shortage) 미출 변수 추가, 우선순위 기반 목적함수(부족 최소화 > 초과 최소화 > 비용 최소화)
 """
 
-OVER_PROD_PENALTY = 100000000.0
-UNDER_PROD_PENALTY = 10000.0
+OVER_PROD_PENALTY = 1000000000.0 # 사용 안 함 (CP-SAT 내부 Weight로 대체)
+UNDER_PROD_PENALTY = 100000.0   # 사용 안 함 (CP-SAT 내부 Weight로 대체)
 PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6
-CG_MAX_ITERATIONS = 1000 # 안전장치 (최대 반복 횟수)
-CG_NO_IMPROVEMENT_LIMIT = 50  # 200 -> 50: 초기 패턴이 우수하면 빨리 넘어가도록 단축
-CG_SUBPROBLEM_TOP_N = 10      # Increased from 3
-SMALL_PROBLEM_THRESHOLD = 6  # Increased to force exhaustive search for narrow width ranges
-SOLVER_TIME_LIMIT_MS = 180000
-PATTERN_SETUP_COST = 1000.0 # 새로운 패턴 종류를 1개 사용할 때마다 1000mm의 손실과 동일한 페널티
-TRIM_LOSS_PENALTY = 5.0      # 자투리 손실 1mm당 페널티
-MIXING_PENALTY = 100.0       # 공백이 1개 섞인 경우는 페널티 비용 팬턴 생성비용과 비교
+CG_MAX_ITERATIONS = 100
+CG_NO_IMPROVEMENT_LIMIT = 100
+CG_SUBPROBLEM_TOP_N = 5
+SMALL_PROBLEM_THRESHOLD = 6
+FINAL_MIP_TIME_LIMIT_MS = 600000
+PATTERN_SETUP_COST = 1000000.0
+TRIM_LOSS_PENALTY = 500.0
+MIXING_PENALTY = 100.0
 
+import configparser
+import os
 
+NUM_THREADS = 8 # Default fallback
 
-class RollOptimize:
+# Load configuration
+config = configparser.ConfigParser()
+config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'conf', 'config.ini')
+if os.path.exists(config_path):
+    config.read(config_path)
+    NUM_THREADS = config.getint('optimization', 'num_threads', fallback=8)
+else:
+    logging.warning(f"Config file not found at {config_path}. Using default NUM_THREADS={NUM_THREADS}")
+
+class RollOptimizeCpsat:
     """
-    [RollOptimize 클래스 분석 및 기능 요약]
-
-    이 클래스는 롤(Roll) 제품의 생산 최적화를 담당합니다.
-    주어진 원지(Jumbo Roll) 폭과 설비 제약 조건을 고려하여, 주문받은 규격(지폭)을 
-    가장 효율적으로 생산할 수 있는 절단 패턴(Cutting Pattern)과 생산 수량을 산출합니다.
-
-    핵심 기능 및 알고리즘:
-    1.  **초기화 (__init__)**:
-        -   주문 데이터(df_spec_pre)를 로드하고, 지폭별 수요량(demands) 및 제약 조건(최대/최소 폭, 최대 조수 등)을 설정합니다.
-
-    2.  **초기 패턴 생성 (_generate_initial_patterns)**:
-        -   Column Generation의 시작점이 될 초기 패턴 집합을 생성합니다.
-        -   다양한 휴리스틱(수요순, 너비순 정렬 등)과 무작위 섞기를 결합한 First-Fit 알고리즘을 사용합니다.
-        -   모든 주문을 커버할 수 있도록 단일 품목 패턴 및 폴백(Fallback) 로직도 포함합니다.
-
-    3.  **열 생성법 (Column Generation) 기반 최적화 (run_optimize)**:
-        -   대규모 조합 최적화 문제를 효율적으로 풀기 위해 반복적인 과정을 수행합니다.
-        -   **Master Problem (_solve_master_problem)**: 
-            현재 확보된 패턴들을 조합하여 비용(과생산, 폐기물, 패턴 교체 비용 등)을 최소화하는 해를 찾습니다. 
-            (초기에는 LP로 완화하여 풀고, 마지막에 MIP로 정수해를 구합니다.)
-        -   **Sub Problem (_solve_subproblem)**: 
-            Master Problem의 Dual Value(잠재 가격)를 활용하여, 현재 해를 개선할 수 있는(Reduced Cost > 0) 
-            새로운 유망 패턴(Knapsack Problem 해)을 동적 계획법(DP)으로 찾아냅니다.
+    [RollOptimizeCpsat 클래스]
     
-    4.  **결과 생성 (_format_results)**:
-        -   최적화된 패턴별 생산 수량을 바탕으로 구체적인 작업 지시 데이터(생산 순서, 롤별 구성 등)를 생성합니다.
-        -   과생산/부족생산 및 로스율 등의 지표를 집계하여 요약 정보를 제공합니다.
+    기존 RollOptimize와 동일한 로직을 수행하되, 
+    _solve_master_problem 메서드에서 is_final_mip=True 일 때 CP-SAT 솔버를 사용합니다.
     """
     
-    def __init__(self, df_spec_pre, max_width=1000, min_width=0, max_pieces=8, lot_no=None, db=None, version=None, num_threads=4):
-        self.num_threads = num_threads
+    def __init__(self, df_spec_pre, max_width=1000, min_width=0, max_pieces=8, lot_no=None, db=None, version=None):
         self.df_spec_pre = df_spec_pre
         self.max_width = max_width
         self.min_width = min_width
@@ -72,14 +66,12 @@ class RollOptimize:
         self.item_info = df_spec_pre.set_index('group_order_no')['지폭'].to_dict()
         self.length_info = df_spec_pre.set_index('group_order_no')['롤길이'].to_dict()
         
-        # 지폭 -> group_order_no 역매핑 (DB 패턴 변환용)
         self.width_to_items = {}
         for item, width in self.item_info.items():
             if width not in self.width_to_items:
                 self.width_to_items[width] = []
             self.width_to_items[width].append(item)
         
-        # sep_qt 정보 저장 (없으면 빈 문자열로 가정)
         if 'sep_qt' in df_spec_pre.columns:
             self.sep_qt_info = df_spec_pre.set_index('group_order_no')['sep_qt'].to_dict()
         else:
@@ -101,7 +93,6 @@ class RollOptimize:
         return True
 
     def _generate_initial_patterns_db(self):
-        """DB에서 기존 롤 패턴(rollwidth)을 가져와 초기 패턴으로 추가합니다."""
         if not self.db or not self.lot_no or not self.version:
             logging.info("--- DB 정보가 없어 기존 롤 패턴을 불러올 수 없습니다. ---")
             return
@@ -119,24 +110,20 @@ class RollOptimize:
         duplicate_count = 0
         
         for pattern_widths in db_patterns:
-            # 지폭 값들을 group_order_no로 변환
             pattern_dict = {}
             is_valid = True
             
             for width in pattern_widths:
-                # 해당 지폭에 매핑되는 아이템 찾기
                 matching_items = self.width_to_items.get(width, [])
                 if not matching_items:
                     is_valid = False
                     invalid_width_count += 1
                     break
                 
-                # 첫 번째 매칭되는 아이템 사용 (동일 지폭이면 어떤 것이든 상관없음)
                 item = matching_items[0]
                 pattern_dict[item] = pattern_dict.get(item, 0) + 1
             
             if is_valid and pattern_dict:
-                # 패턴 너비 검증
                 total_width = sum(self.item_info[item] * count for item, count in pattern_dict.items())
                 if self.min_width <= total_width <= self.max_width:
                     if self._add_pattern(pattern_dict):
@@ -153,7 +140,6 @@ class RollOptimize:
         if not self.items:
             return
         
-        # DB에서 기존 패턴 먼저 로드 (있는 경우)
         self._generate_initial_patterns_db()
 
         sorted_by_demand = sorted(self.items, key=lambda item: self.demands.get(item, 0), reverse=True)
@@ -161,14 +147,9 @@ class RollOptimize:
         sorted_by_width_desc = sorted(self.items, key=lambda item: self.item_info.get(item, 0), reverse=True)
         sorted_by_width_asc = sorted(self.items, key=lambda item: self.item_info.get(item, 0))
 
-        # New Heuristics
-        # 1. Width * Demand (Area proxy)
-        # sorted_by_area_desc = sorted(self.items, key=lambda item: self.item_info.get(item, 0) * self.demands.get(item, 0), reverse=True)
-        
-        # 2. Random Shuffles (add multiple to increase diversity)
-        # random.seed(41) # Ensure determinism
+        random.seed(41)
         random_shuffles = []
-        for _ in range(3):  # Increased from 8 to 10
+        for _ in range(2):
             items_copy = list(self.items)
             random.shuffle(items_copy)
             random_shuffles.append(items_copy)
@@ -178,10 +159,8 @@ class RollOptimize:
             sorted_by_width_asc, 
             sorted_by_width_desc, 
             sorted_by_demand_asc,
-            # sorted_by_area_desc,
         ] + random_shuffles
 
-        # === 기존 First-Fit 휴리스틱 ===
         for sorted_items in heuristics:
             for item in sorted_items:
                 current_pattern = {item: 1}
@@ -200,7 +179,6 @@ class RollOptimize:
                     current_width += self.item_info[best_fit_item]
                     current_pieces += 1
 
-                # min_width 충족을 위한 채우기
                 while current_width < self.min_width and current_pieces < self.max_pieces:
                     item_to_add = next((i for i in sorted_by_width_desc if current_width + self.item_info[i] <= self.max_width), None)
                     
@@ -214,90 +192,6 @@ class RollOptimize:
                 if current_width >= self.min_width:
                     self._add_pattern(current_pattern)
 
-        # === 새로운 휴리스틱 1: Best-Fit (남은 공간에 가장 잘 맞는 아이템 선택) ===
-        for item in self.items:
-            current_pattern = {item: 1}
-            current_width = self.item_info[item]
-            current_pieces = 1
-
-            while current_pieces < self.max_pieces and current_width < self.max_width:
-                remaining_width = self.max_width - current_width
-                
-                # 남은 공간에 가장 잘 맞는 (가장 큰) 아이템 선택
-                candidates = [(i, self.item_info[i]) for i in self.items if self.item_info[i] <= remaining_width]
-                if not candidates:
-                    break
-                
-                # 남은 공간을 가장 많이 채우는 아이템 선택
-                best_item = max(candidates, key=lambda x: x[1])[0]
-                current_pattern[best_item] = current_pattern.get(best_item, 0) + 1
-                current_width += self.item_info[best_item]
-                current_pieces += 1
-
-            if current_width >= self.min_width:
-                self._add_pattern(current_pattern)
-
-        # === 새로운 휴리스틱 2: min_width 타겟팅 (min_width에 가장 가까운 조합 찾기) ===
-        target_width = (self.min_width + self.max_width) // 2  # 중간값 타겟
-        
-        for item in self.items:
-            current_pattern = {item: 1}
-            current_width = self.item_info[item]
-            current_pieces = 1
-
-            while current_pieces < self.max_pieces and current_width < target_width:
-                # 목표까지 남은 너비
-                remaining_to_target = target_width - current_width
-                remaining_to_max = self.max_width - current_width
-                
-                # 목표에 가장 가깝게 채울 수 있는 아이템 선택
-                candidates = [(i, self.item_info[i]) for i in self.items 
-                              if self.item_info[i] <= remaining_to_max]
-                if not candidates:
-                    break
-                
-                # 목표와의 차이가 가장 작은 아이템 선택
-                best_item = min(candidates, key=lambda x: abs(remaining_to_target - x[1]))[0]
-                current_pattern[best_item] = current_pattern.get(best_item, 0) + 1
-                current_width += self.item_info[best_item]
-                current_pieces += 1
-
-            if current_width >= self.min_width:
-                self._add_pattern(current_pattern)
-
-        # === 새로운 휴리스틱 3: 역순 채우기 (큰 아이템부터 시작하여 작은 것으로 채우기) ===
-        for item in sorted_by_width_desc:
-            current_pattern = {item: 1}
-            current_width = self.item_info[item]
-            current_pieces = 1
-
-            # 같은 아이템으로 최대한 채우기
-            item_width = self.item_info[item]
-            while current_pieces < self.max_pieces and current_width + item_width <= self.max_width:
-                current_pattern[item] = current_pattern.get(item, 0) + 1
-                current_width += item_width
-                current_pieces += 1
-
-            # 작은 아이템으로 min_width까지 채우기
-            for small_item in sorted_by_width_asc:
-                if current_width >= self.min_width:
-                    break
-                if current_pieces >= self.max_pieces:
-                    break
-                    
-                small_width = self.item_info[small_item]
-                while current_pieces < self.max_pieces and current_width + small_width <= self.max_width:
-                    current_pattern[small_item] = current_pattern.get(small_item, 0) + 1
-                    current_width += small_width
-                    current_pieces += 1
-                    
-                    if current_width >= self.min_width:
-                        break
-
-            if current_width >= self.min_width:
-                self._add_pattern(current_pattern)
-
-        # === 순수 아이템 패턴 (동일 아이템만으로 구성) ===
         for item in self.items:
             item_width = self.item_info.get(item, 0)
             if item_width <= 0: continue
@@ -314,7 +208,6 @@ class RollOptimize:
                 
                 num_items -= 1
 
-        # === 강화된 폴백: 커버되지 않은 아이템 처리 ===
         covered_items = {item for pattern in self.patterns for item in pattern}
         uncovered_items = set(self.items) - covered_items
 
@@ -323,7 +216,6 @@ class RollOptimize:
             for item in uncovered_items:
                 item_width = self.item_info[item]
                 
-                # 시도 1: 같은 아이템 반복 + 다른 큰 아이템으로 채우기
                 pattern = {item: 1}
                 width = item_width
                 pieces = 1
@@ -354,7 +246,6 @@ class RollOptimize:
                     self._add_pattern(pattern)
                     logging.info(f"  -> 폴백 패턴 생성: {pattern} (너비: {width}mm)")
                 else:
-                    # 시도 2: 작은 아이템부터 채워서 min_width 충족 시도
                     pattern2 = {item: 1}
                     width2 = item_width
                     pieces2 = 1
@@ -374,241 +265,154 @@ class RollOptimize:
                         logging.info(f"  -> 폴백 패턴 생성 (시도2): {pattern2} (너비: {width2}mm)")
                     else:
                         logging.warning(f"  -> [경고] 지폭 {item_width}mm에 대해 min_width({self.min_width}mm)를 충족하는 패턴을 생성하지 못함.")
-                        # 최소한 패턴은 추가하여 MIP에서 검토
                         self._add_pattern(pattern)
 
         logging.info(f"[초기 패턴] 총 {len(self.patterns)}개의 초기 패턴 생성됨")
 
     def _solve_master_problem(self, is_final_mip=False, max_patterns=None):
         """
-        마스터 문제(Master Problem)를 선형계획법(LP) 또는 정수계획법(MIP)으로 해결합니다.
-        
-        목적 함수:
-        1. 과생산 페널티 최소화 (주문량 준수)
-        2. 패턴 교체 비용(Setup Cost) 최소화
-        3. 폐기물(Trim Loss) 최소화 (옵션)
-        4. 혼합 생산(Mixing) 페널티 최소화 (동일 패턴 내 이질적인 제품 혼합 지양)
+        CP-SAT Hybrid 구현 (Prioritized Objective)
         """
         
-        # 1. [Final MIP 단계] Gurobi 직접 호출 시도 (Size-Limited License 활용)
-        if is_final_mip:
-            try:
-                import gurobipy as gp
-                from gurobipy import GRB
-                
-                logging.info(f"[Final MIP] 총 {len(self.patterns)}개의 패턴 생성됨")
-                logging.info("Trying Gurobi Direct Solver (gurobipy)...")
-                
-                # Suppress Gurobi output
-                model = gp.Model("roll_optimization")
-                model.setParam("OutputFlag", 0)
-                model.setParam("LogToConsole", 0)
-                model.setParam("Threads", self.num_threads)
-                
-                # Variables
-                x = {} # pattern count (integer)
-                y = {} # pattern used? (binary)
-                for j in range(len(self.patterns)):
-                    x[j] = model.addVar(vtype=GRB.INTEGER, name=f"P_{j}")
-                    y[j] = model.addVar(vtype=GRB.BINARY, name=f"y_{j}")
-                
-                over_prod_vars = {}
-                for item in self.demands:
-                    over_prod_vars[item] = model.addVar(vtype=GRB.CONTINUOUS, name=f"Over_{item}")
-                    
-                model.update()
-                
-                # Constraints
-                # 1. Demand Satisfaction
-                for item, demand in self.demands.items():
-                    production_expr = gp.quicksum(self.patterns[j].get(item, 0) * x[j] for j in range(len(self.patterns)))
-                    model.addConstr(production_expr == int(demand) + over_prod_vars[item], name=f"demand_{item}")
-                
-                # 2. Link x and y (Big-M)
-                M = sum(self.demands.values()) + 10
-                for j in range(len(self.patterns)):
-                    model.addConstr(x[j] <= M * y[j], name=f"link_{j}")
-
-                # Objective Function
-                obj_terms = []
-                
-                # (1) Over-production Penalty
-                unique_widths_count = len(set(self.item_info.values()))
-                dynamic_over_prod_penalty = max(OVER_PROD_PENALTY, PATTERN_SETUP_COST * unique_widths_count * 20)
-                for item in self.demands:
-                    obj_terms.append(over_prod_vars[item] * dynamic_over_prod_penalty)
-                    
-                # (2) Setup Cost
-                for j in range(len(self.patterns)):
-                    obj_terms.append(y[j] * PATTERN_SETUP_COST)
-                    
-                # (3) Trim Loss
-                for j, pattern in enumerate(self.patterns):
-                    loss = self.max_width - sum(self.item_info[item] * count for item, count in pattern.items())
-                    if loss > 0:
-                        obj_terms.append(x[j] * loss * TRIM_LOSS_PENALTY)
-                        
-                # (4) Mixing Penalty
-                for j, pattern in enumerate(self.patterns):
-                    sep_qts = [self.sep_qt_info[item] for item in pattern for _ in range(pattern[item]) if self.sep_qt_info[item].strip()]
-                    unique_sep_qts = set(sep_qts)
-                    if len(unique_sep_qts) > 1:
-                        obj_terms.append(x[j] * MIXING_PENALTY * 50)
-                    elif len(unique_sep_qts) == 1:
-                        empty_count = sum(count for item, count in pattern.items() if not self.sep_qt_info[item].strip())
-                        if empty_count > 0:
-                            obj_terms.append(x[j] * MIXING_PENALTY * empty_count)
-
-                model.setObjective(gp.quicksum(obj_terms), GRB.MINIMIZE)
-                
-                # Optimize
-                model.setParam('TimeLimit', SOLVER_TIME_LIMIT_MS / 1000.0)
-                model.optimize()
-                
-                # Check for optimal or feasible solution (even if time limit reached)
-                if model.Status in (GRB.OPTIMAL, GRB.SUBOPTIMAL) or (model.Status == GRB.TIME_LIMIT and model.SolCount > 0):
-                    status_msg = "Optimal" if model.Status == GRB.OPTIMAL else "Feasible (TimeLimit)"
-                    logging.info(f"Using solver: GUROBI for Final MIP (Success: {status_msg}, Obj={model.ObjVal})")
-                    return {
-                        'objective': model.ObjVal,
-                        'pattern_counts': {j: x[j].X for j in range(len(self.patterns))},
-                        'over_production': {item: over_prod_vars[item].X for item in self.demands}
-                    }
-                else:
-                    logging.warning(f"Gurobi failed to find optimal solution (Status={model.Status}). Fallback to SCIP.")
-
-            except Exception as e:
-                logging.warning(f"Gurobi direct execution failed: {e}. Fallback to SCIP.")
-
-        # 2. [Fallback/LP 단계] OR-Tools Solver (SCIP or GLOP)
-        # Gurobi 실패 시 또는 LP 단계일 경우 실행
-        
-        solver_name = 'SCIP' if is_final_mip else 'GLOP'
-        solver = pywraplp.Solver.CreateSolver(solver_name)
-        solver.SetNumThreads(self.num_threads)
-        
-        if not solver:
-            return None
-            
-        if is_final_mip:
-             logging.info(f"Using solver: {solver_name} (Fallback/Default)")
-
-        if is_final_mip and hasattr(solver, 'SetTimeLimit'):
-            solver.SetTimeLimit(SOLVER_TIME_LIMIT_MS)
-        
-        if hasattr(solver, 'SetNumThreads'):
-            solver.SetNumThreads(self.num_threads)
-
-        x = {j: (solver.IntVar if is_final_mip else solver.NumVar)(0, solver.infinity(), f'P_{j}')
-             for j in range(len(self.patterns))}
-        over_prod_vars = {item: solver.NumVar(0, solver.infinity(), f'Over_{item}') for item in self.demands}
-
-        constraints = {}
-        objective = 0
-        
-        # Constraints: Demand
-        for item, demand in self.demands.items():
-            production_expr = solver.Sum(self.patterns[j].get(item, 0) * x[j] for j in range(len(self.patterns)))
-            constraints[item] = solver.Add(production_expr == demand + over_prod_vars[item], f'demand_{item}')
-
-        # Objective: Over-production Penalty (LP & MIP common)
-        unique_widths_count = len(set(self.item_info.values()))
-        dynamic_over_prod_penalty = max(OVER_PROD_PENALTY, PATTERN_SETUP_COST * unique_widths_count * 20)
-        objective += solver.Sum(dynamic_over_prod_penalty * over_prod_vars[item] for item in self.demands)
-
-        # MIP Specific Objective Terms
-        if is_final_mip:
-            y = {j: solver.BoolVar(f'y_{j}') for j in range(len(self.patterns))}
-            
-            # Big-M Constraint
-            M = sum(self.demands.values()) + 1
-            for j in range(len(self.patterns)):
-                solver.Add(x[j] <= M * y[j])
-
-            # Setup Cost (MIP only, uses binary variable y)
-            objective += solver.Sum(y[j] * PATTERN_SETUP_COST for j in range(len(self.patterns)))
-
-        # [Common Objective] Trim Loss
-        # LP 단계에서도 트림 손실 비용을 반영해야, Dual 값이 "트림을 줄이는 패턴"에 대한 가치를 반영하게 됨.
-        objective += solver.Sum(
-            (self.max_width - sum(self.item_info[item] * count for item, count in pattern.items())) * x[j] * TRIM_LOSS_PENALTY
-            for j, pattern in enumerate(self.patterns)
-        )
-
-        # [Common Objective] Mixing Penalty
-        total_mixing_penalty = 0
-        for j, pattern in enumerate(self.patterns):
-            sep_qts = [self.sep_qt_info[item] for item in pattern for _ in range(pattern[item]) if self.sep_qt_info[item].strip()]
-            unique_sep_qts = set(sep_qts)
-            
-            if len(unique_sep_qts) > 1:
-                total_mixing_penalty += x[j] * MIXING_PENALTY * 50
-            elif len(unique_sep_qts) == 1:
-                empty_count = sum(count for item, count in pattern.items() if not self.sep_qt_info[item].strip())
-                if empty_count > 0:
-                    total_mixing_penalty += x[j] * MIXING_PENALTY * empty_count
-        
-        objective += total_mixing_penalty
-
-        solver.Minimize(objective)
-
-        status = solver.Solve()
-        if status not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
-            return None
-
-        solution = {
-            'objective': solver.Objective().Value(),
-            'pattern_counts': {j: var.solution_value() for j, var in x.items()},
-            'over_production': {item: over_prod_vars[item].solution_value() for item in self.demands},
-        }
+        # 1. LP Relaxation (Column Generation용) - GLOP 사용
         if not is_final_mip:
-            solution['duals'] = {item: constraints[item].dual_value() for item in self.demands}
+            solver = pywraplp.Solver.CreateSolver('GLOP')
+            if not solver: return None
+
+            x = {j: solver.NumVar(0, solver.infinity(), f'P_{j}') for j in range(len(self.patterns))}
+            over_prod_vars = {item: solver.NumVar(0, solver.infinity(), f'Over_{item}') for item in self.demands}
+            constraints = {}
+
+            for item, demand in self.demands.items():
+                production_expr = solver.Sum(self.patterns[j].get(item, 0) * x[j] for j in range(len(self.patterns)))
+                constraints[item] = solver.Add(production_expr == demand + over_prod_vars[item], f'demand_{item}')
+
+            # LP 단계에서는 간단한 Big-M 사용 (Shadow Price 계산용)
+            unique_widths_count = len(set(self.item_info.values()))
+            dynamic_over_prod_penalty = max(1000000000.0, PATTERN_SETUP_COST * unique_widths_count * 20)
+
+            total_over_penalty = solver.Sum(dynamic_over_prod_penalty * over_prod_vars[item] for item in self.demands)
+            solver.Minimize(total_over_penalty) 
+
+            status = solver.Solve()
+            if status not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
+                return None
+
+            return {
+                'objective': solver.Objective().Value(),
+                'pattern_counts': {j: var.solution_value() for j, var in x.items()},
+                'duals': {item: constraints[item].dual_value() for item in self.demands}
+            }
+
+        # 2. Final Integer Solution - CP-SAT 사용 (Lexicographic/Weighted Approach)
+        else:
+            model = cp_model.CpModel()
             
-        return solution
+            max_demand = sum(self.demands.values())
+            
+            # Variables
+            x = {j: model.NewIntVar(0, int(max_demand) + 10, f'x_{j}') for j in range(len(self.patterns))}
+            
+            # [개선] 부족(Shortage)과 초과(Surplus)를 모두 변수로 모델링
+            # Constraint: Production + Shortage == Demand + Surplus
+            shortage_vars = {item: model.NewIntVar(0, int(max_demand) + 10, f'Short_{item}') for item in self.demands}
+            surplus_vars = {item: model.NewIntVar(0, int(max_demand) + 10, f'Surplus_{item}') for item in self.demands}
+            y = {j: model.NewBoolVar(f'y_{j}') for j in range(len(self.patterns))} 
+
+            for item, demand in self.demands.items():
+                prod_sum = sum(self.patterns[j].get(item, 0) * x[j] for j in range(len(self.patterns)))
+                # production + shortage = demand + surplus
+                # -> surplus = production + shortage - demand (if production + shortage >= demand)
+                # CP-SAT allows linear equality
+                model.Add(prod_sum + shortage_vars[item] == int(demand) + surplus_vars[item])
+
+            # Constraint: Link x and y (Big-M)
+            M = int(max_demand) + 10
+            for j in range(len(self.patterns)):
+                model.Add(x[j] <= M * y[j])
+
+            # --- Objective Function Construction (Lexicographic Weighted Sum) ---
+            # Priority 1: Minimize Shortage (Weight: Very High)
+            # Priority 2: Minimize Surplus (Weight: Medium)
+            # Priority 3: Minimize Costs (Setup, Trim, Mixing) (Weight: Low/1)
+            
+            # 가중치 설정 (주의: CP-SAT은 64bit 정수 범위 내여야 함. 최대 9e18)
+            W1_SHORTAGE = 1000000000  # 10억
+            W2_SURPLUS  = 1000        # 1천
+            W3_COST     = 1           # 1
+            
+            obj_terms = []
+            
+            # (1) Shortage
+            for item in self.demands:
+                obj_terms.append(shortage_vars[item] * W1_SHORTAGE)
+
+            # (2) Surplus (Over Production)
+            for item in self.demands:
+                obj_terms.append(surplus_vars[item] * W2_SURPLUS)
+            
+            # (3) Operational Costs
+            # Setup Cost
+            setup_cost_val = int(PATTERN_SETUP_COST / 10000) # 스케일 조정 (오버플로우 방지 및 우선순위 조정)
+            if setup_cost_val < 1: setup_cost_val = 1
+            for j in range(len(self.patterns)):
+                obj_terms.append(y[j] * setup_cost_val * W3_COST)
+                
+            # Trim Loss
+            trim_penalty_val = int(TRIM_LOSS_PENALTY / 100) # 스케일 조정
+            if trim_penalty_val < 1: trim_penalty_val = 1
+            for j, pattern in enumerate(self.patterns):
+                loss_val = int(self.max_width - sum(self.item_info[item] * count for item, count in pattern.items()))
+                if loss_val > 0:
+                    obj_terms.append(x[j] * loss_val * trim_penalty_val * W3_COST)
+
+            # Mixing Penalty
+            mixing_penalty_val = int(MIXING_PENALTY)
+            for j, pattern in enumerate(self.patterns):
+                sep_qts = [self.sep_qt_info[item] for item in pattern for _ in range(pattern[item]) if self.sep_qt_info[item].strip()]
+                unique_sep_qts = set(sep_qts)
+                
+                penalty_weight = 0
+                if len(unique_sep_qts) > 1:
+                     penalty_weight = mixing_penalty_val * 50
+                elif len(unique_sep_qts) == 1:
+                     empty_count = sum(count for item, count in pattern.items() if not self.sep_qt_info[item].strip())
+                     if empty_count > 0:
+                         penalty_weight = mixing_penalty_val * empty_count
+                
+                if penalty_weight > 0:
+                    obj_terms.append(x[j] * int(penalty_weight) * W3_COST)
+
+            model.Minimize(sum(obj_terms))
+
+            # Solve
+            solver = cp_model.CpSolver()
+            # solver.parameters.log_search_progress = True 
+            solver.parameters.max_time_in_seconds = FINAL_MIP_TIME_LIMIT_MS / 1000.0
+            solver.parameters.num_search_workers = NUM_THREADS # 병렬 처리
+            
+            status = solver.Solve(model)
+            
+            if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+                return None
+            
+            return {
+                'objective': solver.ObjectiveValue(),
+                'pattern_counts': {j: solver.Value(x[j]) for j in x},
+                'over_production': {item: solver.Value(surplus_vars[item]) for item in self.demands}
+            }
 
     def _solve_subproblem(self, duals):
-        """
-        서브 문제(Sub-problem)를 동적 계획법(Dynamic Programming, Knapsack-like)으로 해결합니다.
-        
-        Master Problem에서 얻은 Dual Value(잠재 가격)를 가치(Value)로 간주하여, 
-        제한된 원지 폭(Knapsack Capacity) 내에서 가치 합이 최대가 되는 새로운 패턴을 찾습니다.
-        (Reduced Cost가 양수인 패턴을 찾아 Master Problem에 추가)
-        """
         def run_dp(candidate_items):
             width_limit = self.max_width
             piece_limit = self.max_pieces
-            # Cost-Adjusted DP Logic:
-            # Objective: Maximize (Sum(Dual * Count) - PatternCost)
-            # PatternCost = SetupCost + TrimPenalty + MixingPenalty
-            # Since TrimPenalty = (MaxW - Sum(Width * Count)) * TRIM_LOSS_PENALTY
-            #                   = MaxW * TRIM_LOSS_PENALTY - Sum(Width * Count * TRIM_LOSS_PENALTY)
-            #
-            # Reduced Cost = Sum(Dual * Count) - [SetupCost + (MaxW - Sum(Width * Count)) * TRIM_LOSS_PENALTY]
-            #              = Sum( (Dual + Width * TRIM_LOSS_PENALTY) * Count ) - (SetupCost + MaxW * TRIM_LOSS_PENALTY)
-            #
-            # So, Effective Item Value in DP = Dual + Width * TRIM_LOSS_PENALTY
-            # Threshold to beat = SetupCost + MaxW * TRIM_LOSS_PENALTY
-            
-            target_threshold = PATTERN_SETUP_COST + self.max_width * TRIM_LOSS_PENALTY
-            
-            # [DEBUG] 로그: Dual 값 통계 및 Threshold 확인
-            max_dual = max(duals.values()) if duals else 0
-            avg_dual = sum(duals.values()) / len(duals) if duals else 0
-            # logging.info(f"[CG Debug] Max Dual: {max_dual:.2f}, Avg Dual: {avg_dual:.2f}, Threshold: {target_threshold:.2f}")
-
             item_details = []
             for item in candidate_items:
                 item_width = self.item_info[item]
-                item_dual = duals.get(item, 0)
-                
-                # Add implicit value from saving trim loss
-                item_effective_value = item_dual + item_width * TRIM_LOSS_PENALTY
-                
-                if item_effective_value <= 0:
+                item_value = duals.get(item, 0)
+                if item_value <= 0:
                     continue
-                item_details.append((item, item_width, item_effective_value))
-            
-            # logging.info(f"[CG Debug] Candidate Items with +Value: {len(item_details)}/{len(candidate_items)}")
+                item_details.append((item, item_width, item_value))
             if not item_details:
                 return []
 
@@ -636,15 +440,8 @@ class RollOptimize:
             for pieces in range(1, piece_limit + 1):
                 for width in range(self.min_width, width_limit + 1):
                     value = dp_value[pieces][width]
-                    
-                    # Reduced Cost Check
-                    # RC = Value_Computed - Target_Threshold
-                    # We want RC > 0 (or > small epsilon)
-                    reduced_cost = value - target_threshold
-                    
-                    if reduced_cost <= 1.0: # Minimum improvement margin
+                    if value <= PATTERN_VALUE_THRESHOLD:
                         continue
-                        
                     parent = dp_parent[pieces][width]
                     if not parent:
                         continue
@@ -660,23 +457,6 @@ class RollOptimize:
                         cur_pieces, cur_width = prev_pieces, prev_width
                     if not pattern or cur_pieces != 0 or cur_width != 0:
                         continue
-                    
-                    # Adjust for Mixing Penalty (Simplified)
-                    # If mixed, we subtract mixing penalty from reduced cost to see if it's still viable
-                    sep_qts = [self.sep_qt_info[item] for item in pattern for _ in range(pattern[item]) if self.sep_qt_info[item].strip()]
-                    unique_sep_qts = set(sep_qts)
-                    mixing_cost = 0
-                    if len(unique_sep_qts) > 1:
-                        mixing_cost = MIXING_PENALTY * 50
-                    elif len(unique_sep_qts) == 1:
-                        empty_count = sum(count for item, count in pattern.items() if not self.sep_qt_info[item].strip())
-                        if empty_count > 0:
-                            mixing_cost = MIXING_PENALTY * empty_count
-                            
-                    real_reduced_cost = reduced_cost - mixing_cost
-                    if real_reduced_cost <= 1.0:
-                        continue
-
                     key = frozenset(pattern.items())
                     if key in seen_patterns:
                         continue
@@ -684,26 +464,17 @@ class RollOptimize:
                     if total_width < self.min_width or total_width > self.max_width:
                         continue
                     seen_patterns.add(key)
-                    local_candidates.append({'pattern': pattern, 'value': real_reduced_cost, 'width': total_width, 'pieces': pieces})
+                    local_candidates.append({'pattern': pattern, 'value': value, 'width': total_width, 'pieces': pieces})
             return local_candidates
 
-        # 1. Run DP for ALL items (standard)
         all_candidates = run_dp(self.items)
         
-        # 2. Run DP for each sep_qt group
-        # This encourages generating pure patterns for each sep_qt type
         unique_sep_qts = set(self.sep_qt_info.values())
         for qt in unique_sep_qts:
              qt_items = [item for item in self.items if self.sep_qt_info.get(item) == qt]
              if qt_items:
                  all_candidates.extend(run_dp(qt_items))
 
-        # Sort by value and return top N
-        # Note: Mixed patterns from step 1 might have high 'value' (dual sum) but will be penalized in Master.
-        # Pure patterns from step 2/3 will have lower 'value' potentially but no penalty in Master.
-        # We should return enough candidates to let Master decide.
-        
-        # Remove duplicates based on pattern content
         unique_candidates = []
         seen_keys = set()
         for cand in all_candidates:
@@ -713,10 +484,11 @@ class RollOptimize:
                 unique_candidates.append(cand)
 
         unique_candidates.sort(key=lambda x: x['value'], reverse=True)
-        return unique_candidates[:CG_SUBPROBLEM_TOP_N * 3] # Return more candidates to cover different types    
+        return unique_candidates[:CG_SUBPROBLEM_TOP_N * 3]
 
     def _filter_patterns_by_lp(self, keep_top_n=300):
-        # 1. Solve LP relaxation
+        # LP Relaxation using original Master Problem logic (GLOP)
+        # Note: We must call _solve_master_problem with is_final_mip=False
         lp_solution = self._solve_master_problem(is_final_mip=False)
         if not lp_solution or 'duals' not in lp_solution:
             return
@@ -724,13 +496,10 @@ class RollOptimize:
         duals = lp_solution['duals']
         kept_indices = set()
 
-        # 2. Keep Basis patterns (x > 0)
         for j, count in lp_solution['pattern_counts'].items():
             if count > 1e-6:
                 kept_indices.add(j)
 
-        # 3. Score patterns by "implied value" (sum of duals)
-        # We want patterns that cover high-value demands (high duals).
         patterns_data = []
         for j, pattern in enumerate(self.patterns):
             if j in kept_indices:
@@ -738,12 +507,10 @@ class RollOptimize:
             val = sum(duals.get(item, 0) * count for item, count in pattern.items())
             patterns_data.append({'index': j, 'val': val})
 
-        # 4. Keep Top N by score
         patterns_data.sort(key=lambda x: x['val'], reverse=True)
         for i in range(min(keep_top_n, len(patterns_data))):
             kept_indices.add(patterns_data[i]['index'])
 
-        # 5. Filter patterns
         self.patterns = [self.patterns[j] for j in kept_indices]
         self._rebuild_pattern_cache()
 
@@ -785,16 +552,11 @@ class RollOptimize:
         logging.info(f"Generated {len(self.patterns)} patterns in _generate_all_patterns")
  
     def run_optimize(self, start_prod_seq=0):
-        logging.info(f"Starting run_optimize with {len(self.items)} items")
-        start_time = time.time()
+        logging.info(f"Starting run_optimize (CP-SAT) with {len(self.items)} items")
         
         if len(self.items) <= SMALL_PROBLEM_THRESHOLD:
             logging.info("Using _generate_all_patterns (Small Problem)")
             self._generate_all_patterns()
-                       
-            # filter_start = time.time()
-            # self._filter_patterns_by_lp(keep_top_n=600) # Optimize by filtering patterns
-            # logging.info(f"Pattern filtering took {time.time() - filter_start:.4f}s. Remaining patterns: {len(self.patterns)}")
         else:
             logging.info("Using Column Generation (Large Problem)")
             self._generate_initial_patterns()
@@ -803,7 +565,7 @@ class RollOptimize:
 
             no_improvement = 0
             for _ in range(CG_MAX_ITERATIONS):
-                master_solution = self._solve_master_problem()
+                master_solution = self._solve_master_problem(is_final_mip=False) # LP for Duals
                 if not master_solution or 'duals' not in master_solution:
                     break
 
@@ -837,18 +599,15 @@ class RollOptimize:
 
         self._rebuild_pattern_cache()
         
-        # Gurobi Size-Limited 라이선스는 변수 2000개까지 허용하므로, 
-        # 패턴 수가 2000개 이하이면 굳이 필터링할 필요가 없음. (오히려 정수해 탐색에 방해될 수 있음)
-        SAFE_PATTERN_LIMIT = 2000
-        if len(self.patterns) > SAFE_PATTERN_LIMIT:
+        if len(self.patterns) > 300:
             logging.info(f"패턴 수가 많아 LP 필터링 수행 중... (현재: {len(self.patterns)}개)")
-            self._filter_patterns_by_lp(keep_top_n=SAFE_PATTERN_LIMIT)
+            self._filter_patterns_by_lp(keep_top_n=300)
             logging.info(f"LP 필터링 완료. 남은 패턴: {len(self.patterns)}개")
 
+        # Solve Final MIP using CP-SAT
         final_solution = self._solve_master_problem(is_final_mip=True)
         if not final_solution:
-            return {"error": f"최종 해를 찾을 수 없습니다. {self.min_width}mm 이상을 충족하는 주문이 부족했을 수 있습니다."}
-
+            return {"error": f"최종 해를 찾을 수 없습니다. (CP-SAT)"}
 
         return self._format_results(final_solution, start_prod_seq)
 
@@ -859,12 +618,9 @@ class RollOptimize:
         pattern_roll_cut_details_for_db = []
         production_counts = {item: 0 for item in self.demands}
         prod_seq = start_prod_seq
-        prod_seq = start_prod_seq
         total_cut_seq_counter = 0
 
-        # Extract common properties from the first row of the dataframe (since they are grouped)
         first_row = self.df_spec_pre.iloc[0]
-        # Helper for safe int conversion
         def safe_int(val):
             try:
                 return int(val)
@@ -875,7 +631,7 @@ class RollOptimize:
             'diameter': safe_int(first_row.get('dia', 0)),
             'color': first_row.get('color', ''),
             'luster': safe_int(first_row.get('luster', 0)),
-            'p_lot': self.lot_no, # Use lot_no passed to init
+            'p_lot': self.lot_no,
             'core': safe_int(first_row.get('core', 0)),
             'order_pattern': first_row.get('order_pattern', '')
         }
@@ -957,7 +713,7 @@ class RollOptimize:
                             'rs_gubun': 'R',
                             'width': roll_width,
                             'group_no': group_no,
-                            'weight': 0,  # Weight calculation might be needed here
+                            'weight': 0,
                             'pattern_length': roll_length,
                             'count': int(round(count)),
                             **common_props

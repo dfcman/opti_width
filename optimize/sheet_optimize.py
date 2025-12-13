@@ -3,6 +3,9 @@ from ortools.linear_solver import pywraplp
 from collections import Counter
 import math
 import random
+import logging
+import gurobipy as gp
+from gurobipy import GRB
 
 """
 [파일 설명: sheet_optimize.py]
@@ -13,20 +16,20 @@ Column Generation(열 생성) 알고리즘을 기반으로 하여, 주문 요구
 
 # --- 최적화 설정 상수 ---
 # 페널티 값
-OVER_PROD_PENALTY = 50000.0    # 과생산에 대한 페널티
-UNDER_PROD_PENALTY = 250000.0  # 부족생산에 대한 페널티 (과생산보다 우선순위 높임)
+OVER_PROD_PENALTY  = 5000000.0    # 과생산에 대한 페널티
+UNDER_PROD_PENALTY = 25000000.0  # 부족생산에 대한 페널티 (과생산보다 우선순위 높임)
 PATTERN_COMPLEXITY_PENALTY = 0.01  # 패턴 복잡성에 대한 페널티
 PIECE_COUNT_PENALTY = 10         # 패턴 내 롤(piece) 개수에 대한 페널티 (적은 롤 선호)
 
 # 알고리즘 파라미터
-MIN_PIECES_PER_PATTERN = 2      # 패턴에 포함될 수 있는 최소 폭(piece)의 수
+MIN_PIECES_PER_PATTERN = 1      # 패턴에 포함될 수 있는 최소 폭(piece)의 수
 SMALL_PROBLEM_THRESHOLD = 8     # 전체 탐색을 수행할 최대 주문 지폭 종류 수
-SOLVER_TIME_LIMIT_MS = 120000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
-CG_MAX_ITERATIONS = 200         # 열 생성(Column Generation) 최대 반복 횟수
-CG_NO_IMPROVEMENT_LIMIT = 100    # 개선 없는 경우, 열 생성 조기 종료 조건
-CG_SUBPROBLEM_TOP_N = 20         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
+SOLVER_TIME_LIMIT_MS = 180000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
+CG_MAX_ITERATIONS = 1000         # 열 생성(Column Generation) 최대 반복 횟수
+CG_NO_IMPROVEMENT_LIMIT = 50    # 개선 없는 경우, 열 생성 조기 종료 조건
+CG_SUBPROBLEM_TOP_N = 10         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
 
-NUM_THREADS = 4
+
 
 class SheetOptimize:
     def __init__(
@@ -42,7 +45,8 @@ class SheetOptimize:
             max_sc_width,
             db=None,
             lot_no=None,
-            version=None
+            version=None,
+            num_threads=4
     ):
         """
         [SheetOptimize 클래스 분석 및 기능 요약]
@@ -83,6 +87,7 @@ class SheetOptimize:
         """
         df_spec_pre['지폭'] = df_spec_pre['가로']
 
+        self.num_threads = num_threads
         self.b_wgt = b_wgt
         self.sheet_roll_length = sheet_roll_length
         self.sheet_trim = sheet_trim
@@ -150,27 +155,14 @@ class SheetOptimize:
             self.width_max_constraints[width] = min(current_max, max_allowed)
 
         # 정확한 생산량 준수(Exact Match)가 필요한 지폭 식별
-        # 조건 1: 해당 지폭의 총 주문량(톤)이 20톤 이하
-        # 조건 2: 해당 지폭의 오더 중 regular_gubun이 '2'인 경우
-        # self.exact_match_widths = set()
-        
-        # 지폭별 Group Order(가로, 세로, 등급)별 주문량 계산
-        # 사용자 요청: "가로 동일한 725*905 와 725*565는 ... 따로 체크를 해줘야 돼."
-        # 로직: 해당 지폭에 속한 "모든 Group Order"가 5톤 이하일 때만 Exact Match 적용.
-        #      하나라도 5톤을 초과하는 대량 주문이 있다면, 그 주문으로 과생산을 흡수할 수 있으므로 Exact Match 미적용.
-        
-        # group_order_tons = self.df_orders.groupby(['가로', '세로', '등급'])['주문톤'].sum().reset_index()
-        
-        # # 지폭별로 "가장 큰 Group Order의 톤수"를 계산
-        # width_max_group_ton = group_order_tons.groupby('가로')['주문톤'].max()
-
-        # for width in self.order_widths:
-        #     max_group_ton = width_max_group_ton.get(width, 0)
-            
-        #     # 해당 지폭의 어떤 Group Order도 5톤을 넘지 않으면 (모두 소량이면) Exact Match 적용
-        #     if max_group_ton <= 8:
+        # 현재 비활성화: 패턴 다양성 부족으로 인해 Exact Match 적용 시 해가 없어지는 문제 발생
+        # 과생산 페널티(OVER_PROD_PENALTY)로 초과 생산을 최소화함
+        self.exact_match_widths = set()
+        # Exact Match 비활성화됨 - 필요 시 아래 주석 해제
+        # for width, required_rolls in self.demands_in_rolls.items():
+        #     if required_rolls <= 10:
         #         self.exact_match_widths.add(width)
-        #         print(f"  -> 지폭 {width}mm: Exact Match 적용 (최대 Group Order 톤수: {max_group_ton:.1f})")
+        #         logging.info(f"  -> 지폭 {width}mm: Exact Match 적용 (필요 롤수: {required_rolls}롤 <= 10롤)")
 
         self.items, self.item_info, self.item_composition = self._prepare_items(min_sc_width, max_sc_width)
 
@@ -183,7 +175,7 @@ class SheetOptimize:
         self.db = db
         self.lot_no = lot_no
         self.version = version
-        print(f"\n--- 패턴 제약조건: 최소 {self.min_pieces}폭, 최대 {self.max_pieces}폭 ---")
+        logging.info(f"\n--- 패턴 제약조건: 최소 {self.min_pieces}폭, 최대 {self.max_pieces}폭 ---")
 
         self.patterns = []
 
@@ -223,51 +215,100 @@ class SheetOptimize:
         return items, item_info, item_composition
 
     def _calculate_demand_rolls(self, df_orders):
-        """주문량을 바탕으로 지폭별 필요 롤 수를 계산하고, 원본 데이터프레임에 'rolls' 열을 추가하여 반환합니다."""
+        """주문량을 바탕으로 지폭(및 그룹오더)별 필요 롤 수를 계산하고, 원본 데이터프레임에 'rolls' 열을 추가하여 반환합니다.
+        개별 오더 단위가 아닌 'group_order_no' 단위로 톤수를 합산하여 롤 수를 계산합니다.
+        """
         df_copy = df_orders.copy()
         sheet_roll_length_mm = self.sheet_roll_length * 1000
 
-        def calculate_rolls(row):
-            width_mm = row['가로']
-            length_mm = row['세로']
-            order_ton = row['주문톤']
+        # 1. Group Order별 총 주문톤 합산
+        if 'group_order_no' not in df_copy.columns:
+            # group_order_no가 없으면 개별 처리를 위해 임시 생성 (혹은 에러 처리)
+            # 여기서는 안전하게 index를 사용하거나, 기존 로직대로 가되 row별로 그룹으로 취급
+            df_copy['group_order_no'] = df_copy.index
 
-            if self.b_wgt <= 0 or width_mm <= 0 or length_mm <= 0 or order_ton <= 0:
-                return 0
+        group_sums = df_copy.groupby('group_order_no')['주문톤'].sum().to_dict()
+        # 그룹별 스펙(지폭, 세로) 가져오기 (그룹 내 스펙은 동일하다고 가정)
+        group_specs = df_copy.groupby('group_order_no')[['가로', '세로']].first().to_dict('index')
+
+        # 2. Group 단위 롤 수 계산
+        group_rolls_map = {}
+        for g_no, total_ton in group_sums.items():
+            specs = group_specs[g_no]
+            width_mm = specs['가로']
+            length_mm = specs['세로']
             
+            if self.b_wgt <= 0 or width_mm <= 0 or length_mm <= 0 or total_ton <= 0:
+                group_rolls_map[g_no] = 0
+                continue
+
             sheet_weight_g = (self.b_wgt * width_mm * length_mm) / 1000000
             if sheet_weight_g <= 0:
-                return 0
-
-            total_sheets_needed = (order_ton * 1000000) / sheet_weight_g
+                group_rolls_map[g_no] = 0
+                continue
+            
+            total_sheets_needed = (total_ton * 1000000) / sheet_weight_g
             sheets_per_roll_length = math.floor(sheet_roll_length_mm / length_mm)
             if sheets_per_roll_length <= 0:
-                return 0
+                group_rolls_map[g_no] = 0
+                continue
 
-            sheets_per_roll = sheets_per_roll_length * 1 # num_across is always 1
-            return round(total_sheets_needed / sheets_per_roll, 0)
+            sheets_per_roll = sheets_per_roll_length  # num_across is always 1
+            # 그룹 전체에 대한 필요 롤 수 (반올림)
+            group_rolls_map[g_no] = int(round(total_sheets_needed / sheets_per_roll, 0))
 
-        df_copy['rolls'] = df_copy.apply(calculate_rolls, axis=1).astype(int)
+            if width_mm == 710:
+                logging.info(f"--- [DEBUG] 710mm Calc: total_ton={total_ton}, weight_g={sheet_weight_g:.2f}, sheets={total_sheets_needed:.1f}, "
+                             f"roll_len_mm={sheet_roll_length_mm}, sheets_per_roll={sheets_per_roll}, result_rolls={group_rolls_map[g_no]}")
+
+        # 3. 계산된 그룹 롤 수를 개별 오더(row)에 배분
+        def distribute_rolls(group_df):
+            g_no = group_df['group_order_no'].iloc[0]
+            total_r = group_rolls_map.get(g_no, 0)
+            total_t = group_sums.get(g_no, 0)
+            
+            if total_t == 0 or total_r == 0:
+                group_df['rolls'] = 0
+                return group_df
+            
+            # 비례 배분
+            group_df['rolls'] = (group_df['주문톤'] / total_t * total_r).round().astype(int)
+            
+            # 짜투리 보정 (합계 맞추기)
+            current_sum = group_df['rolls'].sum()
+            diff = total_r - current_sum
+            if diff != 0:
+                # 주문톤이 가장 큰 오더에 차이 반영
+                idx = group_df['주문톤'].idxmax()
+                group_df.loc[idx, 'rolls'] += diff
+            
+            return group_df
+
+        # 그룹별로 함수 적용 (groupby apply는 느릴 수 있으나 정확성 우선)
+        # numeric_only=False to allow preserving other columns if needed, usually default is fine
+        df_copy = df_copy.groupby('group_order_no', group_keys=False).apply(distribute_rolls)
+
+        # 지폭별 최종 요구 롤 수 집계
         demand_rolls = df_copy.groupby('지폭')['rolls'].sum().to_dict()
 
-        print("\n--- 지폭별 필요 롤 수 ---")
+        logging.info("\n--- 지폭별 필요 롤 수 (그룹오더 합산 기준) ---")
         # for width, rolls in demand_rolls.items():
-        #     print(f"  지폭 {width}mm: {rolls} 롤")
-        print("--------------------------\n")
+        #     logging.info(f"  지폭 {width}mm: {rolls} 롤")
+        logging.info("----------------------------------------------\n")
         
         return df_copy, demand_rolls
 
     def _generate_initial_patterns_db(self):
         """th_pattern_sequence 테이블의 기존 패턴 데이터를 활용하여 초기 패턴을 생성합니다."""
         if not self.db or not self.lot_no or not self.version:
-            print("--- DB 정보가 없어 기존 패턴을 불러올 수 없습니다. ---")
+            logging.info("--- DB 정보가 없어 기존 패턴을 불러올 수 없습니다. ---")
             return
 
-        print("\n--- DB에서 기존 패턴을 불러와 초기 패턴을 생성합니다. ---")
+        logging.info("\n--- DB에서 기존 패턴을 불러와 초기 패턴을 생성합니다. ---")
         db_patterns_list = self.db.get_patterns_from_db(self.lot_no, self.version)
 
         if not db_patterns_list:
-            print("--- DB에 저장된 기존 패턴이 없습니다. ---")
+            logging.info("--- DB에 저장된 기존 패턴이 없습니다. ---")
             return
 
         initial_patterns_from_db = []
@@ -281,7 +322,7 @@ class SheetOptimize:
                 initial_patterns_from_db.append(pattern_dict)
             else:
                 invalid_items = [name for name in pattern_dict if name not in self.items]
-                print(f"    - 경고: DB 패턴 {pattern_dict}의 아이템 {invalid_items}이(가) 현재 주문에 없어 해당 패턴을 무시합니다.")
+                logging.info(f"    - 경고: DB 패턴 {pattern_dict}의 아이템 {invalid_items}이(가) 현재 주문에 없어 해당 패턴을 무시합니다.")
 
         if initial_patterns_from_db:
             seen_patterns = {frozenset(p.items()) for p in self.patterns}
@@ -290,7 +331,7 @@ class SheetOptimize:
                 if frozenset(p_dict.items()) not in seen_patterns:
                     self.patterns.append(p_dict)
                     added_count += 1
-            print(f"--- DB에서 {added_count}개의 신규 초기 패턴을 추가했습니다. ---")
+            logging.info(f"--- DB에서 {added_count}개의 신규 초기 패턴을 추가했습니다. ---")
 
     def _generate_initial_patterns(self):
         """휴리스틱을 사용하여 초기 패턴을 생성합니다."""
@@ -325,7 +366,55 @@ class SheetOptimize:
             sorted_by_demand_asc
         ] + random_shuffles
         
-        # 2. 각 휴리스틱에 대해 First-Fit과 유사한 패턴 생성
+        # ====== 개선 1: 소량 주문 지폭 우선 패턴 생성 ======
+        # 필요 롤수가 적은 지폭을 주 아이템으로 하는 패턴을 우선 생성
+        small_demand_items = sorted(
+            self.items,
+            key=lambda i: self.demands_in_rolls.get(list(self.item_composition[i].keys())[0], float('inf'))
+        )
+        
+        for primary_item in small_demand_items[:20]:  # 상위 20개 소량 주문 지폭
+            primary_width = self.item_info[primary_item]
+            primary_base_width = list(self.item_composition[primary_item].keys())[0]
+            primary_rolls = self.demands_in_rolls.get(primary_base_width, 0)
+            
+            # 소량 주문(10롤 이하)에 대해서만 특별 패턴 생성
+            if primary_rolls > 10:
+                continue
+                
+            # 이 지폭을 주 아이템으로 하고, 다른 지폭으로 min_width를 맞추는 패턴 탐색
+            for secondary_item in sorted_by_width_desc:
+                if secondary_item == primary_item:
+                    continue
+                    
+                secondary_width = self.item_info[secondary_item]
+                
+                # 다양한 조합 시도
+                for primary_count in range(1, self.max_pieces + 1):
+                    remaining_width = self.max_width - (primary_width * primary_count)
+                    remaining_pieces = self.max_pieces - primary_count
+                    
+                    if remaining_width <= 0 or remaining_pieces <= 0:
+                        continue
+                    
+                    secondary_count = min(int(remaining_width / secondary_width), remaining_pieces)
+                    if secondary_count <= 0:
+                        continue
+                        
+                    total_width = primary_width * primary_count + secondary_width * secondary_count
+                    total_pieces = primary_count + secondary_count
+                    
+                    if self.min_width <= total_width <= self.max_width and self.min_pieces <= total_pieces:
+                        new_pattern = {primary_item: primary_count, secondary_item: secondary_count}
+                        pattern_key = frozenset(new_pattern.items())
+                        if pattern_key not in seen_patterns:
+                            self.patterns.append(new_pattern)
+                            seen_patterns.add(pattern_key)
+
+        logging.info(f"--- {len(self.patterns)}개의 소량주문 우선 패턴 생성됨 ---")
+
+        # ====== 기존 로직: First-Fit 휴리스틱 ======
+        first_fit_count = len(self.patterns)
         for sorted_items in heuristics:
             for item in sorted_items:
                 item_width = self.item_info[item]
@@ -367,7 +456,68 @@ class SheetOptimize:
                         self.patterns.append(current_pattern)
                         seen_patterns.add(pattern_key)
         
-        print(f"--- {len(self.patterns)}개의 혼합 패턴 생성됨 ---")
+        # ====== 개선 2: Best-Fit 휴리스틱 추가 (남은 공간을 최소화하는 아이템 선택) ======
+        for item in sorted_by_demand_asc:  # 소량 주문 먼저
+            item_width = self.item_info[item]
+            
+            current_pattern = {item: 1}
+            current_width = item_width
+            current_pieces = 1
+
+            while current_pieces < self.max_pieces:
+                remaining_width = self.max_width - current_width
+                
+                # Best-Fit: 남은 공간에 가장 잘 맞는(공간을 가장 적게 남기는) 아이템 선택
+                best_fit_item = None
+                min_waste = float('inf')
+                for candidate in self.items:
+                    candidate_width = self.item_info[candidate]
+                    if candidate_width <= remaining_width:
+                        waste = remaining_width - candidate_width
+                        if waste < min_waste:
+                            min_waste = waste
+                            best_fit_item = candidate
+                
+                if not best_fit_item:
+                    break 
+
+                current_pattern[best_fit_item] = current_pattern.get(best_fit_item, 0) + 1
+                current_width += self.item_info[best_fit_item]
+                current_pieces += 1
+
+            if self.min_width <= current_width <= self.max_width and self.min_pieces <= current_pieces:
+                pattern_key = frozenset(current_pattern.items())
+                if pattern_key not in seen_patterns:
+                    self.patterns.append(current_pattern)
+                    seen_patterns.add(pattern_key)
+
+        # ====== 개선 3: 2폭 조합 패턴 체계적 생성 ======
+        # 두 가지 아이템만 사용하는 패턴을 체계적으로 생성
+        items_list = list(self.items)
+        for i, item1 in enumerate(items_list):
+            width1 = self.item_info[item1]
+            for item2 in items_list[i:]:  # 중복 방지
+                width2 = self.item_info[item2]
+                
+                # 다양한 개수 조합 시도
+                for count1 in range(1, self.max_pieces):
+                    for count2 in range(1, self.max_pieces - count1 + 1):
+                        total_width = width1 * count1 + width2 * count2
+                        total_pieces = count1 + count2
+                        
+                        if self.min_width <= total_width <= self.max_width and self.min_pieces <= total_pieces <= self.max_pieces:
+                            new_pattern = {item1: count1}
+                            if item1 != item2:
+                                new_pattern[item2] = count2
+                            else:
+                                new_pattern[item1] += count2
+                            
+                            pattern_key = frozenset(new_pattern.items())
+                            if pattern_key not in seen_patterns:
+                                self.patterns.append(new_pattern)
+                                seen_patterns.add(pattern_key)
+        
+        logging.info(f"--- {len(self.patterns)}개의 혼합 패턴 생성됨 ---")
 
         # --- 3. 모든 복합폭에 대해 '순수 품목 패턴' 생성 ---
         pure_patterns_added = 0
@@ -380,6 +530,7 @@ class SheetOptimize:
             num_items = min(int(self.max_width / item_width), self.max_pieces)
             
             # 너비가 큰 조합부터 작은 조합까지 순차적으로 확인
+            found_valid_pure = False
             while num_items > 0:
                 new_pattern = {item: num_items}
                 total_width = item_width * num_items
@@ -390,23 +541,39 @@ class SheetOptimize:
                         self.patterns.append(new_pattern)
                         seen_patterns.add(pattern_key)
                         pure_patterns_added += 1
+                        found_valid_pure = True
                         break # 이 아이템으로 만들 수 있는 가장 좋은 순수패턴을 찾았으므로 종료
                 
                 num_items -= 1
 
+            # [Patch] 항상 최적의 순수 패턴(꽉 채운 것)을 후보군에 추가합니다.
+            # min_width를 만족하는 패턴을 찾았더라도, 때로는 Trim Loss를 감수하더라도 더 단순한(또는 다른 조합의) 패턴이 필요할 수 있습니다.
+            # 특히 Over-Production Penalty가 매우 크므로, 독립 생산 가능한 패턴은 필수입니다.
+            fill_num = min(int(self.max_width / item_width), self.max_pieces)
+            if fill_num > 0:
+                fallback_pattern = {item: fill_num}
+                # fallback_key = frozenset(fallback_pattern.items())
+                # 중복 체크 제거: 확실하게 추가하기 위함
+                self.patterns.append(fallback_pattern)
+                # seen_patterns.add(fallback_key)
+                # Logging
+                logging.info(f"--- [DEBUG] Forced Pure Pattern for {item}: {fallback_pattern}")
+
+
+
         if pure_patterns_added > 0:
-            print(f"--- {pure_patterns_added}개의 순수 품목 패턴 추가됨 ---")
+            logging.info(f"--- {pure_patterns_added}개의 순수 품목 패턴 추가됨 ---")
 
         # --- 4. 폴백 로직: 초기 패턴으로 커버되지 않는 주문이 있는지 최종 확인 ---
         covered_widths = {w for p in self.patterns for item_name in p for w in self.item_composition.get(item_name, {})}
         uncovered_widths = set(self.order_widths) - covered_widths
 
         if uncovered_widths:
-            print(f"--- 경고: 초기 패턴에 포함되지 않은 주문 발견: {uncovered_widths} ---")
-            print("--- 해당 주문에 대한 폴백 패턴을 추가 생성합니다. ---")
+            logging.info(f"--- 경고: 초기 패턴에 포함되지 않은 주문 발견: {uncovered_widths} ---")
+            logging.info("--- 해당 주문에 대한 폴백 패턴을 추가 생성합니다. ---")
             
             for width in uncovered_widths:
-                print(f"  - 지폭 {width}mm에 대한 순수 품목 패턴 생성 시도...")
+                logging.info(f"  - 지폭 {width}mm에 대한 순수 품목 패턴 생성 시도...")
 
                 # 1. 이 지폭으로 만들 수 있는 유효한 복합폭 아이템 목록을 찾습니다.
                 valid_components = []
@@ -441,7 +608,7 @@ class SheetOptimize:
                             valid_components.append(item_name)
 
                 if not valid_components:
-                    print(f"    - 경고: 지폭 {width}mm로 만들 수 있는 유효한 복합폭 아이템이 없습니다. 폴백 패턴을 생성할 수 없습니다.")
+                    logging.info(f"    - 경고: 지폭 {width}mm로 만들 수 있는 유효한 복합폭 아이템이 없습니다. 폴백 패턴을 생성할 수 없습니다.")
                     continue
 
                 # 2. 너비가 넓은 순으로 정렬하여 Greedy 알고리즘 준비
@@ -475,27 +642,27 @@ class SheetOptimize:
                         if pattern_key not in seen_patterns:
                             self.patterns.append(new_pattern)
                             seen_patterns.add(pattern_key)
-                            print(f"    -> 생성된 순수 패턴: {new_pattern} (너비: {total_width}mm, 폭 수: {total_pieces}) -> 폴백 패턴으로 추가됨.")
+                            logging.info(f"    -> 생성된 순수 패턴: {new_pattern} (너비: {total_width}mm, 폭 수: {total_pieces}) -> 폴백 패턴으로 추가됨.")
                         else:
-                            print(f"    - 생성된 순수 패턴 {new_pattern}은 이미 존재합니다.")
+                            logging.info(f"    - 생성된 순수 패턴 {new_pattern}은 이미 존재합니다.")
                     else:
-                        print(f"    - 생성된 순수 패턴 {new_pattern}이 최종 제약조건(최소너비/폭수)을 만족하지 못합니다. (너비: {total_width}, 폭 수: {total_pieces})")
+                        logging.info(f"    - 생성된 순수 패턴 {new_pattern}이 최종 제약조건(최소너비/폭수)을 만족하지 못합니다. (너비: {total_width}, 폭 수: {total_pieces})")
                 else:
-                    print(f"    - 지폭 {width}mm에 대한 순수 패턴을 구성하지 못했습니다.")
+                    logging.info(f"    - 지폭 {width}mm에 대한 순수 패턴을 구성하지 못했습니다.")
 
         # --- 5. 생성된 패턴들을 후처리하여 작은 복합폭들을 통합 ---
         # self._consolidate_patterns() # 사용자 요청: 초기 생성 시에는 통합하지 않음
 
-        print(f"--- 총 {len(self.patterns)}개의 초기 패턴 생성됨 ---")
-        print(self.patterns)
-        print("--------------------------\n")
+        logging.info(f"--- 총 {len(self.patterns)}개의 초기 패턴 생성됨 ---")
+        # logging.info(self.patterns)
+        logging.info("--------------------------\n")
 
     def _consolidate_patterns(self):
         """
         생성된 초기 패턴들을 후처리하여 작은 복합폭 아이템들을 가능한 큰 복합폭 아이템으로 통합합니다.
         예: {'814x1': 2}는 {'814x2': 1}로 변경을 시도합니다.
         """
-        print("\n--- 생성된 패턴에 대해 후처리(통합)를 시작합니다. ---")
+        logging.info("\n--- 생성된 패턴에 대해 후처리(통합)을 시작합니다. ---")
         
         processed_patterns = []
         seen_patterns = set()
@@ -575,7 +742,7 @@ class SheetOptimize:
 
         original_count = len(self.patterns)
         self.patterns = processed_patterns
-        print(f"--- 패턴 통합 완료: {original_count}개 -> {len(self.patterns)}개 패턴으로 정리됨 ---")
+        logging.info(f"--- 패턴 통합 완료: {original_count}개 -> {len(self.patterns)}개 패턴으로 정리됨 ---")
 
     def _solve_master_problem_ilp(self, is_final_mip=False):
         """
@@ -585,19 +752,126 @@ class SheetOptimize:
         1. 총 생산 롤 수 최소화
         2. 과생산/부족생산 페널티 최소화
         3. 패턴 복잡도 및 교체 비용 페널티 최소화
+        4. 패턴 내 총 롤(piece) 개수에 대한 페널티 (Quadratic)
         
         Args:
             is_final_mip (bool): True이면 정수해(Integer Solution)를 구하고, 
                                False이면 열 생성을 위한 실수해(Relaxed LP)와 Dual Value를 구합니다.
         """
+        # 1. [Final MIP] Try Gurobi Direct Solver
+        if is_final_mip:
+            logging.info(f"--- [DEBUG] Entering _solve_master_problem_ilp(is_final_mip={is_final_mip}, Patterns={len(self.patterns)})")
+            # [DEBUG]
+            if 710 in self.demands_in_rolls:
+                logging.info(f"--- [DEBUG] Solver received demand for 710mm: {self.demands_in_rolls[710]}")
+            logging.info(f"--- [DEBUG] Exact Match Widths: {sorted(list(self.exact_match_widths))}")
+            if 710 in self.demands_in_rolls:
+                 logging.info(f"--- [DEBUG] Demand for 710mm: {self.demands_in_rolls[710]}")
+            
+            try:
+                model = gp.Model("SheetOptimizeMaster")
+                model.setParam("OutputFlag", 0)  # Silence console output
+                model.setParam("LogToConsole", 0)
+                if hasattr(self, 'num_threads'):
+                    model.setParam("Threads", self.num_threads)
+                
+                model.setParam("TimeLimit", SOLVER_TIME_LIMIT_MS / 1000.0)
+                model.setParam("MIPFocus", 1) # 1: Find valid solution (Feasibility) first
+
+                # Variables
+                x = {}
+                for j in range(len(self.patterns)):
+                    x[j] = model.addVar(vtype=GRB.INTEGER, name=f'P_{j}')
+
+                over_prod_vars = {}
+                for width in self.demands_in_rolls:
+                    over_prod_vars[width] = model.addVar(vtype=GRB.CONTINUOUS, name=f'Over_{width}')
+                
+                under_prod_vars = {}
+                for width, required_rolls in self.demands_in_rolls.items():
+                    allowed_under_prod = max(1, math.ceil(required_rolls))
+                    under_prod_vars[width] = model.addVar(lb=0, ub=allowed_under_prod, vtype=GRB.CONTINUOUS, name=f'Under_{width}')
+
+                # Constraints: Demand
+                constraints = {}
+                for width, required_rolls in self.demands_in_rolls.items():
+                    production_expr = gp.quicksum(
+                        x[j] * sum(self.item_composition[item_name].get(width, 0) * count for item_name, count in self.patterns[j].items())
+                        for j in range(len(self.patterns))
+                    )
+                    model.addConstr(production_expr + under_prod_vars[width] == required_rolls + over_prod_vars[width], name=f'demand_{width}')
+
+                    # Exact Match Logic (width >= 900mm)
+                    if width in self.exact_match_widths:
+                        over_prod_vars[width].ub = 0.0
+
+                # Objective
+                total_rolls = gp.quicksum(x[j] for j in range(len(self.patterns)))
+                local_over_penalty = 5000000.0
+                total_over_prod_penalty = gp.quicksum(local_over_penalty * var for var in over_prod_vars.values())
+                total_under_prod_penalty = gp.quicksum(UNDER_PROD_PENALTY * var for var in under_prod_vars.values())
+                total_complexity_penalty = gp.quicksum(PATTERN_COMPLEXITY_PENALTY * len(self.patterns[j]) * x[j] for j in range(len(self.patterns)))
+                
+                # Quadratic Piece Count Penalty
+                # Note: Gurobi supports quadratic objectives directly
+                total_piece_penalty = gp.quicksum(
+                PIECE_COUNT_PENALTY * (sum(count for item, count in self.patterns[j].items()) ** 2) * x[j]
+                    for j in range(len(self.patterns))
+                )
+
+                model.setObjective(total_rolls + total_over_prod_penalty + total_under_prod_penalty + total_complexity_penalty + total_piece_penalty, GRB.MINIMIZE)
+                
+                # Solve
+                model.optimize()
+
+                if model.Status in (GRB.OPTIMAL, GRB.SUBOPTIMAL) or (model.Status == GRB.TIME_LIMIT and model.SolCount > 0):
+                    status_msg = "Optimal" if model.Status == GRB.OPTIMAL else "Feasible (TimeLimit)"
+                    logging.info(f"Using solver: GUROBI for Final MIP (Success: {status_msg}, Obj={model.ObjVal})")
+                    result = {
+                        'objective': model.ObjVal,
+                        'pattern_counts': {j: x[j].X for j in range(len(self.patterns))},
+                        'over_production': {w: over_prod_vars[w].X for w in over_prod_vars},
+                        'under_production': {w: under_prod_vars[w].X for w in under_prod_vars}
+                    }
+                    
+                    if 710 in result['over_production']:
+                        logging.info(f"--- [DEBUG] Solver Result for 710mm: Over={result['over_production'][710]}, Under={result['under_production'][710]}")
+                        # Log patterns using 710
+                        total_710_from_solver = 0
+                        for j, count in result['pattern_counts'].items():
+                            if count > 0.001:
+                                pat = self.patterns[j]
+                                pat_710_qty = 0
+                                for item, qty in pat.items():
+                                    # item is string like '710' or '710_A'
+                                    # Check item composition
+                                    if item in self.item_composition:
+                                        for w, q in self.item_composition[item].items():
+                                            if w == 710:
+                                                pat_710_qty += q * qty
+                                if pat_710_qty > 0:
+                                     total_710_from_solver += count * pat_710_qty
+                                     logging.info(f"--- [DEBUG] Solver Pattern {j}: {pat} (710x{pat_710_qty}), Count={count:.4f}")
+                        logging.info(f"--- [DEBUG] Total 710mm Calculated from Solver Counts: {total_710_from_solver}")
+                    
+                    return result
+                else:
+                     logging.warning(f"Gurobi failed to find optimal solution (Status={model.Status}). Fallback to SCIP.")
+
+            except Exception as e:
+                logging.warning(f"Gurobi direct execution failed: {e}. Fallback to SCIP.")
+
+        # 2. [Fallback/Default] OR-Tools Solver (SCIP or GLOP)
         solver = pywraplp.Solver.CreateSolver('SCIP' if is_final_mip else 'GLOP')
         
         # Enable multi-threading
         if hasattr(solver, 'SetNumThreads'):
-            solver.SetNumThreads(NUM_THREADS)
+            solver.SetNumThreads(self.num_threads)
 
         if is_final_mip:
             solver.SetTimeLimit(SOLVER_TIME_LIMIT_MS)
+        else:
+            solver.SetTimeLimit(30000) # 30 seconds for LP
 
         # 변수 정의
         x = {j: solver.IntVar(0, solver.infinity(), f'P_{j}') if is_final_mip else solver.NumVar(0, solver.infinity(), f'P_{j}') for j in range(len(self.patterns))}
@@ -617,12 +891,10 @@ class SheetOptimize:
             )
             constraints[width] = solver.Add(production_for_width + under_prod_vars[width] == required_rolls + over_prod_vars[width], f'demand_{width}')
 
-            # # Exact Match 제약조건 적용
-            # if width in self.exact_match_widths:
-            #     # 과생산 금지 (UB = 0) -> 1로 완화 (정수해 불가능성 대비)
-            #     over_prod_vars[width].SetBounds(0.0, 1.0)
-            #     # 부족생산 금지 (UB = 0) -> 강제 맞춤
-            #     under_prod_vars[width].SetBounds(0.0, 0.0)
+            # Exact Match 제약조건 적용 (지폭 >= 900mm)
+            if width in self.exact_match_widths:
+                # 과생산 금지 (Upper Bound = 0)
+                over_prod_vars[width].SetBounds(0.0, 0.0)
 
         # 목적함수: 총 롤 수 + 페널티 최소화
         total_rolls = solver.Sum(x.values())
@@ -644,6 +916,9 @@ class SheetOptimize:
         )
 
         solver.Minimize(total_rolls + total_over_prod_penalty + total_under_prod_penalty + total_complexity_penalty + total_piece_penalty)
+        
+        if not is_final_mip:
+             logging.info("--- [DEBUG] Calling OR-Tools solver.Solve() for LP Relaxation...")
         
         status = solver.Solve()
         if status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
@@ -810,16 +1085,16 @@ class SheetOptimize:
     def run_optimize(self, start_prod_seq=0):
         """최적화 실행 메인 함수"""
         if len(self.order_widths) <= SMALL_PROBLEM_THRESHOLD:
-            print(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 모든 패턴을 탐색합니다 (Small-scale) ---")
+            logging.info(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 모든 패턴을 탐색합니다 (Small-scale) ---")
             self._generate_all_patterns()
         else:
-            print(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 열 생성 기법을 시작합니다 (Large-scale) ---")
+            logging.info(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 열 생성 기법을 시작합니다 (Large-scale) ---")
             # self._generate_initial_patterns_db() # DB에서 가져온 패턴을 먼저 추가
             self._generate_initial_patterns()
             
             initial_pattern_count = len(self.patterns)
             self.patterns = [p for p in self.patterns if sum(self.item_info[i] * c for i, c in p.items()) >= self.min_width - 200]
-            print(f"--- 초기 패턴 필터링: {initial_pattern_count}개 -> {len(self.patterns)}개 (최소 너비 {self.min_width}mm 적용)")
+            logging.info(f"--- 초기 패턴 필터링: {initial_pattern_count}개 -> {len(self.patterns)}개 (최소 너비 {self.min_width}mm 적용)")
 
             if not self.patterns:
                 return {"error": "초기 유효 패턴을 생성할 수 없습니다. 제약조건이 너무 엄격할 수 있습니다."}
@@ -844,21 +1119,23 @@ class SheetOptimize:
                                 patterns_added += 1
                 
                 if patterns_added > 0:
+                    logging.info(f"--- [CG] Iteration {iteration}: Added {patterns_added} new patterns. Obj={master_solution.get('objective', 'N/A'):.2f}")
                     no_improvement_count = 0
                 else:
-                    no_improvement_count += 1
+                    logging.info(f"--- 더 이상 유효한 신규 패턴이 생성되지 않아 조기 종료합니다 (반복 {iteration}). ---")
+                    break
                 
                 if no_improvement_count >= CG_NO_IMPROVEMENT_LIMIT:
-                    print(f"--- {CG_NO_IMPROVEMENT_LIMIT}번의 반복 동안 개선이 없어 수렴으로 간주하고 종료합니다 (반복 {iteration}). ---")
+                    logging.info(f"--- {CG_NO_IMPROVEMENT_LIMIT}번의 반복 동안 개선이 없어 수렴으로 간주하고 종료합니다 (반복 {iteration}). ---")
                     break
 
         if not self.patterns:
             return {"error": "유효한 패턴을 생성할 수 없습니다."}
 
-        print(f"\n--- 총 {len(self.patterns)}개의 패턴으로 최종 최적화를 수행합니다. ---")
+        logging.info(f"\n--- 총 {len(self.patterns)}개의 패턴으로 최종 최적화를 수행합니다. ---")
         
         # 최종 최적화 전에 패턴 통합(Consolidation) 한 번 더 수행
-        self._consolidate_patterns()
+        # self._consolidate_patterns()
 
         final_solution = self._solve_master_problem_ilp(is_final_mip=True)        
         if not final_solution:
@@ -885,8 +1162,8 @@ class SheetOptimize:
         # 주문 이행 요약 생성 (수정된 _build_fulfillment_summary 호출)
         fulfillment_summary = self._build_fulfillment_summary(demand_tracker)
 
-        print("\n[주문 이행 요약 (그룹오더별)]")
-        # print(fulfillment_summary.to_string())
+        logging.info("\n[주문 이행 요약 (그룹오더별)]")
+        # logging.info(fulfillment_summary.to_string())
 
         return {
             "pattern_result": df_patterns.sort_values('count', ascending=False) if not df_patterns.empty else df_patterns,
@@ -951,17 +1228,34 @@ class SheetOptimize:
             'core': 0, # Sheet orders don't use core
             'order_pattern': first_row.get('order_pattern', '')
         }
+        logging.info(f"--- [DEBUG] Building Pattern Details. Start Prod Seq: {start_prod_seq}")
+        
+        # 1. Expand patterns into individual rolls
+        all_rolls_data = [] # List of dictionaries, each dict represents one roll
 
         for j, count in final_solution['pattern_counts'].items():
-            if count < 0.99:
+            if count <= 0.001:
                 continue
             
-            roll_count = int(round(count))
+            # [DEBUG] Log pattern usage in builder
+            pat = self.patterns[j]
+            pat_710_qty = 0
+            for item, qty in pat.items():
+                if item in self.item_composition:
+                    for w, q in self.item_composition[item].items():
+                        if w == 710:
+                            pat_710_qty += q * qty
+            if pat_710_qty > 0:
+                 logging.info(f"--- [DEBUG] Builder Pattern {j}: {pat} (710x{pat_710_qty}), Count={count}")
+
+            batch_count = int(round(count))
+            roll_count = batch_count # Restore variable name for downstream logic
+
             pattern_dict = self.patterns[j]
             
 
 
-            prod_seq_counter += 1
+            # prod_seq_counter += 1 # Original line, moved to inside grouped_batches loop
             
             # --- [Modified Logic] Assign orders per roll and group into batches ---
             
@@ -1182,7 +1476,7 @@ class SheetOptimize:
     
     def _generate_initial_patterns_test(self):
         """초기 패턴 생성을 위해 First-Fit-Decreasing 휴리스틱을 사용합니다."""
-        print("\n--- 유효한 초기 패턴을 생성합니다 ---")
+        logging.info("\n--- 유효한 초기 패턴을 생성합니다 ---")
         
         # frozenset으로 패턴 중복 체크를 효율적으로 관리
         seen_patterns = set()
@@ -1279,7 +1573,7 @@ class SheetOptimize:
                 if pattern_key not in seen_patterns:
                     self.patterns.append(current_pattern)
                     seen_patterns.add(pattern_key)
-        print(f"--- {len(self.patterns)}개의 혼합 패턴 생성됨 ---")
+        logging.info(f"--- {len(self.patterns)}개의 혼합 패턴 생성됨 ---")
 
 
         # 너비가 작은 아이템부터 순서대로 처리 (First-Fit-Decreasing)
@@ -1324,7 +1618,7 @@ class SheetOptimize:
                 if pattern_key not in seen_patterns:
                     self.patterns.append(current_pattern)
                     seen_patterns.add(pattern_key)
-        print(f"--- {len(self.patterns)}개의 혼합 패턴 생성됨 ---")
+        logging.info(f"--- {len(self.patterns)}개의 혼합 패턴 생성됨 ---")
 
         # --- 2. 모든 복합폭에 대해 '순수 품목 패턴' 생성 ---
         pure_patterns_added = 0
@@ -1351,18 +1645,18 @@ class SheetOptimize:
                 num_items -= 1
 
         if pure_patterns_added > 0:
-            print(f"--- {pure_patterns_added}개의 순수 품목 패턴 추가됨 ---")
+            logging.info(f"--- {pure_patterns_added}개의 순수 품목 패턴 추가됨 ---")
 
         # --- 폴백 로직: 초기 패턴으로 커버되지 않는 주문이 있는지 최종 확인 ---
         covered_widths = {w for p in self.patterns for item_name in p for w in self.item_composition.get(item_name, {})}
         uncovered_widths = set(self.order_widths) - covered_widths
 
         if uncovered_widths:
-            print(f"--- 경고: 초기 패턴에 포함되지 않은 주문 발견: {uncovered_widths} ---")
-            print("--- 해당 주문에 대한 폴백 패턴을 추가 생성합니다. ---")
+            logging.info(f"--- 경고: 초기 패턴에 포함되지 않은 주문 발견: {uncovered_widths} ---")
+            logging.info("--- 해당 주문에 대한 폴백 패턴을 추가 생성합니다. ---")
             
             for width in uncovered_widths:
-                print(f"  - 지폭 {width}mm에 대한 순수 품목 패턴 생성 시도...")
+                logging.info(f"  - 지폭 {width}mm에 대한 순수 품목 패턴 생성 시도...")
 
                 # 1. 이 지폭으로 만들 수 있는 유효한 복합폭 아이템 목록을 찾습니다.
                 valid_components = []
@@ -1383,7 +1677,7 @@ class SheetOptimize:
                             valid_components.append(item_name)
 
                 if not valid_components:
-                    print(f"    - 경고: 지폭 {width}mm로 만들 수 있는 유효한 복합폭 아이템이 없습니다. 폴백 패턴을 생성할 수 없습니다.")
+                    logging.info(f"    - 경고: 지폭 {width}mm로 만들 수 있는 유효한 복합폭 아이템이 없습니다. 폴백 패턴을 생성할 수 없습니다.")
                     continue
 
                 # 2. 너비가 넓은 순으로 정렬하여 Greedy 알고리즘 준비
@@ -1417,14 +1711,14 @@ class SheetOptimize:
                         if pattern_key not in seen_patterns:
                             self.patterns.append(new_pattern)
                             seen_patterns.add(pattern_key)
-                            print(f"    -> 생성된 순수 패턴: {new_pattern} (너비: {total_width}mm, 폭 수: {total_pieces}) -> 폴백 패턴으로 추가됨.")
+                            logging.info(f"    -> 생성된 순수 패턴: {new_pattern} (너비: {total_width}mm, 폭 수: {total_pieces}) -> 폴백 패턴으로 추가됨.")
                         else:
-                            print(f"    - 생성된 순수 패턴 {new_pattern}은 이미 존재합니다.")
+                            logging.info(f"    - 생성된 순수 패턴 {new_pattern}은 이미 존재합니다.")
                     else:
-                        print(f"    - 생성된 순수 패턴 {new_pattern}이 최종 제약조건(최소너비/폭수)을 만족하지 못합니다. (너비: {total_width}, 폭 수: {total_pieces})")
+                        logging.info(f"    - 생성된 순수 패턴 {new_pattern}이 최종 제약조건(최소너비/폭수)을 만족하지 못합니다. (너비: {total_width}, 폭 수: {total_pieces})")
                 else:
-                    print(f"    - 지폭 {width}mm에 대한 순수 패턴을 구성하지 못했습니다.")
+                    logging.info(f"    - 지폭 {width}mm에 대한 순수 패턴을 구성하지 못했습니다.")
 
-        print(f"--- 총 {len(self.patterns)}개의 초기 패턴 생성됨 ---")
-        print(self.patterns)
-        print("--------------------------\n")
+        logging.info(f"--- 총 {len(self.patterns)}개의 초기 패턴 생성됨 ---")
+        logging.info(self.patterns)
+        logging.info("--------------------------\n")
