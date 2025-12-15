@@ -564,6 +564,9 @@ def process_sheet_lot(
             sheet_trim=sheet_trim_size,
             min_sc_width=min_sc_width,
             max_sc_width=max_sc_width,
+            db=db,
+            lot_no=lot_no,
+            version=version,
             num_threads=NUM_THREADS
         )
         
@@ -1117,7 +1120,7 @@ def main():
             logging.info(f"{'='*60}")
             logging.info(f"{'='*60}")
             logging.info(f"{'='*60}")
-            time.sleep(60)
+            time.sleep(10)
 
     except FileNotFoundError as e:        
         logging.error(f"[치명적 에러] 설정 파일을 찾을 수 없습니다: {e}")

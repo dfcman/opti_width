@@ -93,7 +93,7 @@ class DataInserters:
             insert into  th_roll_sequence (
                 module, plant, pm_no, schedule_unit, paper_type, b_wgt,
                 lot_no, version, prod_seq, unit_no, seq, roll_seq, pok_cnt,
-                rollwidth, length, spool_no, spool_seq, rs_gubun,
+                rollwidth, length, trim_loss, spool_no, spool_seq, rs_gubun,
                 dia, weight, 
                 cut_cnt, color, luster, core, pattern, p_lot, p_type, p_wgt, p_machine, 
                 width1, width2, width3, width4, width5, width6, width7,
@@ -101,7 +101,7 @@ class DataInserters:
             ) values (
                 'C', :plant, :pm_no, :schedule_unit, :paper_type, :b_wgt,
                 :lot_no, :version, :prod_seq, :unit_no, :seq, :roll_seq, :pok_cnt,
-                :rollwidth, :length, :spool_no, :spool_seq, :rs_gubun,
+                :rollwidth, :length, :trim_loss, :spool_no, :spool_seq, :rs_gubun,
                 :dia, round(:b_wgt * :rollwidth * :length / 1000000,1), 
                 :cut_cnt, :color, :luster, :core, :pattern, :p_lot, :p_type, :p_wgt, :p_machine, 
                 :w1, :w2, :w3, :w4, :w5, :w6, :w7,
@@ -123,6 +123,7 @@ class DataInserters:
                     'seq':seq + 1, 'roll_seq': roll_seq, 'pok_cnt': pok_cnt_value,
                     'rollwidth': roll_detail['rollwidth'],
                     'length': roll_detail['pattern_length'],
+                    'trim_loss': roll_detail.get('sheet_trim', 0), 
                     'spool_no': prod_seq, 
                     'spool_seq': seq + 1,
                     'dia': int(roll_detail.get('diameter', 0)), 

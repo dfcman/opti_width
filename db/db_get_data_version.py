@@ -28,11 +28,11 @@ class VersionGetters:
                 
                 SELECT 
                     a.plant, pm_no, a.schedule_unit, a.lot_no, a.version, a.min_width, a.roll_max_width, 
-                    a.sheet_max_width, a.max_re_count as max_pieces, 4 as sheet_max_pieces,
+                    a.sheet_max_width, a.max_re_count as max_pieces, a.max_re_count as sheet_max_pieces,
                     a.paper_type, a.b_wgt,
                     a.min_sc_width, a.max_sc_width, a.sheet_trim_size, sheet_length_re,
                     ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type != '1')) as sheet_order_cnt,
-                    ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '31' and pack_type = '1')) as roll_order_cnt
+                    ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type = '1')) as roll_order_cnt
                 FROM th_versions_manager a, th_tar_std_length b, th_calculation_messages c
                 WHERE a.plant = b.plant
                 AND a.paper_type = b.paper_type
@@ -40,7 +40,7 @@ class VersionGetters:
                 and a.lot_no = c.lot_no
                 and a.version = c.version
                 --and c.message_seq = '9'
-                and a.lot_no = '3250900051' and a.version = '01'
+                and a.lot_no = '3250900068' and a.version = '02'
                 and LENGTH(c.version_id) > 0
                 ORDER BY a.plant, a.version_id, a.schedule_unit, a.lot_no, a.version DESC
                 FETCH FIRST 1 ROWS ONLY

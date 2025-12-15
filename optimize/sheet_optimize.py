@@ -299,16 +299,16 @@ class SheetOptimize:
         return df_copy, demand_rolls
 
     def _generate_initial_patterns_db(self):
-        """th_pattern_sequence 테이블의 기존 패턴 데이터를 활용하여 초기 패턴을 생성합니다."""
-        if not self.db or not self.lot_no or not self.version:
+        """th_pattern_tot_sheet 테이블의 사용자 편집 패턴 데이터를 활용하여 초기 패턴을 생성합니다."""
+        if not self.db or not self.lot_no:
             logging.info("--- DB 정보가 없어 기존 패턴을 불러올 수 없습니다. ---")
             return
 
-        logging.info("\n--- DB에서 기존 패턴을 불러와 초기 패턴을 생성합니다. ---")
-        db_patterns_list = self.db.get_patterns_from_db(self.lot_no, self.version)
+        logging.info("\n--- DB(th_pattern_tot_sheet)에서 사용자 편집 패턴을 불러와 초기 패턴을 생성합니다. ---")
+        db_patterns_list = self.db.get_sheet_patterns_from_db(self.lot_no)
 
         if not db_patterns_list:
-            logging.info("--- DB에 저장된 기존 패턴이 없습니다. ---")
+            logging.info("--- DB에 저장된 사용자 편집 패턴이 없거나, 현재 오더와 일치하는 패턴이 없습니다. ---")
             return
 
         initial_patterns_from_db = []
@@ -322,7 +322,7 @@ class SheetOptimize:
                 initial_patterns_from_db.append(pattern_dict)
             else:
                 invalid_items = [name for name in pattern_dict if name not in self.items]
-                logging.info(f"    - 경고: DB 패턴 {pattern_dict}의 아이템 {invalid_items}이(가) 현재 주문에 없어 해당 패턴을 무시합니다.")
+                logging.debug(f"    - 경고: DB 패턴 {pattern_dict}의 아이템 {invalid_items}이(가) 현재 주문에 없어 해당 패턴을 무시합니다.")
 
         if initial_patterns_from_db:
             seen_patterns = {frozenset(p.items()) for p in self.patterns}
@@ -331,7 +331,7 @@ class SheetOptimize:
                 if frozenset(p_dict.items()) not in seen_patterns:
                     self.patterns.append(p_dict)
                     added_count += 1
-            logging.info(f"--- DB에서 {added_count}개의 신규 초기 패턴을 추가했습니다. ---")
+            logging.info(f"--- DB에서 {added_count}개의 사용자 편집 패턴을 추가했습니다. ---")
 
     def _generate_initial_patterns(self):
         """휴리스틱을 사용하여 초기 패턴을 생성합니다."""
@@ -557,7 +557,7 @@ class SheetOptimize:
                 self.patterns.append(fallback_pattern)
                 # seen_patterns.add(fallback_key)
                 # Logging
-                logging.info(f"--- [DEBUG] Forced Pure Pattern for {item}: {fallback_pattern}")
+                logging.debug(f"--- [DEBUG] Forced Pure Pattern for {item}: {fallback_pattern}")
 
 
 
@@ -762,11 +762,7 @@ class SheetOptimize:
         if is_final_mip:
             logging.info(f"--- [DEBUG] Entering _solve_master_problem_ilp(is_final_mip={is_final_mip}, Patterns={len(self.patterns)})")
             # [DEBUG]
-            if 710 in self.demands_in_rolls:
-                logging.info(f"--- [DEBUG] Solver received demand for 710mm: {self.demands_in_rolls[710]}")
-            logging.info(f"--- [DEBUG] Exact Match Widths: {sorted(list(self.exact_match_widths))}")
-            if 710 in self.demands_in_rolls:
-                 logging.info(f"--- [DEBUG] Demand for 710mm: {self.demands_in_rolls[710]}")
+            logging.debug(f"--- [DEBUG] Exact Match Widths: {sorted(list(self.exact_match_widths))}")
             
             try:
                 model = gp.Model("SheetOptimizeMaster")
@@ -834,26 +830,6 @@ class SheetOptimize:
                         'under_production': {w: under_prod_vars[w].X for w in under_prod_vars}
                     }
                     
-                    if 710 in result['over_production']:
-                        logging.info(f"--- [DEBUG] Solver Result for 710mm: Over={result['over_production'][710]}, Under={result['under_production'][710]}")
-                        # Log patterns using 710
-                        total_710_from_solver = 0
-                        for j, count in result['pattern_counts'].items():
-                            if count > 0.001:
-                                pat = self.patterns[j]
-                                pat_710_qty = 0
-                                for item, qty in pat.items():
-                                    # item is string like '710' or '710_A'
-                                    # Check item composition
-                                    if item in self.item_composition:
-                                        for w, q in self.item_composition[item].items():
-                                            if w == 710:
-                                                pat_710_qty += q * qty
-                                if pat_710_qty > 0:
-                                     total_710_from_solver += count * pat_710_qty
-                                     logging.info(f"--- [DEBUG] Solver Pattern {j}: {pat} (710x{pat_710_qty}), Count={count:.4f}")
-                        logging.info(f"--- [DEBUG] Total 710mm Calculated from Solver Counts: {total_710_from_solver}")
-                    
                     return result
                 else:
                      logging.warning(f"Gurobi failed to find optimal solution (Status={model.Status}). Fallback to SCIP.")
@@ -918,7 +894,7 @@ class SheetOptimize:
         solver.Minimize(total_rolls + total_over_prod_penalty + total_under_prod_penalty + total_complexity_penalty + total_piece_penalty)
         
         if not is_final_mip:
-             logging.info("--- [DEBUG] Calling OR-Tools solver.Solve() for LP Relaxation...")
+             logging.debug("--- [DEBUG] Calling OR-Tools solver.Solve() for LP Relaxation...")
         
         status = solver.Solve()
         if status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
@@ -1089,7 +1065,7 @@ class SheetOptimize:
             self._generate_all_patterns()
         else:
             logging.info(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 열 생성 기법을 시작합니다 (Large-scale) ---")
-            # self._generate_initial_patterns_db() # DB에서 가져온 패턴을 먼저 추가
+            self._generate_initial_patterns_db()  # DB에서 사용자 편집 패턴을 먼저 추가
             self._generate_initial_patterns()
             
             initial_pattern_count = len(self.patterns)
@@ -1119,14 +1095,14 @@ class SheetOptimize:
                                 patterns_added += 1
                 
                 if patterns_added > 0:
-                    logging.info(f"--- [CG] Iteration {iteration}: Added {patterns_added} new patterns. Obj={master_solution.get('objective', 'N/A'):.2f}")
+                    logging.debug(f"--- [CG] Iteration {iteration}: Added {patterns_added} new patterns. Obj={master_solution.get('objective', 'N/A'):.2f}")
                     no_improvement_count = 0
                 else:
-                    logging.info(f"--- 더 이상 유효한 신규 패턴이 생성되지 않아 조기 종료합니다 (반복 {iteration}). ---")
+                    logging.debug(f"--- 더 이상 유효한 신규 패턴이 생성되지 않아 조기 종료합니다 (반복 {iteration}). ---")
                     break
                 
                 if no_improvement_count >= CG_NO_IMPROVEMENT_LIMIT:
-                    logging.info(f"--- {CG_NO_IMPROVEMENT_LIMIT}번의 반복 동안 개선이 없어 수렴으로 간주하고 종료합니다 (반복 {iteration}). ---")
+                    logging.debug(f"--- {CG_NO_IMPROVEMENT_LIMIT}번의 반복 동안 개선이 없어 수렴으로 간주하고 종료합니다 (반복 {iteration}). ---")
                     break
 
         if not self.patterns:
@@ -1408,6 +1384,7 @@ class SheetOptimize:
                         'prod_seq': prod_seq_counter,
                         'roll_seq': roll_seq_counter,
                         'rs_gubun': 'S',
+                        'sheet_trim': self.sheet_trim,
                         **common_props
                     })
                     
