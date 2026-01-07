@@ -37,7 +37,9 @@ class Database(CsvGetters, RollGetters, SheetGetters, VersionGetters, DataInsert
                 "th_pattern_sequence",
                 "th_roll_sequence",
                 "th_cut_sequence",
-                "th_order_group"
+                "th_sheet_sequence",
+                "th_order_group",
+                "th_group_master"
             ]
             for table in tables_to_delete:
                 query = f"DELETE FROM {table} WHERE lot_no = :lot_no AND version = :version"

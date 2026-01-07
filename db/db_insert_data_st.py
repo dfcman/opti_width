@@ -1,4 +1,5 @@
 import oracledb
+import pandas as pd
 
 class DataInserters:
     """석문 공장(8000) 전용 데이터 INSERT 함수들"""
@@ -300,5 +301,84 @@ class DataInserters:
             print(f"DEBUG: First record to insert: {bind_vars_list[0]}")
             cursor.executemany(insert_query, bind_vars_list)
             print(f"Prepared {len(bind_vars_list)} new order group records for transaction.")
+
+    def insert_group_master(self, connection, lot_no, version, plant, pm_no, schedule_unit, df_groups):
+        """
+        df_groups DataFrame을 th_group_master 테이블에 저장합니다.
+        """
+        cursor = connection.cursor()
+
+        insert_query = """
+            insert into th_group_master (
+                plant, schedule_unit, lot_no, version, group_no,
+                paper_type, b_wgt, width, length, trim,
+                rs_gubun, export, nation_code, customer,
+                pt_gubun, skid_yn, dia, core, order_no
+            ) values (
+                :plant, :schedule_unit, :lot_no, :version, :group_no,
+                :paper_type, :b_wgt, :width, :length, :trim,
+                :rs_gubun, :export, :nation_code, :customer,
+                :pt_gubun, :skid_yn, :dia, :core, :order_no
+            )
+        """
+
+        df_copy = df_groups.copy()
+        df_copy['lot_no'] = lot_no
+        df_copy['version'] = version
+        df_copy['plant'] = plant
+        df_copy['pm_no'] = pm_no
+        df_copy['schedule_unit'] = schedule_unit
+
+        # DataFrame 컬럼 이름을 DB 컬럼에 맞게 매핑
+        rename_map = {
+            'group_order_no': 'group_no',
+            '가로': 'width',
+            '세로': 'length',
+            'customer_name': 'customer',
+            # 'export_yn': 'export' (will handle logic below)
+        }
+        
+        df_to_insert = df_copy.rename(columns={k: v for k, v in rename_map.items() if k in df_copy.columns})
+        
+        # trim column logic?
+        # Maybe use 'trim_loss' or 'trim_size' if available, else 0
+        if 'trim' not in df_to_insert.columns:
+            df_to_insert['trim'] = 0
+
+        if 'export' not in df_to_insert.columns:
+            if 'export_yn' in df_to_insert.columns:
+                df_to_insert['export'] = df_to_insert['export_yn']
+            else:
+                df_to_insert['export'] = 'N' # Default value if missing
+
+        required_cols = [
+            'plant', 'schedule_unit', 'lot_no', 'version', 'group_no',
+            'paper_type', 'b_wgt', 'width', 'length', 
+            'rs_gubun', 'nation_code', 'customer',
+            'pt_gubun', 'skid_yn', 'dia', 'core', 'order_no'
+        ]
+
+        # Ensure all columns exist
+        for col in required_cols:
+            if col not in df_to_insert.columns:
+                # logging.warning(f"Missing column {col} for group master insert. Filling with None/0.")
+                if col in ['width', 'length', 'dia', 'core', 'b_wgt']:
+                    df_to_insert[col] = 0
+                else:
+                    df_to_insert[col] = ''
+
+        # Handle NaNs
+        df_to_insert = df_to_insert.fillna({
+            'width': 0, 'length': 0, 'dia':0, 'core':0, 'b_wgt':0,
+            'rs_gubun': '', 'nation_code': '', 'customer': '', 'pt_gubun': '', 'skid_yn': '', 'order_no': ''
+        })
+
+        bind_vars_list = df_to_insert[required_cols + ['trim', 'export']].to_dict('records')
+
+        if bind_vars_list:
+            # print(f"DEBUG: First group master record to insert: {bind_vars_list[0]}")
+            cursor.executemany(insert_query, bind_vars_list)
+        
+        print(f"Prepared {len(bind_vars_list)} new group master records for transaction.")
 
     

@@ -48,6 +48,8 @@ import math
 import random
 import time
 import logging
+import gurobipy as gp
+from gurobipy import GRB
 
 # --- 최적화 설정 상수 ---
 # 비용 상수 (모든 목적 함수 항을 '비용'으로 통일하기 위해 사용)
@@ -55,14 +57,18 @@ COST_PER_ROLL = 5000.0          # 롤 1개 교체/사용에 대한 비용 (예�
 COST_PER_METER_MATERIAL = 0.8  # 원자재 1미터당 비용 (예시)
 
 # 페널티 값
-OVER_PROD_PENALTY = 200.0    # 과생산에 대한 페널티
-UNDER_PROD_PENALTY = 100000.0  # 부족생산에 대한 페널티
-PATTERN_COMPLEXITY_PENALTY = 0.01  # 패턴 복잡성에 대한 페널티
-PIECE_COUNT_PENALTY = 10           # 패턴 내 롤(piece) 개수에 대한 페널티 (적은 롤 선호)
+OVER_PROD_PENALTY = 20000000.0    # 과생산에 대한 페널티(1미터당 페널티 부여 값)
+UNDER_PROD_PENALTY = 10000000.0  # 부족생산에 대한 페널티
+PATTERN_COMPLEXITY_PENALTY = 1.0  #  (복잡도 페널티) "한 패턴에 여러 규격을 섞지 마라!" (작업자가 헷갈리지 않게 단순한 구성을 선호하게 만듦)
+PATTERN_COUNT_PENALTY = 1000.0       # "칼 세팅(패턴 변경) 횟수를 줄여라!" (생산 효율을 위해 전체 패턴 종류를 줄임)
 TRIM_PENALTY = 0          # 트림(loss) 면적(mm^2)당 페널티. 폐기물 비용.
 ITEM_SINGLE_STRIP_PENALTIES = {}
 DEFAULT_SINGLE_STRIP_PENALTY = 1000  # 지정되지 않은 단일폭은 기본적으로 패널티 없음
 DISALLOWED_SINGLE_BASE_WIDTHS = {}  # 단일 사용을 금지할 주문 폭 집합
+
+# [New] 단폭(x1) 아이템 사용 페널티
+# 패턴 내 단폭 아이템 개수에 비례하여 페널티 부여 (복합폭 x2 이상 사용 유도)
+SINGLE_STRIP_PENALTY = 5000.0  # 단폭(x1) 아이템 1개당 페널티
 
 # 솔버 멀티스레딩
 import configparser
@@ -93,50 +99,79 @@ class SheetOptimizeCa:
     
     def __init__(
             self,
-            df_spec_pre,
-            max_width,
-            min_width,
-            max_pieces,
-            b_wgt,
-            min_sheet_roll_length,
-            max_sheet_roll_length,
-            sheet_trim,
-            min_sc_width,
-            max_sc_width,
             db=None,
             lot_no=None,
             version=None,
-            num_threads=4
+            df_spec_pre=None,
+            max_width=None,
+            min_width=None,
+            max_pieces=None,
+            b_wgt=None,
+            min_sheet_roll_length=None,
+            max_sheet_roll_length=None,
+            std_roll_cnt=None,
+            sheet_trim=None,
+            min_sc_width=None,
+            max_sc_width=None,
+            color=None,
+            paper_type=None,
+            p_type=None,
+            p_wgt=None,
+            p_color=None,
+            coating_yn=None,
+            min_cm_width=None,
+            max_cm_width=None,
+            max_sl_count=None,
+            ww_trim_size=None,
+            ww_trim_size_sheet=None,
+            num_threads=4,
+            double_cutter='N' # [New] 복합폭 생성 옵션 (Y: 이종규격 허용, N: 동일규격만 허용)
     ):
         """
         SheetOptimizeCa 생성자.
-        
-        Args:
-            df_spec_pre (pd.DataFrame): 주문 데이터. 필수 컬럼: '가로', '세로', '주문톤', 'group_order_no'
-            max_width (int): 원지(Jumbo Roll) 최대 폭 (mm)
-            min_width (int): 패턴에서 허용하는 최소 총 폭 (mm)
-            max_pieces (int): 패턴당 최대 허용 조수 (복합 아이템 개수)
-            b_wgt (float): 평량 (g/m²) - 무게 계산에 사용
-            min_sheet_roll_length (float): 쉬트 롤 최소 길이 (m)
-            max_sheet_roll_length (float): 쉬트 롤 최대 길이 (m)
-            sheet_trim (int): 쉬트 트림 사이즈 (mm) - 복합폭 계산 시 추가되는 손실분
-            min_sc_width (int): 슬리터 칼(SC) 최소 폭 (mm) - 복합 아이템 폭의 하한
-            max_sc_width (int): 슬리터 칼(SC) 최대 폭 (mm) - 복합 아이템 폭의 상한
-            db: 데이터베이스 연결 객체 (선택)
-            lot_no (str): 롯트 번호 (선택)
-            version (str): 버전 (선택)
         """
-        # 주문 데이터의 '가로' 컬럼을 '지폭'으로 복사 (내부 처리용)
-        df_spec_pre['지폭'] = df_spec_pre['가로']
-
-        # 평량 및 롤 길이 제약조건 저장
+        # 저장
+        self.df_orders = df_spec_pre.copy()
+        
+        self.double_cutter = double_cutter # [New]
+        self.max_width = max_width
+        self.min_width = min_width
+        self.max_pieces = max_pieces
         self.b_wgt = b_wgt
-        self.num_threads = num_threads
         self.min_sheet_roll_length = min_sheet_roll_length
         self.max_sheet_roll_length = max_sheet_roll_length
-        self.sheet_trim = sheet_trim  # 복합폭 계산 시 추가되는 트림 손실
-        self.original_max_width = max_width  # 원지 최대 폭 저장
+        self.sheet_trim = sheet_trim
+        self.min_sc_width = min_sc_width
+        self.max_sc_width = max_sc_width
         
+        self.color = color
+        self.paper_type = paper_type
+        self.p_type = p_type
+        self.p_wgt = p_wgt
+        self.p_color = p_color
+        self.coating_yn = coating_yn
+        self.min_cm_width = min_cm_width
+        self.max_cm_width = max_cm_width
+        self.max_sl_count = max_sl_count
+        self.std_roll_cnt = std_roll_cnt
+        self.ww_trim_size = ww_trim_size
+        self.ww_trim_size_sheet = ww_trim_size_sheet
+        
+        self.db = db
+        self.lot_no = lot_no
+        self.version = version
+        self.num_threads = num_threads
+
+        # 주문 데이터의 '가로' 컬럼을 '지폭'으로 복사 (내부 처리용)
+        self.df_orders['지폭'] = self.df_orders['가로']
+        
+        self.original_max_width = max_width
+        self.min_pieces = MIN_PIECES_PER_PATTERN
+
+        # [Constraint] User Request: Disallowed Combinations (List of tuples)
+        # 예: [(635, 636), (648, 636)] -> 635와 636 혼합 금지
+        self.disallowed_combinations = [(635, 636)]
+
         # 주문량을 미터 단위로 변환하여 수요 계산
         self.df_orders, self.demands_in_meters, self.order_sheet_lengths = self._calculate_demand_meters(df_spec_pre)
         self.order_widths = list(self.demands_in_meters.keys())  # 고유 주문 지폭 목록
@@ -152,20 +187,36 @@ class SheetOptimizeCa:
         # 복합 아이템 생성: 여러 지폭을 조합하여 슬리터 칼로 한 번에 자를 수 있는 단위
         self.items, self.item_info, self.item_composition = self._prepare_items(min_sc_width, max_sc_width)
 
-        # 제약조건 저장
-        self.max_width = max_width
-        self.min_width = min_width
-        self.min_pieces = MIN_PIECES_PER_PATTERN
-        self.max_pieces = int(max_pieces)
-        self.min_sc_width = min_sc_width
-        self.max_sc_width = max_sc_width
-        self.db = db
-        self.lot_no = lot_no
-        self.version = version
         logging.info(f"--- 패턴 제약조건: 최소 {self.min_pieces}폭, 최대 {self.max_pieces}폭 ---")
 
         # 패턴 저장소 초기화 (외부에서 패턴을 주입해야 함)
         self.patterns = []
+
+    def _is_pattern_valid(self, current_pattern):
+        """
+        패턴의 유효성을 검사합니다. 특히 금지된 조합이 포함되어 있는지 확인합니다.
+        
+        Args:
+            current_pattern (dict): {item_name: count, ...}
+            
+        Returns:
+            bool: True if valid, False if invalid (contains disallowed combination)
+        """
+        if not self.disallowed_combinations:
+            return True
+            
+        # 1. 현재 패턴에 포함된 모든 '기본 지폭' 수집 (Composite Item 내부 포함)
+        all_base_widths = set()
+        for it_name in current_pattern:
+            if it_name in self.item_composition:
+                 all_base_widths.update(self.item_composition[it_name].keys())
+        
+        # 2. 금지된 조합 확인
+        for width1, width2 in self.disallowed_combinations:
+            if width1 in all_base_widths and width2 in all_base_widths:
+                return False
+                
+        return True
 
     def _prepare_items(self, min_sc_width, max_sc_width):
         """
@@ -195,17 +246,37 @@ class SheetOptimizeCa:
         item_composition = {}  # composite_item_name -> {original_width: count}
         
         # 하나의 복합 아이템에 포함될 수 있는 최대 기본 지폭 개수
-        max_pieces_in_composite = 4 
+        # [Mod] max_sl_count가 있으면 사용, 없으면 기본값 4
+        max_pieces_in_composite = self.max_sl_count if self.max_sl_count and self.max_sl_count > 0 else 4 
 
         # ============================================================
         # Step 1: 단일 지폭 복합 아이템 생성 (같은 지폭 N개 조합)
         # 예: 710mm x 1 = 710mm, 710mm x 2 = 1420mm, ...
         # ============================================================
+        
+        # [Mod] Trim 계산 로직: Coating Y이면 (sheet_trim + ww_trim_size_sheet), 아니면 sheet_trim
+        if self.coating_yn == 'Y':
+             effective_trim = (self.sheet_trim or 0) + (self.ww_trim_size_sheet or 0)
+        else:
+             effective_trim = self.sheet_trim
+
         for width in self.order_widths:
             for i in range(1, max_pieces_in_composite + 1):
                 # 복합폭 계산: (기본 지폭 × 개수) + 트림 손실
-                base_width = width * i + self.sheet_trim
+                base_width = width * i + effective_trim
                 
+                # [Mod] Same Spec Items (Step 1) check:
+                # User Request (Implicit): 939x1 (939mm) should be valid if it meets slitter min (500mm),
+                # even if min_cm (1000mm) is higher.
+                # So we ONLY check min_sc_width here, and skip min_cm_width unless strict enforcement is needed.
+                # Assuming min_cm_width is primarily for "Mixed" composites stability.
+                pass
+                
+                # [Original Code removed]
+                # if self.min_cm_width is not None and self.max_cm_width is not None:
+                #    if not (self.min_cm_width <= base_width <= self.max_cm_width):
+                #        continue
+
                 # 슬리터 칼 제약조건 체크
                 if not (min_sc_width <= base_width <= max_sc_width):
                     continue
@@ -222,30 +293,37 @@ class SheetOptimizeCa:
         # Step 2: 혼합 지폭 복합 아이템 생성 (다른 지폭 조합)
         # 예: 710mm + 850mm = 1560mm
         # ============================================================
-        for i in range(2, max_pieces_in_composite + 1):
-            # 중복 조합(combinations_with_replacement) 생성
-            for combo in combinations_with_replacement(self.order_widths, i):
-                # 단일 지폭만으로 구성된 조합은 Step 1에서 이미 처리됨
-                if len(set(combo)) == 1:
-                    continue
+        if self.double_cutter == 'Y':
+            # [Mod] User Request: double_cutter='Y' 일 때만 혼합 지폭 허용
+            for i in range(2, max_pieces_in_composite + 1):
+                # 중복 조합(combinations_with_replacement) 생성
+                for combo in combinations_with_replacement(self.order_widths, i):
+                    # 단일 지폭만으로 구성된 조합은 Step 1에서 이미 처리됨
+                    if len(set(combo)) == 1:
+                        continue
 
-                # 복합폭 계산: 모든 지폭 합계 + 트림 손실
-                base_width = sum(combo) + self.sheet_trim
-                
-                # 슬리터 칼 제약조건 체크
-                if not (min_sc_width <= base_width <= max_sc_width):
-                    continue
+                    # 복합폭 계산: 모든 지폭 합계 + 트림 손실
+                    base_width = sum(combo) + effective_trim
+                    
+                    # [New] CM (Composite) 폭 제약 확인
+                    if self.min_cm_width is not None and self.max_cm_width is not None:
+                        if not (self.min_cm_width <= base_width <= self.max_cm_width):
+                            continue
 
-                if base_width <= self.original_max_width:
-                    # 조합 구성 카운팅 (예: (710, 710, 850) → {710: 2, 850: 1})
-                    comp_counts = Counter(combo)
-                    # 아이템 명명: 정렬된 "지폭x개수" 조합 (예: "710x2+850x1")
-                    item_name = "+".join(sorted([f"{w}x{c}" for w, c in comp_counts.items()]))
+                    # 슬리터 칼 제약조건 체크
+                    if not (min_sc_width <= base_width <= max_sc_width):
+                        continue
 
-                    if item_name not in items:
-                        items.append(item_name)
-                        item_info[item_name] = base_width
-                        item_composition[item_name] = dict(comp_counts)
+                    if base_width <= self.original_max_width:
+                        # 조합 구성 카운팅 (예: (710, 710, 850) → {710: 2, 850: 1})
+                        comp_counts = Counter(combo)
+                        # 아이템 명명: 정렬된 "지폭x개수" 조합 (예: "710x2+850x1")
+                        item_name = "+".join(sorted([f"{w}x{c}" for w, c in comp_counts.items()]))
+
+                        if item_name not in items:
+                            items.append(item_name)
+                            item_info[item_name] = base_width
+                            item_composition[item_name] = dict(comp_counts)
 
         return items, item_info, item_composition
 
@@ -271,9 +349,9 @@ class SheetOptimizeCa:
 
         def calculate_meters(row):
             """개별 주문 행에 대한 필요 생산 길이(m)를 계산합니다."""
-            width_mm = row['가로']    # 지폭 (mm)
-            length_mm = row['세로']   # 장당 세로 길이 (mm)
-            order_ton = row['주문톤']  # 주문량 (톤)
+            width_mm = row.get('지폭', row.get('width', 0))    # 지폭 (mm)
+            length_mm = row.get('세로', row.get('length', 0))   # 장당 세로 길이 (mm)
+            order_ton = row.get('주문톤', row.get('order_ton_cnt', 0))  # 주문량 (톤)
 
             # 유효성 검사: 0 이하 값이 있으면 계산 불가
             if self.b_wgt <= 0 or width_mm <= 0 or length_mm <= 0 or order_ton <= 0:
@@ -291,6 +369,18 @@ class SheetOptimizeCa:
             total_meters_needed = total_sheets_needed * (length_mm / 1000)
             return total_meters_needed
 
+        # 컬럼명 소문자 변환 (DB에서 대문자로 넘어오는 경우 대응)
+        df_copy.columns = [c.lower() for c in df_copy.columns]
+
+        # 영문 컬럼명을 한글로 매핑
+        rename_map = {
+            'width': '지폭', 
+            'length': '세로', 
+            'order_ton_cnt': '주문톤',
+            '가로': '지폭' # 가로가 들어올 경우도 대비
+        }
+        df_copy = df_copy.rename(columns=rename_map)
+            
         # 각 주문 행에 대해 필요 미터 계산
         df_copy['meters'] = df_copy.apply(calculate_meters, axis=1)
         # 지폭별로 필요 미터 합계
@@ -325,16 +415,20 @@ class SheetOptimizeCa:
             if self.min_width <= current_width <= self.max_width and self.min_pieces <= current_pieces <= self.max_pieces:
                 pattern_key = frozenset(current_pattern.items())
                 if pattern_key not in seen_patterns:
-                    # CA 버전: 패턴 길이는 min/max 범위의 중간값 사용
-                    pattern_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
-                    loss_per_roll = self.max_width - current_width
-                    
-                    all_patterns.append({
-                        'composition': current_pattern.copy(),
-                        'length': pattern_length,
-                        'loss_per_roll': loss_per_roll
-                    })
-                    seen_patterns.add(pattern_key)
+                    # [Constraint] User Request: Check disallowed combinations
+                    if not self._is_pattern_valid(current_pattern):
+                         seen_patterns.add(pattern_key) 
+                    else:
+                        # CA 버전: 패턴 길이는 min/max 범위의 중간값 사용
+                        pattern_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
+                        loss_per_roll = self.max_width - current_width
+                        
+                        all_patterns.append({
+                            'composition': current_pattern.copy(),
+                            'length': pattern_length,
+                            'loss_per_roll': loss_per_roll
+                        })
+                        seen_patterns.add(pattern_key)
 
             # 종료 조건
             if current_pieces >= self.max_pieces or start_index >= len(item_list):
@@ -356,6 +450,118 @@ class SheetOptimizeCa:
         find_combinations_recursive(0, {}, 0, 0)
         self.patterns = all_patterns
         logging.info(f"--- 전체 탐색으로 {len(self.patterns)}개의 패턴 생성됨 ---")
+
+    def _generate_initial_patterns_db(self):
+        """th_pattern_tot_sheet 테이블의 사용자 편집 패턴 데이터를 활용하여 초기 패턴을 생성합니다 (CA 버전)."""
+        if not self.db or not self.lot_no:
+            logging.info("--- DB 정보가 없어 기존 패턴을 불러올 수 없습니다. ---")
+            return
+
+        logging.info("\n--- DB(th_pattern_tot_sheet)에서 사용자 편집 패턴을 불러와 초기 패턴을 생성합니다. ---")
+        # CA용 패턴 가져오기 메서드 호출
+        db_patterns_list = self.db.get_sheet_ca_patterns_from_db(self.lot_no)
+
+        if not db_patterns_list:
+            logging.info("--- DB에 저장된 사용자 편집 패턴이 없거나, 현재 오더와 일치하는 패턴이 없습니다. ---")
+            return
+
+        logging.info(f"--- 현재 생성된 유효 아이템 목록 (총 {len(self.items)}개): {self.items[:20]} ... ---")
+        
+        initial_patterns_from_db = []
+        pattern_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
+
+        for pattern_item_list in db_patterns_list:
+            pattern_dict = dict(Counter(pattern_item_list))
+            
+            # DB 패턴 아이템 복구 및 검증
+            all_items_valid = True
+            
+            for item_name in pattern_dict.keys():
+                if item_name in self.items:
+                    continue
+                
+                # 아이템 복구 시도
+                is_recovered = False
+                try:
+                    # 복합폭 파싱 (예: "710x1+850x1" 또는 "710x2")
+                    sub_items = item_name.split('+')
+                    total_width = 0
+                    composition = {}
+                    
+                    valid_sub_items = True
+                    for sub in sub_items:
+                        # "710x2" 형식 파싱
+                        if 'x' not in sub:
+                            valid_sub_items = False
+                            break
+                        w_str, c_str = sub.split('x')
+                        w = int(w_str)
+                        c = int(c_str)
+                        
+                        # 지폭이 현재 주문에 존재하는지 확인
+                        if w not in self.order_widths:
+                            valid_sub_items = False
+                            break
+                        
+                        total_width += w * c
+                        composition[w] = composition.get(w, 0) + c
+                    
+                    if valid_sub_items:
+                        # 트림 포함하여 총 폭 계산 (단, 710x1+850x1은 트림이 한 번만 포함됨)
+                        # [Mod] Trim 계산 로직 적용
+                        if self.coating_yn == 'Y':
+                             effective_trim = (self.ww_trim_size or 0) + (self.ww_trim_size_sheet or 0)
+                        else:
+                             effective_trim = self.sheet_trim
+                        
+                        composite_width = total_width + effective_trim
+                        
+                        # 슬리터 칼 제약 및 최대 폭 제약 확인
+                        # [Mod] CM (Composite) 폭 제약 추가 확인
+                        is_cm_valid = True
+                        if self.min_cm_width is not None and self.max_cm_width is not None:
+                            if not (self.min_cm_width <= composite_width <= self.max_cm_width):
+                                is_cm_valid = False
+                        
+                        if is_cm_valid and self.min_sc_width <= composite_width <= self.max_sc_width and composite_width <= self.original_max_width:
+                             # 아이템 등록
+                             self.items.append(item_name)
+                             self.item_info[item_name] = composite_width
+                             self.item_composition[item_name] = composition
+                             is_recovered = True
+                             logging.info(f"    -> [Recover] DB 패턴 아이템 복구: {item_name} (폭: {composite_width}mm)")
+                except Exception as e:
+                    logging.warning(f"    - [Error] DB 아이템 {item_name} 파싱/복구 실패: {e}")
+                
+                if not is_recovered:
+                    all_items_valid = False
+                    break
+            
+            if all_items_valid:
+                # 패턴 전체 유효성 (총 너비 등) 확인
+                current_total_width = sum(self.item_info[name] * count for name, count in pattern_dict.items())
+                current_total_pieces = sum(pattern_dict.values()) 
+                 
+                if self.min_width <= current_total_width <= self.max_width and self.min_pieces <= current_total_pieces <= self.max_pieces:
+                    # 패턴 구조체 생성
+                    loss_per_roll = self.max_width - current_total_width
+                    new_pat = {
+                        'composition': pattern_dict,
+                        'length': pattern_length,
+                        'loss_per_roll': loss_per_roll
+                    }
+                    initial_patterns_from_db.append(new_pat)
+
+        if initial_patterns_from_db:
+            seen_patterns = {frozenset(p['composition'].items()) for p in self.patterns}
+            added_count = 0
+            for pat in initial_patterns_from_db:
+                key = frozenset(pat['composition'].items())
+                if key not in seen_patterns:
+                    self.patterns.append(pat)
+                    seen_patterns.add(key)
+                    added_count += 1
+            logging.info(f"--- DB에서 {added_count}개의 사용자 편집 패턴을 추가했습니다. ---")
 
     def _generate_initial_patterns(self):
         """
@@ -411,8 +617,15 @@ class SheetOptimizeCa:
                 while current_pieces < self.max_pieces:
                     remaining_width = self.max_width - current_width
                     
-                    # 남은 공간에 맞는 가장 큰 아이템을 찾음 (First-Fit)
-                    best_fit_item = next((i for i in sorted_items if self.item_info[i] <= remaining_width), None)
+                    # [Constraint] User Request: Check disallowed combinations via helper
+                    def is_valid_combination(candidate_item, current_pat):
+                        # 임시 패턴 구성
+                        temp_pat = current_pat.copy()
+                        temp_pat[candidate_item] = temp_pat.get(candidate_item, 0) + 1
+                        return self._is_pattern_valid(temp_pat)
+
+                    # 남은 공간에 맞는 가장 큰 아이템을 찾음 (First-Fit) + 금지 조합 확인
+                    best_fit_item = next((i for i in sorted_items if self.item_info[i] <= remaining_width and is_valid_combination(i, current_pattern)), None)
                     
                     if not best_fit_item:
                         break 
@@ -475,6 +688,120 @@ class SheetOptimizeCa:
         Returns:
             dict: 최적화 결과 (pattern_counts, over_production, under_production, duals)
         """
+        # 1. [Final MIP] Try Gurobi Direct Solver
+        if is_final_mip:
+            try:
+                logging.info("Trying Gurobi Direct Solver SheetOptimizeCA (gurobipy)...")
+                model = gp.Model("SheetOptimizationCA")
+                model.setParam("OutputFlag", 0)
+                model.setParam("LogToConsole", 0)
+                if hasattr(self, 'num_threads'):
+                    model.setParam("Threads", self.num_threads)
+                
+                model.setParam("TimeLimit", SOLVER_TIME_LIMIT_MS / 1000.0)
+                model.setParam("MIPFocus", 0) 
+
+                # Variables: x (Pattern Counts)
+                x = {}
+                for j in range(len(self.patterns)):
+                    x[j] = model.addVar(vtype=GRB.INTEGER, name=f'P_{j}')
+                
+                # Variables: Over/Under Production
+                over_prod_vars = {}
+                for w in self.demands_in_meters:
+                    over_prod_vars[w] = model.addVar(vtype=GRB.CONTINUOUS, name=f'Over_{w}')
+                
+                under_prod_vars = {}
+                for width, required_meters in self.demands_in_meters.items():
+                    allowed_under = max(1, math.ceil(required_meters * 0.1)) # 10% tolerance
+                    under_prod_vars[width] = model.addVar(lb=0, ub=allowed_under, vtype=GRB.CONTINUOUS, name=f'Under_{width}')
+
+                # Variables: Pattern Usage (Binary) for Count Penalty
+                y = {}
+                for j in range(len(self.patterns)):
+                    y[j] = model.addVar(vtype=GRB.BINARY, name=f'Use_{j}')
+                
+                # Big-M Constraints: x[j] <= M * y[j]
+                M = 1000
+                for j in range(len(self.patterns)):
+                    model.addConstr(x[j] <= M * y[j], name=f'Link_{j}')
+
+                # Constraints: Demand
+                # Production (m) + Under = Demand + Over
+                for width, required_meters in self.demands_in_meters.items():
+
+                    
+                    total_width_prod_expr = gp.quicksum(
+                        x[j] * self.patterns[j]['length'] * sum(
+                            count * self.item_composition[item_name].get(width, 0)
+                            for item_name, count in self.patterns[j]['composition'].items()
+                        )
+                        for j in range(len(self.patterns))
+                    )
+                    model.addConstr(total_width_prod_expr + under_prod_vars[width] == required_meters + over_prod_vars[width], name=f'demand_{width}')
+
+                # Objective
+                total_rolls = gp.quicksum(x[j] for j in range(len(self.patterns)))
+                total_over_prod_penalty = gp.quicksum(OVER_PROD_PENALTY * var for var in over_prod_vars.values())
+                total_under_prod_penalty = gp.quicksum(UNDER_PROD_PENALTY * var for var in under_prod_vars.values())
+                
+                total_complexity_penalty = gp.quicksum(
+                    PATTERN_COMPLEXITY_PENALTY * max(0, len(self.patterns[j]['composition']) - 1) * x[j]
+                    for j in range(len(self.patterns))
+                )
+                
+                total_pattern_count_penalty = gp.quicksum(
+                    PATTERN_COUNT_PENALTY * y[j] for j in range(len(self.patterns))
+                )
+                
+                # [New] 단폭(x1) 아이템 사용 페널티
+                # 패턴 내 단폭(x1) 아이템 개수를 세어 페널티 부여
+                # 예: "656(636*1) + 656(636*1) + 656(636*1)" -> 단폭 3개 -> 페널티 3 * SINGLE_STRIP_PENALTY
+                # 예: "1292(636*2) + 1292(636*2)" -> 단폭 0개 -> 페널티 없음
+                def count_single_strips(pattern_composition):
+                    """패턴 내 단폭(x1) 아이템의 총 개수를 반환"""
+                    single_count = 0
+                    for item_name, item_count in pattern_composition.items():
+                        # item_name 예: "636x1", "636x2", "636x1+710x1"
+                        # '+' 로 분리하여 각 서브 아이템이 x1인지 확인
+                        sub_items = item_name.split('+')
+                        for sub in sub_items:
+                            if sub.endswith('x1'):
+                                single_count += item_count
+                    return single_count
+                
+                total_single_strip_penalty = gp.quicksum(
+                    SINGLE_STRIP_PENALTY * count_single_strips(self.patterns[j]['composition']) * x[j]
+                    for j in range(len(self.patterns))
+                )
+                
+                model.setObjective(
+                    total_rolls + total_over_prod_penalty + total_under_prod_penalty +
+                    total_complexity_penalty +
+                    total_pattern_count_penalty +
+                    total_single_strip_penalty,
+                    GRB.MINIMIZE
+                )
+
+                model.optimize()
+
+                if model.Status in (GRB.OPTIMAL, GRB.SUBOPTIMAL) or (model.Status == GRB.TIME_LIMIT and model.SolCount > 0):
+                    status_msg = "Optimal" if model.Status == GRB.OPTIMAL else "Feasible (TimeLimit)"
+                    logging.info(f"Using solver: GUROBI for Final MIP (Success: {status_msg}, Obj={model.ObjVal})")
+                    solution = {
+                        'objective': model.ObjVal,
+                        'pattern_counts': {j: x[j].X for j in range(len(self.patterns))},
+                        'over_production': {w: over_prod_vars[w].X for w in over_prod_vars},
+                        'under_production': {w: under_prod_vars[w].X for w in under_prod_vars}
+                    }
+                    return solution
+                else:
+                    logging.warning(f"Gurobi failed (Status={model.Status}). Fallback to SCIP.")
+
+            except Exception as e:
+                logging.warning(f"Gurobi execution failed: {e}. Fallback to SCIP.")
+
+        # 2. [Fallback/Default] OR-Tools Solver (SCIP or GLOP)
         solver = pywraplp.Solver.CreateSolver('SCIP' if is_final_mip else 'GLOP')
         
         if hasattr(solver, 'SetNumThreads'):
@@ -518,22 +845,65 @@ class SheetOptimizeCa:
         total_rolls = solver.Sum(x.values())
         total_over_prod_penalty = solver.Sum(OVER_PROD_PENALTY * var for var in over_prod_vars.values())
         total_under_prod_penalty = solver.Sum(UNDER_PROD_PENALTY * var for var in under_prod_vars.values())
+        # [Mod] Complexity Penalty Refinement:
+        # Group items by their underlying base widths.
+        # e.g., '788x1' and '788x2' should both count towards the '788mm' base width group.
+        # This prevents penalizing mixtures of x1/x2 variants of the same width.
+        
+        pattern_complexity_vars = []
+        for j, pat in enumerate(self.patterns):
+             distinct_base_widths = set()
+             for item_name in pat['composition']:
+                 if item_name in self.item_composition:
+                     # Add all original base widths (e.g., 788, 710) for this item
+                     distinct_base_widths.update(self.item_composition[item_name].keys())
+             
+             # Penalty based on number of distinct base width types - 1
+             complexity_score = max(0, len(distinct_base_widths) - 1)
+             pattern_complexity_vars.append(complexity_score)
+
         total_complexity_penalty = solver.Sum(
-            PATTERN_COMPLEXITY_PENALTY * len(self.patterns[j]['composition']) * x[j]
+            PATTERN_COMPLEXITY_PENALTY * pattern_complexity_vars[j] * x[j]
             for j in range(len(self.patterns))
         )
         
-        # 패턴 내 롤 개수에 대한 페널티 (Quadratic)
-        total_piece_penalty = solver.Sum(
-            PIECE_COUNT_PENALTY * (sum(
-                count for item, count in self.patterns[j]['composition'].items()
-            ) ** 2) * x[j]
+        total_pattern_count_penalty = 0
+        if is_final_mip:
+            # [Constraint] User Request: Minimize total number of patterns used
+            # 패턴 사용 여부 변수 (Binary)
+            y = {j: solver.IntVar(0, 1, f'Use_{j}') for j in range(len(self.patterns))}
+            
+            # Big-M 제약조건: x[j] <= M * y[j]
+            # M은 충분히 큰 수 (예: 1000, 롤 수가 1000개를 넘지 않는다고 가정)
+            M = 1000
+            for j in range(len(self.patterns)):
+                solver.Add(x[j] <= M * y[j])
+                
+            total_pattern_count_penalty = solver.Sum(
+                PATTERN_COUNT_PENALTY * y[j] for j in range(len(self.patterns))
+            )
+
+        # [New] 단폭(x1) 아이템 사용 페널티 (OR-Tools용)
+        def count_single_strips_ortools(pattern_composition):
+            """패턴 내 단폭(x1) 아이템의 총 개수를 반환"""
+            single_count = 0
+            for item_name, item_count in pattern_composition.items():
+                sub_items = item_name.split('+')
+                for sub in sub_items:
+                    if sub.endswith('x1'):
+                        single_count += item_count
+            return single_count
+        
+        total_single_strip_penalty = solver.Sum(
+            SINGLE_STRIP_PENALTY * count_single_strips_ortools(self.patterns[j]['composition']) * x[j]
             for j in range(len(self.patterns))
         )
 
         solver.Minimize(
             total_rolls + total_over_prod_penalty + total_under_prod_penalty + 
-            total_complexity_penalty + total_piece_penalty
+            total_complexity_penalty +
+            total_pattern_count_penalty +
+            total_single_strip_penalty
         )
         
         status = solver.Solve()
@@ -544,6 +914,23 @@ class SheetOptimizeCa:
                 'over_production': {w: var.solution_value() for w, var in over_prod_vars.items()},
                 'under_production': {w: var.solution_value() for w, var in under_prod_vars.items()}
             }
+            # [Debug] Log Penalty Values (OR-Tools 버전 호환성을 위해 변수 값 직접 계산)
+            logging.info(f"[DEBUG] Solver Objective: {solver.Objective().Value()}")
+            
+            # 변수 값 직접 합산 (구버전 OR-Tools 호환)
+            debug_total_rolls = sum(var.solution_value() for var in x.values())
+            debug_over_prod = sum(OVER_PROD_PENALTY * var.solution_value() for var in over_prod_vars.values())
+            debug_under_prod = sum(UNDER_PROD_PENALTY * var.solution_value() for var in under_prod_vars.values())
+            debug_complexity = sum(PATTERN_COMPLEXITY_PENALTY * pattern_complexity_vars[j] * x[j].solution_value() for j in range(len(self.patterns)))
+            
+            logging.info(f"[DEBUG] Total Rolls: {debug_total_rolls}")
+            logging.info(f"[DEBUG] OverProd Penalty: {debug_over_prod}")
+            logging.info(f"[DEBUG] UnderProd Penalty: {debug_under_prod}")
+            logging.info(f"[DEBUG] Complexity Penalty: {debug_complexity}")
+            if is_final_mip:
+                debug_pattern_count = sum(PATTERN_COUNT_PENALTY * y[j].solution_value() for j in range(len(self.patterns)))
+                logging.info(f"[DEBUG] Pattern Count Penalty: {debug_pattern_count}")
+            
             if not is_final_mip:
                 solution['duals'] = {w: constraints[w].dual_value() for w in self.demands_in_meters}
             return solution
@@ -644,6 +1031,10 @@ class SheetOptimizeCa:
                 if total_width < self.min_width or total_width > self.max_width:
                     continue
 
+                # [Constraint] User Request: Check disallowed combinations
+                if not self._is_pattern_valid(pattern):
+                     continue
+
                 # Reduced Cost 계산
                 reduced_cost = value - (1.0 + PIECE_COUNT_PENALTY * (pieces ** 2))
 
@@ -679,6 +1070,9 @@ class SheetOptimizeCa:
         
         # 패턴이 외부에서 주입되지 않은 경우 자체 생성
         if not self.patterns:
+            # DB에서 사용자 편집 패턴을 먼저 불러와 추가합니다.
+            self._generate_initial_patterns_db()
+            
             if len(self.order_widths) <= SMALL_PROBLEM_THRESHOLD:
                 logging.info(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 모든 패턴을 탐색합니다 (Small-scale) ---")
                 self._generate_all_patterns()
@@ -726,10 +1120,106 @@ class SheetOptimizeCa:
             return {"error": "유효한 패턴을 생성할 수 없습니다."}
 
         logging.info(f"--- 총 {len(self.patterns)}개의 패턴으로 최종 최적화를 수행합니다. ---")
+        
+        # [Debug] Check Item Generation
+        logging.info(f"[DEBUG] Generated Items (Top 20): {list(self.item_info.items())[:20]}")
+        logging.info(f"[DEBUG] Constraints: min_sc_width={self.min_sc_width}, max_sc_width={self.max_sc_width}")
+        
+        # 1. Column Generation (패턴 생성)
+        # 초기 패턴만으로도 충분한지 확인 (Small Problem)
         final_solution = self._solve_master_problem_ilp(is_final_mip=True)
         if not final_solution:
             return {"error": "최종 해를 찾을 수 없습니다."}
         
+        # [Constraint] std_roll_cnt (복합폭 개수) 배수 적용
+        # 롤 개수가 std_roll_cnt 의 배수가 되도록 길이 조절
+        if self.std_roll_cnt and self.std_roll_cnt > 1:
+            # 1. 계산된 솔루션의 실제 생산량과 주문량을 비교하여 과생산 비율(Scale Factor) 계산
+            #    (Solver가 고정 길이 제약으로 인해 과생산한 경우 이를 보정하기 위함)
+            scale_factor = 1.0
+            
+            # 패턴별 생산량 집계
+            solver_prod_by_width = {} # {width: total_meters}
+            for j, count in final_solution['pattern_counts'].items():
+                if count < 0.01: continue
+                pat_len = self.patterns[j]['length']
+                for item_name, item_count in self.patterns[j]['composition'].items():
+                    # item_composition: {base_width: num}
+                    for base_w, base_num in self.item_composition[item_name].items():
+                        solver_prod_by_width[base_w] = solver_prod_by_width.get(base_w, 0) + (count * pat_len * item_count * base_num)
+
+            # 주문량 대비 생산량 비율 확인 (가장 타이트한 비율 찾기)
+            # 생산량이 주문량보다 크다면(비율 < 1) 줄여야 함.
+            # 모든 주문을 만족해야 하므로 Max(Required / Produced) 를 사용.
+            max_ratio = 0.0
+            has_check = False
+            for w, demand_m in self.demands_in_meters.items():
+                prod_m = solver_prod_by_width.get(w, 0)
+                if prod_m > 0:
+                    ratio = demand_m / prod_m
+                    if ratio > max_ratio:
+                        max_ratio = ratio
+                    has_check = True
+            
+            if has_check and max_ratio > 0:
+                scale_factor = max_ratio
+                logging.info(f"[Constraint Adjustment] Solver Over/Under-production Scale Factor: {scale_factor:.4f} (based on demand)")
+
+            # [New] Aggregated Roll Count Calculation
+            # "roll_std_cnt를 전체 패턴에서에서 복합폭기준으로 해서 최소로만 적용하면 되도록 해줘"
+            item_aggregated_counts = {}
+            for j, count in final_solution['pattern_counts'].items():
+                if count < 0.99: continue
+                count_int = int(round(count))
+                for item_name in self.patterns[j]['composition']:
+                    item_aggregated_counts[item_name] = item_aggregated_counts.get(item_name, 0) + count_int
+
+            # 2. 패턴별 조정 적용
+            for j, count in list(final_solution['pattern_counts'].items()):
+                if count < 0.99: 
+                    continue
+                
+                count_int = int(round(count))
+                current_length = self.patterns[j]['length']
+
+                # 보정된 필요 총 길이 (과생산 제거)
+                optimized_total_len = (count_int * current_length) * scale_factor
+                
+                # [Modified] Ensure count is at least std_roll_cnt IF aggregated count is insufficient
+                # Only enforce minimum if ANY item in this pattern has a LOW aggregated count.
+                # If all items in this pattern are produced in sufficient quantity (>= std_roll_cnt) across all patterns,
+                # then we can allow this specific pattern to have a small count (e.g. 3).
+                
+                needs_increase = False
+                for item_name in self.patterns[j]['composition']:
+                    if item_aggregated_counts.get(item_name, 0) < self.std_roll_cnt:
+                        needs_increase = True
+                        break
+                
+                if count_int < self.std_roll_cnt and needs_increase:
+                    new_count = self.std_roll_cnt
+                    logging.info(f"[Constraint Adjustment] P{j} Count {count_int} increased to min {self.std_roll_cnt} (Aggregated insufficient)")
+                else:
+                    new_count = count_int 
+                
+                # 이미 배수지만 scale_factor로 인해 길이가 줄어들어야 하는 경우도 처리하기 위해
+                if new_count == 0: new_count = max(1, self.std_roll_cnt)
+
+                new_length = optimized_total_len / new_count
+                
+                # [User Request] 롤 길이를 100 단위로 반올림 (초과생산 감수)
+                new_length = round(new_length / 100.0) * 100.0
+                
+                # 제약조건 확인 (최소 롤 길이) - 경고만 남기고 적용
+                if new_length < self.min_sheet_roll_length:
+                    logging.warning(f"[Constraint Warning] 패턴 {j} 길이 조정: {current_length:.1f} -> {new_length:.1f} (최소 {self.min_sheet_roll_length} 미만). Over-production 보정 및 배수 적용 결과.")
+
+                logging.info(f"[Constraint Adjustment] Pattern {j} Count {count_int} -> {new_count} (Min {self.std_roll_cnt}). Length {current_length:.1f} -> {new_length:.1f} (Scale: {scale_factor:.4f})")
+                
+                # 결과 업데이트
+                final_solution['pattern_counts'][j] = float(new_count)
+                self.patterns[j]['length'] = new_length
+
         return self._format_results(final_solution, start_prod_seq)
 
     def _format_results(self, final_solution, start_prod_seq=0):
@@ -951,6 +1441,7 @@ class SheetOptimizeCa:
                         'prod_seq': prod_seq_counter,
                         'roll_seq': roll_seq_counter,
                         'rs_gubun': 'S',  # Sheet 구분
+                        'loss_per_roll': pattern['loss_per_roll'], # [New] trim_loss added
                         **common_props
                     })
 
@@ -994,6 +1485,7 @@ class SheetOptimizeCa:
                 'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
                 'prod_seq': prod_seq_counter,
                 'rs_gubun': 'S',  # Sheet 구분
+                **common_props # [Mod] Add common props (color, p_lot, etc)
             })
 
             # ----------------------------------------------------------------
@@ -1016,10 +1508,15 @@ class SheetOptimizeCa:
                     # 이 주문에서 아직 필요한 미터
                     needed = demand_tracker.loc[order_idx, 'meters'] - demand_tracker.loc[order_idx, 'fulfilled_meters']
                     if needed > 0:
-                        # 필요량과 생산량 중 작은 값만큼 이행
+                        # 필요량과 생산량 중 작은 값만큼 이행 (일단 채움)
                         fulfill_amount = min(needed, produced_meters)
                         demand_tracker.loc[order_idx, 'fulfilled_meters'] += fulfill_amount
                         produced_meters -= fulfill_amount
+                
+                # [Fix] 과생산분 반영: 만약 모든 오더를 채우고도 생산량이 남았다면, 해당 지폭의 마지막 오더에 합산하여 표기
+                if produced_meters > 0 and not relevant_orders.empty:
+                    last_idx = relevant_orders[-1]
+                    demand_tracker.loc[last_idx, 'fulfilled_meters'] += produced_meters
 
         return result_patterns, pattern_details_for_db, pattern_roll_details_for_db, pattern_roll_cut_details_for_db, demand_tracker, prod_seq_counter
 
@@ -1041,8 +1538,10 @@ class SheetOptimizeCa:
                 - 필요길이(m), 생산길이(m), 과부족(m): 미터 단위 비교
         """
         # 기본 주문 정보 복사
-        summary_df = self.df_orders[['group_order_no', '가로', '세로', '수출내수', '등급', '주문톤', 'meters']].copy()
-        summary_df.rename(columns={'meters': '필요길이(m)', '주문톤': '주문량(톤)'}, inplace=True)
+        # self.df_orders에는 '가로' 대신 '지폭' 컬럼이 존재함 (_calculate_demand_meters에서 rename 됨)
+        summary_df = self.df_orders[['group_order_no', '지폭', '세로', '수출내수', '등급', '주문톤', 'meters']].copy()
+        # 리포팅용으로 다시 '가로'로 이름 변경
+        summary_df.rename(columns={'지폭': '가로', 'meters': '필요길이(m)', '주문톤': '주문량(톤)'}, inplace=True)
         
         # 이행 정보 병합
         summary_df = pd.merge(summary_df, demand_tracker[['original_order_idx', 'fulfilled_meters']], 

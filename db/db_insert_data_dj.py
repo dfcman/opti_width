@@ -58,7 +58,7 @@ class DataInserters:
                     'cut_cnt': 1,
                     'color': str(pattern.get('color', '')),
                     'luster': int(pattern.get('luster', 0)),
-                    'p_lot': str(pattern.get('p_lot', '')), 
+                    'p_lot': str(pattern.get('p_lot', '')),
                     'p_type': paper_type,
                     'p_wgt': b_wgt, 
                     'core': int(pattern.get('core', 0)),
@@ -211,7 +211,91 @@ class DataInserters:
         print(f"Prepared {len(bind_vars_list)} new cut sequences for transaction.")
 
 
-    def insert_sheet_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit):
+    def insert_sheet_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit, 
+                                paper_type, b_wgt, pattern_sheet_details):
+        cursor = connection.cursor()
+
+        insert_query = """
+            insert into th_sheet_sequence (
+                module, plant, pm_no, schedule_unit, lot_no, version, 
+                prod_seq, unit_no, seq, roll_seq, cut_seq, sheet_seq, pack_type, width, 
+                group_no, order_no,
+                weight, sheet_cnt,
+                spool_no, spool_seq, p_machine,
+                length, paper_type, b_wgt,
+                color, luster, p_lot, p_type, p_wgt
+            ) values (
+                'C', :plant, :pm_no, :schedule_unit, :lot_no, :version, 
+                :prod_seq, :unit_no, :seq, :roll_seq, :cut_seq, :sheet_seq, :pack_type, :width, 
+                :group_no, :order_no,
+                round(:b_wgt * :width * :length / 1000000,1), :sheet_cnt,
+                :spool_no, :spool_seq, :p_machine,
+                :length, :paper_type, :b_wgt,
+                :color, :luster, :p_lot, :p_type, :p_wgt
+            )
+        """
+
+        bind_vars_list = []
+        for sheet_detail in pattern_sheet_details:
+            for seq in range(sheet_detail.get('count', 1)):
+                current_seq = sheet_detail.get('override_seq', seq + 1)
+                bind_vars = {
+                    'plant': plant, 'pm_no': pm_no, 'schedule_unit': schedule_unit, 
+                    'lot_no': lot_no, 'version': version,
+                    'prod_seq': sheet_detail['prod_seq'], 
+                    'unit_no': sheet_detail['unit_no'],
+                    'seq': current_seq, 
+                    'spool_no': sheet_detail['prod_seq'], 
+                    'spool_seq': current_seq,
+                    'p_machine': pm_no,
+                    'roll_seq': sheet_detail['roll_seq'],
+                    'cut_seq': sheet_detail['cut_seq'], 
+                    'sheet_seq': sheet_detail['sheet_seq'],
+                    'pack_type': sheet_detail['pack_type'],
+                    'width': sheet_detail['width'],
+                    'group_no': sheet_detail['group_no'], 
+                    'order_no': sheet_detail['order_no'],
+                    'sheet_cnt': sheet_detail['sheet_cnt'],
+                    'length': sheet_detail['pattern_length'],
+                    'paper_type': paper_type,
+                    'b_wgt': b_wgt,
+                    'color': str(sheet_detail.get('color', '')),
+                    'luster': int(sheet_detail.get('luster', 0)),
+                    'p_lot': lot_no,
+                    'p_type': paper_type,
+                    'p_wgt': b_wgt
+                }
+                bind_vars_list.append(bind_vars)
+
+        if bind_vars_list:
+            cursor.executemany(insert_query, bind_vars_list)
+
+        print(f"Prepared {len(bind_vars_list)} sheet sequences for transaction.")
+
+        # Create a variable for the IN OUT cursor parameter
+        out_cursor = cursor.var(oracledb.DB_TYPE_CURSOR)
+
+        # Call the stored procedure with named parameters to ensure correctness
+        cursor.callproc("PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO", keyword_parameters={
+            'P_PLANT': plant,
+            'P_SCHEDULE_UNIT': schedule_unit,
+            'P_LOT_NO': lot_no,
+            'P_VERSION': version,
+            'C_SN': out_cursor
+        })
+
+        # You can now fetch results from the out_cursor if needed, for example:
+        result_cursor = out_cursor.getvalue()
+        # for row in result_cursor:
+        #     print(row)
+
+        print(f"Prepared sheet sequences for transaction by calling PKG_JP_INOUT_MANAGER.SP_JP_GEN_SPOOL_NO.")
+        print(f"[DEBUG] Sheet sequence generation procedure called for Lot {lot_no}, Version {version}, PM {pm_no}.")
+
+        
+
+
+    def insert_sheet_sequence_procedure(self, connection, lot_no, version, plant, pm_no, schedule_unit):
         cursor = connection.cursor()
         
         # As per the user's request, this function will call a stored procedure.
@@ -255,9 +339,9 @@ class DataInserters:
 
         insert_query = """
             insert into th_order_group (
-                plant, pm_no, schedule_unit, lot_no, version, group_no, order_no
+                plant, pm_no, schedule_unit, lot_no, version, group_no, order_no, prod_wgt
             ) values (
-                :plant, :pm_no, :schedule_unit, :lot_no, :version, :group_no, :order_no
+                :plant, :pm_no, :schedule_unit, :lot_no, :version, :group_no, :order_no, :prod_wgt
             )
         """
 
@@ -272,18 +356,22 @@ class DataInserters:
         
         df_to_insert = df_copy.rename(columns={k: v for k, v in rename_map.items() if k in df_copy.columns})
         
+        # prod_wgt 컬럼이 없으면 0으로 초기화
+        if 'prod_wgt' not in df_to_insert.columns:
+            df_to_insert['prod_wgt'] = 0
+
         # DB에 저장할 최종 컬럼 목록을 선택합니다.
-        final_cols = ['lot_no', 'version', 'plant', 'pm_no', 'schedule_unit', 'group_no', 'order_no']
+        final_cols = ['lot_no', 'version', 'plant', 'pm_no', 'schedule_unit', 'group_no', 'order_no', 'prod_wgt']
         
         print(f"Before drop_duplicates: {len(df_to_insert)} rows")
         # 중복 제거 (PK 위반 방지)
-        df_to_insert = df_to_insert.drop_duplicates(subset=final_cols)
+        df_to_insert = df_to_insert.drop_duplicates(subset=['lot_no', 'version', 'plant', 'pm_no', 'schedule_unit', 'group_no', 'order_no'])
         print(f"After drop_duplicates: {len(df_to_insert)} rows")
         
         # Check for remaining duplicates (should be 0)
-        dups = df_to_insert[df_to_insert.duplicated(subset=final_cols, keep=False)]
+        dups = df_to_insert[df_to_insert.duplicated(subset=['lot_no', 'version', 'plant', 'pm_no', 'schedule_unit', 'group_no', 'order_no'], keep=False)]
         if not dups.empty:
-            print(f"WARNING: Duplicates found after drop_duplicates:\n{dups}")
+            print(f"WARNING: Duplicates found after drop_duplicates key check:\n{dups}")
 
         # 데이터 타입 변환 (DB_TYPE_NUMBER 오류 방지)
         # plant, lot_no, group_no 등이 숫자로 된 문자열일 경우 숫자로 변환 시도
@@ -298,8 +386,89 @@ class DataInserters:
         bind_vars_list = df_to_insert[final_cols].to_dict('records')
 
         if bind_vars_list:
-            print(f"DEBUG: First record to insert: {bind_vars_list[0]}")
+            # print(f"DEBUG: First record to insert: {bind_vars_list[0]}")
             cursor.executemany(insert_query, bind_vars_list)
-            print(f"Prepared {len(bind_vars_list)} new order group records for transaction.")
+            print(f"[DEBUG] Inserted {len(bind_vars_list)} rows into th_order_group.")
+
+    def insert_group_master(self, connection, lot_no, version, plant, pm_no, schedule_unit, df_groups):
+        """
+        df_groups DataFrame을 th_group_master 테이블에 저장합니다.
+        (그룹별 대표 오더 정보)
+        """
+        cursor = connection.cursor()
+
+        insert_query = """
+            insert into th_group_master (
+                plant, schedule_unit, lot_no, version, group_no,
+                paper_type, b_wgt, width, length, trim,
+                rs_gubun, export, nation_code, customer,
+                pt_gubun, skid_yn, dia, core, order_no
+            ) values (
+                :plant, :schedule_unit, :lot_no, :version, :group_no,
+                :paper_type, :b_wgt, :width, :length, :trim,
+                :rs_gubun, :export, :nation_code, :customer,
+                :pt_gubun, :skid_yn, :dia, :core, :order_no
+            )
+        """
+
+        df_copy = df_groups.copy()
+        df_copy['lot_no'] = lot_no
+        df_copy['version'] = version
+        df_copy['plant'] = plant
+        df_copy['pm_no'] = pm_no
+        df_copy['schedule_unit'] = schedule_unit
+
+        # DataFrame 컬럼 이름을 DB 컬럼에 맞게 매핑
+        rename_map = {
+            'group_order_no': 'group_no',
+            '가로': 'width',
+            '세로': 'length',
+            'customer_name': 'customer',
+            # 'export_yn': 'export' (will handle logic below)
+        }
+        
+        df_to_insert = df_copy.rename(columns={k: v for k, v in rename_map.items() if k in df_copy.columns})
+        
+        # trim column logic?
+        # Maybe use 'trim_loss' or 'trim_size' if available, else 0
+        if 'trim' not in df_to_insert.columns:
+            df_to_insert['trim'] = 0
+
+        if 'export' not in df_to_insert.columns:
+            if 'export_yn' in df_to_insert.columns:
+                df_to_insert['export'] = df_to_insert['export_yn']
+            else:
+                df_to_insert['export'] = 'N' # Default value if missing
+
+        required_cols = [
+            'plant', 'schedule_unit', 'lot_no', 'version', 'group_no',
+            'paper_type', 'b_wgt', 'width', 'length', 
+            'rs_gubun', 'nation_code', 'customer',
+            'pt_gubun', 'skid_yn', 'dia', 'core', 'order_no'
+        ]
+
+        # Ensure all columns exist
+        for col in required_cols:
+            if col not in df_to_insert.columns:
+                # logging.warning(f"Missing column {col} for group master insert. Filling with None/0.")
+                if col in ['width', 'length', 'dia', 'core', 'b_wgt']:
+                    df_to_insert[col] = 0
+                else:
+                    df_to_insert[col] = ''
+
+        # Handle NaNs
+        df_to_insert = df_to_insert.fillna({
+            'width': 0, 'length': 0, 'dia':0, 'core':0, 'b_wgt':0,
+            'rs_gubun': '', 'nation_code': '', 'customer': '', 'pt_gubun': '', 'skid_yn': '', 'order_no': ''
+        })
+
+        bind_vars_list = df_to_insert[required_cols + ['trim', 'export']].to_dict('records')
+
+        if bind_vars_list:
+            # print(f"DEBUG: First group master record to insert: {bind_vars_list[0]}")
+            cursor.executemany(insert_query, bind_vars_list)
+        
+        print(f"Prepared {len(bind_vars_list)} new group master records for transaction.")
+
 
     

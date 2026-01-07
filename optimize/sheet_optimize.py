@@ -16,15 +16,15 @@ Column Generation(열 생성) 알고리즘을 기반으로 하여, 주문 요구
 
 # --- 최적화 설정 상수 ---
 # 페널티 값
-OVER_PROD_PENALTY  = 5000000.0    # 과생산에 대한 페널티
-UNDER_PROD_PENALTY = 25000000.0  # 부족생산에 대한 페널티 (과생산보다 우선순위 높임)
+OVER_PROD_PENALTY  = 500000000.0    # 과생산에 대한 페널티 (5억)
+UNDER_PROD_PENALTY = 25000000000.0  # 부족생산에 대한 페널티 (250억, 과생산보다 우선순위 높임)
 PATTERN_COMPLEXITY_PENALTY = 0.01  # 패턴 복잡성에 대한 페널티
 PIECE_COUNT_PENALTY = 10         # 패턴 내 롤(piece) 개수에 대한 페널티 (적은 롤 선호)
 
 # 알고리즘 파라미터
 MIN_PIECES_PER_PATTERN = 1      # 패턴에 포함될 수 있는 최소 폭(piece)의 수
 SMALL_PROBLEM_THRESHOLD = 8     # 전체 탐색을 수행할 최대 주문 지폭 종류 수
-SOLVER_TIME_LIMIT_MS = 180000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
+SOLVER_TIME_LIMIT_MS = 300000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
 CG_MAX_ITERATIONS = 1000         # 열 생성(Column Generation) 최대 반복 횟수
 CG_NO_IMPROVEMENT_LIMIT = 50    # 개선 없는 경우, 열 생성 조기 종료 조건
 CG_SUBPROBLEM_TOP_N = 10         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
@@ -257,10 +257,6 @@ class SheetOptimize:
             # 그룹 전체에 대한 필요 롤 수 (반올림)
             group_rolls_map[g_no] = int(round(total_sheets_needed / sheets_per_roll, 0))
 
-            if width_mm == 710:
-                logging.info(f"--- [DEBUG] 710mm Calc: total_ton={total_ton}, weight_g={sheet_weight_g:.2f}, sheets={total_sheets_needed:.1f}, "
-                             f"roll_len_mm={sheet_roll_length_mm}, sheets_per_roll={sheets_per_roll}, result_rolls={group_rolls_map[g_no]}")
-
         # 3. 계산된 그룹 롤 수를 개별 오더(row)에 배분
         def distribute_rolls(group_df):
             g_no = group_df['group_order_no'].iloc[0]
@@ -311,18 +307,37 @@ class SheetOptimize:
             logging.info("--- DB에 저장된 사용자 편집 패턴이 없거나, 현재 오더와 일치하는 패턴이 없습니다. ---")
             return
 
+        logging.info(f"--- 현재 생성된 유효 아이템 목록 (총 {len(self.items)}개): {self.items[:20]} ... ---")
+        
         initial_patterns_from_db = []
         for pattern_item_list in db_patterns_list:
             pattern_dict = dict(Counter(pattern_item_list))
             
-            # DB의 패턴에 포함된 모든 아이템이 현재 주문에도 유효한지 확인
+            # DB 패턴 아이템이 items에 없으면 강제 복구 (Recover)
+            for item_name in pattern_dict.keys():
+                if item_name not in self.items:
+                     try:
+                         # 예: "420x3" -> width=420, count=3
+                         w_str, c_str = item_name.split('x')
+                         w = int(w_str)
+                         c = int(c_str)
+                         
+                         # 강제 추가
+                         self.items.append(item_name)
+                         self.item_info[item_name] = w * c + self.sheet_trim
+                         self.item_composition[item_name] = {w: c}
+                         logging.info(f"    -> [Recover] DB 패턴 아이템 복구: {item_name} (폭: {self.item_info[item_name]}mm)")
+                     except Exception as e:
+                         logging.warning(f"    - [Error] DB 아이템 {item_name} 파싱 실패: {e}")
+
+            # DB의 패턴에 포함된 모든 아이템이 현재 주문에도 유효한지 확인 (이제 복구했으므로 거의 통과)
             is_valid = all(item_name in self.items for item_name in pattern_dict.keys())
             
             if is_valid:
                 initial_patterns_from_db.append(pattern_dict)
             else:
                 invalid_items = [name for name in pattern_dict if name not in self.items]
-                logging.debug(f"    - 경고: DB 패턴 {pattern_dict}의 아이템 {invalid_items}이(가) 현재 주문에 없어 해당 패턴을 무시합니다.")
+                logging.info(f"    - 경고: DB 패턴 {pattern_dict}의 아이템 {invalid_items}이(가) 복구 실패하여 무시합니다.")
 
         if initial_patterns_from_db:
             seen_patterns = {frozenset(p.items()) for p in self.patterns}
@@ -744,7 +759,7 @@ class SheetOptimize:
         self.patterns = processed_patterns
         logging.info(f"--- 패턴 통합 완료: {original_count}개 -> {len(self.patterns)}개 패턴으로 정리됨 ---")
 
-    def _solve_master_problem_ilp(self, is_final_mip=False):
+    def _solve_master_problem(self, is_final_mip=False):
         """
         마스터 문제(Master Problem)를 선형계획법(LP) 또는 정수계획법(MIP)으로 해결합니다.
         
@@ -760,19 +775,20 @@ class SheetOptimize:
         """
         # 1. [Final MIP] Try Gurobi Direct Solver
         if is_final_mip:
-            logging.info(f"--- [DEBUG] Entering _solve_master_problem_ilp(is_final_mip={is_final_mip}, Patterns={len(self.patterns)})")
+            logging.info(f"--- [DEBUG] Entering _solve_master_problem(is_final_mip={is_final_mip}, Patterns={len(self.patterns)})")
             # [DEBUG]
             logging.debug(f"--- [DEBUG] Exact Match Widths: {sorted(list(self.exact_match_widths))}")
             
             try:
-                model = gp.Model("SheetOptimizeMaster")
+                logging.info("Trying Gurobi Direct Solver SheetOptimize (gurobipy)...")
+                model = gp.Model("SheetOptimization")
                 model.setParam("OutputFlag", 0)  # Silence console output
                 model.setParam("LogToConsole", 0)
                 if hasattr(self, 'num_threads'):
                     model.setParam("Threads", self.num_threads)
                 
                 model.setParam("TimeLimit", SOLVER_TIME_LIMIT_MS / 1000.0)
-                model.setParam("MIPFocus", 1) # 1: Find valid solution (Feasibility) first
+                model.setParam("MIPFocus", 0) # 1: Find valid solution (Feasibility) first
 
                 # Variables
                 x = {}
@@ -823,14 +839,14 @@ class SheetOptimize:
                 if model.Status in (GRB.OPTIMAL, GRB.SUBOPTIMAL) or (model.Status == GRB.TIME_LIMIT and model.SolCount > 0):
                     status_msg = "Optimal" if model.Status == GRB.OPTIMAL else "Feasible (TimeLimit)"
                     logging.info(f"Using solver: GUROBI for Final MIP (Success: {status_msg}, Obj={model.ObjVal})")
-                    result = {
+                    solution = {
                         'objective': model.ObjVal,
                         'pattern_counts': {j: x[j].X for j in range(len(self.patterns))},
                         'over_production': {w: over_prod_vars[w].X for w in over_prod_vars},
                         'under_production': {w: under_prod_vars[w].X for w in under_prod_vars}
                     }
                     
-                    return result
+                    return solution
                 else:
                      logging.warning(f"Gurobi failed to find optimal solution (Status={model.Status}). Fallback to SCIP.")
 
@@ -909,7 +925,7 @@ class SheetOptimize:
             return solution
         return None
 
-    def _solve_subproblem_dp(self, duals):
+    def _solve_subproblem(self, duals):
         """
         서브 문제(Sub-problem)를 동적 계획법(Dynamic Programming, Knapsack-like)으로 해결합니다.
         
@@ -1058,11 +1074,61 @@ class SheetOptimize:
         find_combinations_recursive(0, {}, 0, 0)
         self.patterns = all_patterns
 
+    def _add_fallback_patterns(self):
+        """
+        초기 패턴 생성(Brute-force) 후에 호출되어, 
+        각 주문 지폭에 대해 min_width 제약을 무시하고 생성 가능한 가장 넓은 '순수 패턴'을 강제로 추가합니다.
+        
+        목적: 
+        - min_width 제약으로 인해 소량 주문 지폭을 처리할 패턴이 아예 생성되지 않거나,
+        - 다른 대량 주문 지폭과 섞인 '혼합 패턴'만 존재하여, 소량 주문 처리 시 막대한 과생산이 발생하는 것을 방지합니다.
+        - Trim Loss가 발생하더라도(롤 수 증가), 과생산 페널티(5억)를 피할 수 있는 '비상 탈출구'를 솔버에게 제공합니다.
+        """
+        logging.info("--- [Fallback] 과생산 방지를 위한 순수/효율 패턴 추가 시작 ---")
+        added_count = 0
+        seen_patterns = {frozenset(p.items()) for p in self.patterns}
+        
+        for width in self.order_widths:
+            # 1. 해당 지폭으로 만들 수 있는 가장 긴 '순수 아이템 패턴' 찾기
+            best_pure_pattern = None
+            max_width_found = 0
+            
+            # 1-1. 복합폭 아이템 확인
+            pass_pure = False
+            for item in self.items:
+                # 해당 아이템이 이 지폭으로만 구성되어 있는지 확인
+                if item in self.item_composition and len(self.item_composition[item]) == 1 and width in self.item_composition[item]:
+                     # 예: "420x4"(1704) -> 420mm
+                     item_width = self.item_info[item]
+                     
+                     # 이 아이템을 최대 몇 개 넣을 수 있는지 계산
+                     max_count = min(int(self.max_width / item_width), self.max_pieces)
+                     if max_count > 0:
+                         current_width = item_width * max_count
+                         if current_width > max_width_found:
+                             max_width_found = current_width
+                             best_pure_pattern = {item: max_count}
+            
+            # 1-2. 만약 복합폭 아이템으로 찾지 못했거나 더 좋은 게 있을 수 있으므로 직접 계산
+            # (사실 위의 루프에서 다 커버되지만, 혹시 items에 없는 조합이 있을까봐)
+            
+            if best_pure_pattern:
+                pattern_key = frozenset(best_pure_pattern.items())
+                if pattern_key not in seen_patterns:
+                    self.patterns.append(best_pure_pattern)
+                    seen_patterns.add(pattern_key)
+                    added_count += 1
+                    logging.info(f"    -> [추가] 지폭 {width}mm 순수 패턴: {best_pure_pattern} (폭: {max_width_found}mm)")
+        
+        logging.info(f"--- [Fallback] 총 {added_count}개의 순수/효율 패턴이 추가되었습니다. ---")
+
     def run_optimize(self, start_prod_seq=0):
         """최적화 실행 메인 함수"""
         if len(self.order_widths) <= SMALL_PROBLEM_THRESHOLD:
             logging.info(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 모든 패턴을 탐색합니다 (Small-scale) ---")
             self._generate_all_patterns()
+            
+            self._generate_initial_patterns_db()  # DB에서 사용자 편집 패턴 추가 (Small-scale에도 적용)
         else:
             logging.info(f"\n--- 주문 종류가 {len(self.order_widths)}개 이므로, 열 생성 기법을 시작합니다 (Large-scale) ---")
             self._generate_initial_patterns_db()  # DB에서 사용자 편집 패턴을 먼저 추가
@@ -1078,11 +1144,11 @@ class SheetOptimize:
             # 열 생성 루프
             no_improvement_count = 0
             for iteration in range(CG_MAX_ITERATIONS):
-                master_solution = self._solve_master_problem_ilp()
+                master_solution = self._solve_master_problem()
                 if not master_solution or 'duals' not in master_solution:
                     break
 
-                new_patterns = self._solve_subproblem_dp(master_solution['duals'])
+                new_patterns = self._solve_subproblem(master_solution['duals'])
                 
                 patterns_added = 0
                 if new_patterns:
@@ -1113,7 +1179,7 @@ class SheetOptimize:
         # 최종 최적화 전에 패턴 통합(Consolidation) 한 번 더 수행
         # self._consolidate_patterns()
 
-        final_solution = self._solve_master_problem_ilp(is_final_mip=True)        
+        final_solution = self._solve_master_problem(is_final_mip=True)        
         if not final_solution:
             return {"error": "최종 해를 찾을 수 없습니다."}
         
@@ -1142,7 +1208,7 @@ class SheetOptimize:
         # logging.info(fulfillment_summary.to_string())
 
         return {
-            "pattern_result": df_patterns.sort_values('count', ascending=False) if not df_patterns.empty else df_patterns,
+            "pattern_result": df_patterns,  # TSP 정렬 순서 유지 (count 정렬 제거)
             "pattern_details_for_db": pattern_details_for_db,
             "pattern_roll_details_for_db": pattern_roll_details_for_db,
             "pattern_roll_cut_details_for_db": pattern_roll_cut_details_for_db,
@@ -1206,23 +1272,79 @@ class SheetOptimize:
         }
         logging.info(f"--- [DEBUG] Building Pattern Details. Start Prod Seq: {start_prod_seq}")
         
+        # ====== 패턴 정렬: 칼날 교체 최소화를 위한 TSP-like 정렬 ======
+        def get_pattern_widths(pattern_idx):
+            """패턴에서 사용되는 복합폭 집합 반환 (칼날 위치 기준)"""
+            pattern_dict = self.patterns[pattern_idx]
+            composite_widths = set()
+            for item_name in pattern_dict.keys():
+                # item_info에서 복합폭 추출 (예: "879x1" -> 903mm)
+                if item_name in self.item_info:
+                    composite_widths.add(self.item_info[item_name])
+            return composite_widths
+        
+        def calculate_knife_change_cost(widths1, widths2):
+            """두 패턴 간 칼날 교체 비용 계산
+            
+            - 기본 비용: 변경되는 지폭 수 (대칭 차집합)
+            - Tie-breaker: 공통 지폭이 많을수록 좋음 (음수로 반환하여 우선순위 높임)
+            
+            반환값: (변경 비용, -공통 지폭 수) 튜플로 정렬에 사용
+            """
+            changes = len(widths1 ^ widths2)  # 대칭 차집합: 변경되는 지폭
+            common = len(widths1 & widths2)   # 교집합: 공통 지폭
+            return (changes, -common)  # 변경 적고, 공통 많을수록 좋음
+        
+        def sort_patterns_by_similarity(pattern_indices):
+            """Greedy TSP: 현재 패턴과 가장 유사한 다음 패턴 선택"""
+            if len(pattern_indices) <= 1:
+                return pattern_indices
+            
+            # 각 패턴의 지폭 집합 미리 계산
+            pattern_widths_map = {idx: get_pattern_widths(idx) for idx in pattern_indices}
+            
+            # 가장 큰 지폭을 가진 패턴을 시작점으로 선택 (안정적인 시작)
+            sorted_patterns = []
+            remaining = list(pattern_indices)
+            
+            # 첫 패턴 선택: 가장 큰 최대 지폭을 가진 패턴
+            first_pattern = max(remaining, key=lambda idx: max(pattern_widths_map[idx]) if pattern_widths_map[idx] else 0)
+            sorted_patterns.append(first_pattern)
+            remaining.remove(first_pattern)
+            
+            # Greedy 탐색
+            while remaining:
+                current_widths = pattern_widths_map[sorted_patterns[-1]]
+                # 칼날 교체 비용이 가장 적은 다음 패턴 선택
+                next_pattern = min(remaining, 
+                                   key=lambda idx: calculate_knife_change_cost(current_widths, pattern_widths_map[idx]))
+                sorted_patterns.append(next_pattern)
+                remaining.remove(next_pattern)
+            
+            return sorted_patterns
+        
+        # 사용할 패턴 인덱스 수집 (count > 0인 것만)
+        used_pattern_indices = [j for j, count in final_solution['pattern_counts'].items() if count > 0.001]
+        
+        # 패턴 정렬
+        sorted_pattern_indices = sort_patterns_by_similarity(used_pattern_indices)
+        
+        # [DEBUG] 정렬 결과 로그
+        logging.info(f"--- [TSP 정렬] 패턴 수: {len(sorted_pattern_indices)}, 정렬 순서: {sorted_pattern_indices}")
+        for idx, j in enumerate(sorted_pattern_indices):
+            pat_widths = get_pattern_widths(j)
+            logging.info(f"    {idx+1}. 패턴 {j}: 지폭={sorted(pat_widths, reverse=True)}")
+        
         # 1. Expand patterns into individual rolls
         all_rolls_data = [] # List of dictionaries, each dict represents one roll
 
-        for j, count in final_solution['pattern_counts'].items():
+        # 정렬된 순서로 패턴 처리 (칼날 교체 최소화)
+        for j in sorted_pattern_indices:
+            count = final_solution['pattern_counts'][j]
             if count <= 0.001:
                 continue
             
-            # [DEBUG] Log pattern usage in builder
-            pat = self.patterns[j]
-            pat_710_qty = 0
-            for item, qty in pat.items():
-                if item in self.item_composition:
-                    for w, q in self.item_composition[item].items():
-                        if w == 710:
-                            pat_710_qty += q * qty
-            if pat_710_qty > 0:
-                 logging.info(f"--- [DEBUG] Builder Pattern {j}: {pat} (710x{pat_710_qty}), Count={count}")
+
 
             batch_count = int(round(count))
             roll_count = batch_count # Restore variable name for downstream logic
@@ -1340,8 +1462,8 @@ class SheetOptimize:
                     'widths': (r_data['composite_widths'] + [0] * 8)[:8],
                     'group_nos': (r_data['composite_group_nos'] + [''] * 8)[:8],
                     'prod_seq': prod_seq_counter,
-
                     'rs_gubun': 'S',
+                    **common_props
                 })
 
                 # Add to result_patterns (CSV)

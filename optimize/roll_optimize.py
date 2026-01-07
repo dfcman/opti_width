@@ -18,10 +18,10 @@ CG_MAX_ITERATIONS = 1000 # 안전장치 (최대 반복 횟수)
 CG_NO_IMPROVEMENT_LIMIT = 50  # 200 -> 50: 초기 패턴이 우수하면 빨리 넘어가도록 단축
 CG_SUBPROBLEM_TOP_N = 10      # Increased from 3
 SMALL_PROBLEM_THRESHOLD = 6  # Increased to force exhaustive search for narrow width ranges
-SOLVER_TIME_LIMIT_MS = 180000
+SOLVER_TIME_LIMIT_MS = 300000
 PATTERN_SETUP_COST = 1000.0 # 새로운 패턴 종류를 1개 사용할 때마다 1000mm의 손실과 동일한 페널티
 TRIM_LOSS_PENALTY = 5.0      # 자투리 손실 1mm당 페널티
-MIXING_PENALTY = 100.0       # 공백이 1개 섞인 경우는 페널티 비용 팬턴 생성비용과 비교
+MIXING_PENALTY = 100.0       # 공백이 1개 섞인 경우는 페널티 비용 팬텀 생성비용과 비교
 
 
 
@@ -118,6 +118,9 @@ class RollOptimize:
         out_of_range_count = 0
         duplicate_count = 0
         
+        invalid_width_details = []
+        out_of_range_details = []
+        
         for pattern_widths in db_patterns:
             # 지폭 값들을 group_order_no로 변환
             pattern_dict = {}
@@ -129,6 +132,7 @@ class RollOptimize:
                 if not matching_items:
                     is_valid = False
                     invalid_width_count += 1
+                    invalid_width_details.append(pattern_widths)
                     break
                 
                 # 첫 번째 매칭되는 아이템 사용 (동일 지폭이면 어떤 것이든 상관없음)
@@ -145,8 +149,19 @@ class RollOptimize:
                         duplicate_count += 1
                 else:
                     out_of_range_count += 1
+                    out_of_range_details.append((pattern_widths, total_width))
         
         logging.info(f"--- DB 패턴 처리 결과: 추가={added_count}, 중복={duplicate_count}, 지폭없음={invalid_width_count}, 범위초과={out_of_range_count} ---")
+        
+        if invalid_width_details:
+             logging.info(f"--- 지폭없음(매핑실패) 상세 ({len(invalid_width_details)}건) ---")
+             for p in invalid_width_details:
+                 logging.info(f"  Widths: {p} -> 매핑 가능한 지폭 없음")
+
+        if out_of_range_details:
+             logging.info(f"--- 범위초과 상세 ({len(out_of_range_details)}건) [Min:{self.min_width}, Max:{self.max_width}] ---")
+            #  for p, t_width in out_of_range_details:
+            #      logging.info(f"  Widths: {p}, Total: {t_width}")
 
     def _generate_initial_patterns(self):
         self._clear_patterns()
@@ -397,13 +412,14 @@ class RollOptimize:
                 from gurobipy import GRB
                 
                 logging.info(f"[Final MIP] 총 {len(self.patterns)}개의 패턴 생성됨")
-                logging.info("Trying Gurobi Direct Solver (gurobipy)...")
+                logging.info("Trying Gurobi Direct Solver roll_optimization(gurobipy)...")
                 
                 # Suppress Gurobi output
-                model = gp.Model("roll_optimization")
+                model = gp.Model("RollOptimization")
                 model.setParam("OutputFlag", 0)
                 model.setParam("LogToConsole", 0)
-                model.setParam("Threads", self.num_threads)
+                if hasattr(self, 'num_threads'):
+                    model.setParam("Threads", self.num_threads)
                 
                 # Variables
                 x = {} # pattern count (integer)
@@ -469,11 +485,12 @@ class RollOptimize:
                 if model.Status in (GRB.OPTIMAL, GRB.SUBOPTIMAL) or (model.Status == GRB.TIME_LIMIT and model.SolCount > 0):
                     status_msg = "Optimal" if model.Status == GRB.OPTIMAL else "Feasible (TimeLimit)"
                     logging.info(f"Using solver: GUROBI for Final MIP (Success: {status_msg}, Obj={model.ObjVal})")
-                    return {
+                    solution = {
                         'objective': model.ObjVal,
                         'pattern_counts': {j: x[j].X for j in range(len(self.patterns))},
                         'over_production': {item: over_prod_vars[item].X for item in self.demands}
                     }
+                    return solution
                 else:
                     logging.warning(f"Gurobi failed to find optimal solution (Status={model.Status}). Fallback to SCIP.")
 

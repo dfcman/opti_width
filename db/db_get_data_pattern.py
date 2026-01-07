@@ -131,3 +131,46 @@ class PatternGetters:
         finally:
             if connection:
                 self.pool.release(connection)
+
+    def get_sheet_ca_patterns_from_db(self, lot_no):
+        """th_pattern_tot_sheet 테이블에서 현재 오더의 지종/평량에 해당하는 모든 패턴을 가져옵니다.
+        
+        CA 공장은 복합폭("710x1+850x1") 등 복잡한 아이템을 사용하므로,
+        SQL 단계에서는 지종/평량 일치 여부만 확인하고
+        상세한 유효성 검증(현재 오더에 포함된 지폭인지 등)은 Python 로직에서 수행합니다.
+        """
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+            
+            # CA는 복합폭 처리가 복잡하므로, 일단 해당 지종/평량의 모든 사용자 패턴을 가져옵니다.
+            query = """
+                SELECT DISTINCT
+                    width1, width2, width3, width4, 
+                    width5, width6, width7, width8
+                FROM th_pattern_tot_sheet
+                WHERE (paper_type, b_wgt) IN (
+                    SELECT paper_type, b_wgt
+                    FROM h3t_production_order
+                    WHERE paper_prod_seq = :lot_no AND ROWNUM = 1
+                )
+            """
+            cursor.execute(query, lot_no=lot_no)
+            rows = cursor.fetchall()
+            
+            db_patterns = []
+            for row in rows:
+                # None이나 빈 문자열이 아닌 유효한 아이템명만 필터링합니다.
+                pattern_items = [item for item in row if item]
+                if pattern_items:
+                    db_patterns.append(pattern_items)
+            
+            print(f"Successfully fetched {len(db_patterns)} sheet patterns from CA DB for lot {lot_no}")
+            return db_patterns
+        except oracledb.Error as error:
+            print(f"Error while fetching CA sheet patterns from DB: {error}")
+            return []
+        finally:
+            if connection:
+                self.pool.release(connection)
