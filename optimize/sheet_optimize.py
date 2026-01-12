@@ -24,7 +24,6 @@ PIECE_COUNT_PENALTY = 10         # 패턴 내 롤(piece) 개수에 대한 페널
 # 알고리즘 파라미터
 MIN_PIECES_PER_PATTERN = 1      # 패턴에 포함될 수 있는 최소 폭(piece)의 수
 SMALL_PROBLEM_THRESHOLD = 8     # 전체 탐색을 수행할 최대 주문 지폭 종류 수
-SOLVER_TIME_LIMIT_MS = 300000    # 최종 MIP 솔버의 최대 실행 시간 (밀리초)
 CG_MAX_ITERATIONS = 1000         # 열 생성(Column Generation) 최대 반복 횟수
 CG_NO_IMPROVEMENT_LIMIT = 50    # 개선 없는 경우, 열 생성 조기 종료 조건
 CG_SUBPROBLEM_TOP_N = 10         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
@@ -34,18 +33,24 @@ CG_SUBPROBLEM_TOP_N = 10         # 열 생성 시, 각 반복에서 추가할 �
 class SheetOptimize:
     def __init__(
             self,
-            df_spec_pre,
-            max_width,
-            min_width,
-            max_pieces,
-            b_wgt,
-            sheet_roll_length,
-            sheet_trim,
-            min_sc_width,
-            max_sc_width,
             db=None,
+            plant=None,
+            pm_no=None,
+            schedule_unit=None,
             lot_no=None,
             version=None,
+            paper_type=None,
+            b_wgt=0,
+            color=None,
+            df_spec_pre=None,
+            min_width=0,
+            max_width=1000,
+            max_pieces=8,
+            time_limit=300000,
+            sheet_roll_length=0,
+            sheet_trim=0,
+            min_sc_width=0,
+            max_sc_width=0,
             num_threads=4
     ):
         """
@@ -92,6 +97,7 @@ class SheetOptimize:
         self.sheet_roll_length = sheet_roll_length
         self.sheet_trim = sheet_trim
         self.original_max_width = max_width
+        self.solver_time_limit_ms = time_limit  # 밀리초 단위 시간 제한
         
         # _calculate_demand_rolls에서 'rolls' 열이 추가된 데이터프레임을 받음
         self.df_orders, self.demands_in_rolls = self._calculate_demand_rolls(df_spec_pre)
@@ -342,10 +348,23 @@ class SheetOptimize:
         if initial_patterns_from_db:
             seen_patterns = {frozenset(p.items()) for p in self.patterns}
             added_count = 0
+            skipped_count = 0
             for p_dict in initial_patterns_from_db:
+                # min_width/max_width 제약조건 검증 추가
+                pattern_width = sum(self.item_info.get(item, 0) * count for item, count in p_dict.items())
+                if pattern_width > self.max_width:
+                    logging.info(f"    - 경고: DB 패턴 {p_dict}의 총 폭({pattern_width}mm)이 max_width({self.max_width}mm)를 초과하여 무시합니다.")
+                    skipped_count += 1
+                    continue
+                if pattern_width < self.min_width:
+                    logging.info(f"    - 경고: DB 패턴 {p_dict}의 총 폭({pattern_width}mm)이 min_width({self.min_width}mm) 미만이어서 무시합니다.")
+                    skipped_count += 1
+                    continue
                 if frozenset(p_dict.items()) not in seen_patterns:
                     self.patterns.append(p_dict)
                     added_count += 1
+            if skipped_count > 0:
+                logging.info(f"--- DB에서 {skipped_count}개의 패턴이 너비 제약조건 위반으로 제외되었습니다. ---")
             logging.info(f"--- DB에서 {added_count}개의 사용자 편집 패턴을 추가했습니다. ---")
 
     def _generate_initial_patterns(self):
@@ -567,12 +586,13 @@ class SheetOptimize:
             fill_num = min(int(self.max_width / item_width), self.max_pieces)
             if fill_num > 0:
                 fallback_pattern = {item: fill_num}
-                # fallback_key = frozenset(fallback_pattern.items())
-                # 중복 체크 제거: 확실하게 추가하기 위함
-                self.patterns.append(fallback_pattern)
-                # seen_patterns.add(fallback_key)
-                # Logging
-                logging.debug(f"--- [DEBUG] Forced Pure Pattern for {item}: {fallback_pattern}")
+                fallback_width = item_width * fill_num
+                # min_width 조건 체크 추가 - min_width 미만이면 추가하지 않음
+                if fallback_width >= self.min_width:
+                    self.patterns.append(fallback_pattern)
+                    logging.debug(f"--- [DEBUG] Forced Pure Pattern for {item}: {fallback_pattern} (width: {fallback_width}mm)")
+                else:
+                    logging.debug(f"--- [DEBUG] Skipped Pure Pattern for {item}: {fallback_pattern} (width: {fallback_width}mm < min_width: {self.min_width}mm)")
 
 
 
@@ -787,7 +807,7 @@ class SheetOptimize:
                 if hasattr(self, 'num_threads'):
                     model.setParam("Threads", self.num_threads)
                 
-                model.setParam("TimeLimit", SOLVER_TIME_LIMIT_MS / 1000.0)
+                model.setParam("TimeLimit", self.solver_time_limit_ms / 1000.0)
                 model.setParam("MIPFocus", 0) # 1: Find valid solution (Feasibility) first
 
                 # Variables
@@ -861,7 +881,7 @@ class SheetOptimize:
             solver.SetNumThreads(self.num_threads)
 
         if is_final_mip:
-            solver.SetTimeLimit(SOLVER_TIME_LIMIT_MS)
+            solver.SetTimeLimit(self.solver_time_limit_ms)
         else:
             solver.SetTimeLimit(30000) # 30 seconds for LP
 
@@ -1113,6 +1133,10 @@ class SheetOptimize:
             # (사실 위의 루프에서 다 커버되지만, 혹시 items에 없는 조합이 있을까봐)
             
             if best_pure_pattern:
+                # min_width 제약조건 체크 추가
+                if max_width_found < self.min_width:
+                    logging.debug(f"    - [스킵] 지폭 {width}mm 순수 패턴: {best_pure_pattern} (폭: {max_width_found}mm < min_width: {self.min_width}mm)")
+                    continue
                 pattern_key = frozenset(best_pure_pattern.items())
                 if pattern_key not in seen_patterns:
                     self.patterns.append(best_pure_pattern)
@@ -1135,8 +1159,10 @@ class SheetOptimize:
             self._generate_initial_patterns()
             
             initial_pattern_count = len(self.patterns)
-            self.patterns = [p for p in self.patterns if sum(self.item_info[i] * c for i, c in p.items()) >= self.min_width - 200]
-            logging.info(f"--- 초기 패턴 필터링: {initial_pattern_count}개 -> {len(self.patterns)}개 (최소 너비 {self.min_width}mm 적용)")
+            # min_width와 max_width 제약조건 모두 적용하여 필터링
+            self.patterns = [p for p in self.patterns 
+                             if self.min_width - 200 <= sum(self.item_info[i] * c for i, c in p.items()) <= self.max_width]
+            logging.info(f"--- 초기 패턴 필터링: {initial_pattern_count}개 -> {len(self.patterns)}개 (너비 범위 {self.min_width}~{self.max_width}mm 적용)")
 
             if not self.patterns:
                 return {"error": "초기 유효 패턴을 생성할 수 없습니다. 제약조건이 너무 엄격할 수 있습니다."}
@@ -1156,7 +1182,8 @@ class SheetOptimize:
                     for new_pattern in new_patterns:
                         if frozenset(new_pattern.items()) not in current_pattern_keys:
                             pattern_width = sum(self.item_info[item] * count for item, count in new_pattern.items())
-                            if pattern_width >= self.min_width:
+                            # min_width와 max_width 모두 검증
+                            if self.min_width <= pattern_width <= self.max_width:
                                 self.patterns.append(new_pattern)
                                 patterns_added += 1
                 
@@ -1175,6 +1202,13 @@ class SheetOptimize:
             return {"error": "유효한 패턴을 생성할 수 없습니다."}
 
         logging.info(f"\n--- 총 {len(self.patterns)}개의 패턴으로 최종 최적화를 수행합니다. ---")
+        
+        # 최종 최적화 전에 min_width/max_width 제약조건 최종 검증 (안전장치)
+        pre_filter_count = len(self.patterns)
+        self.patterns = [p for p in self.patterns 
+                         if self.min_width <= sum(self.item_info.get(i, 0) * c for i, c in p.items()) <= self.max_width]
+        if len(self.patterns) < pre_filter_count:
+            logging.info(f"--- [최종 필터링] 너비 범위({self.min_width}~{self.max_width}mm) 벗어난 패턴 {pre_filter_count - len(self.patterns)}개 제거됨 ---")
         
         # 최종 최적화 전에 패턴 통합(Consolidation) 한 번 더 수행
         # self._consolidate_patterns()

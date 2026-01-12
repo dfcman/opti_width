@@ -25,7 +25,7 @@ class PatternGetters:
                                 rollwidth5, rollwidth6, rollwidth7, rollwidth8
                             )
                         )
-                        where ( paper_type, b_wgt ) in (select paper_type, b_wgt from h3t_production_order where paper_prod_seq = :lot_no and rownum = 1 )
+                        --where ( paper_type, b_wgt ) in (select paper_type, b_wgt from h3t_production_order where paper_prod_seq = :lot_no and rownum = 1 )
                     ) P
                     -- 2. 오더 테이블과 조인
                     LEFT JOIN (

@@ -33,7 +33,8 @@ class VersionGetters:
                     (select color from sapd12t_tmp s12 where s12.lot_no = a.lot_no and rownum = 1 ) as color, 
                     a.min_sc_width, a.max_sc_width, a.sheet_trim_size, sheet_length_re,
                     ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type != '1')) as sheet_order_cnt,
-                    ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type = '1')) as roll_order_cnt
+                    ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type = '1')) as roll_order_cnt,
+                    a.time_limit * 1000 as time_limit
                 FROM th_versions_manager a, th_tar_std_length b, th_calculation_messages c
                 WHERE a.plant = b.plant(+)
                 AND a.paper_type = b.paper_type(+)
@@ -41,7 +42,7 @@ class VersionGetters:
                 and a.lot_no = c.lot_no
                 and a.version = c.version
                 --and c.message_seq = '9'
-                and a.lot_no = '3260100003' and a.version = '01'
+                and a.lot_no = '3260100412' and a.version = '01'
                 and LENGTH(c.version_id) > 0
                 ORDER BY a.plant, a.version_id, a.schedule_unit, a.lot_no, a.version DESC
                 FETCH FIRST 1 ROWS ONLY
@@ -80,15 +81,14 @@ class VersionGetters:
             #     and version = '99'
             # """
 
-            # print(f"Executing query to fetch target lot:\n{query}")
-            print(f"Executing query to fetch target lot")
+            print(f"Executing query to fetch target lot:\n{query}")
             cursor.execute(query)
             result = cursor.fetchone()
-            # 반환 값 개수를 19개로 맞춤
-            return result if result else (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
+            # 반환 값 개수를 20개로 맞춤
+            return result if result else (None,) * 20
         except oracledb.Error as error:
             print(f"Error while fetching target lot: {error}")
-            return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+            return (None,) * 20
         finally:
             if connection:
                 self.pool.release(connection)
@@ -109,7 +109,7 @@ class VersionGetters:
             # 5250900616, 5250900062, 5250900429
             query = """
                 SELECT 
-                    plant, pm_no, schedule_unit, lot_no, version, paper_type, b_wgt, color, 
+                    plant, pm_no, schedule_unit, lot_no, version, time_limit * 1000 as time_limit, paper_type, b_wgt, color, 
                     min_width, roll_max_width, min_sc_width, max_sc_width, coating_yn, 
                     sheet_trim_size, ww_trim_size,
                     min_cm_width, max_cm_width, max_sl_count, p_type, p_wgt, ww_trim_size_sheet,
@@ -117,8 +117,8 @@ class VersionGetters:
                     ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type = '1')) as roll_order_cnt
                 FROM th_versions_manager a
                 --where a.calc_successful = '9'
-                --   5251204230   5251200302   5251200178  5251200510 5251200012 
-                where lot_no = '5251200012'
+                --   5251204230   5251200302   5251200178  5251200510 5251200012  5251201860 5251200705 5251201794 5251203330 5251203142
+                where lot_no = '5251203330' and version = '01'
                 ORDER BY a.plant, a.version_id, a.schedule_unit, a.lot_no, a.version
                 FETCH FIRST 1 ROWS ONLY
             """
@@ -128,11 +128,11 @@ class VersionGetters:
             # cursor.execute(query)
             cursor.execute(query)
             result = cursor.fetchone()
-            # 반환 값 개수를 23개로 맞춤
-            return result if result else (None,) * 23
+            # 반환 값 개수를 24개로 맞춤
+            return result if result else (None,) * 24
         except oracledb.Error as error:
             print(f"Error while fetching target lot: {error}")
-            return (None,) * 23
+            return (None,) * 24
         finally:
             if connection:
                 self.pool.release(connection)
@@ -178,10 +178,10 @@ class VersionGetters:
             # Total 16 vars.
             # 쿼리 컬럼 수: 1(plant)+1+1+1+1(version)+1(min)+1(max)+1(sheet_max)+1(pieces)+1(sheet_pieces)+1(pt)+1(bw)+1(color) + 1(min_cm)+1(max_cm)+1(ww_trim) = 16.
             # OK.
-            return result if result else (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
+            return result if result else (None,) * 16
         except oracledb.Error as error:
             print(f"Error while fetching target lot: {error}")
-            return None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+            return (None,) * 16
         finally:
             if connection:
                 self.pool.release(connection)
@@ -254,9 +254,9 @@ class VersionGetters:
 
             query = """
                 SELECT 
-                    a.plant, a.pm_no, a.schedule_unit, a.lot_no, a.version, a.coating_yn, 
+                    a.plant, a.pm_no, a.schedule_unit, a.lot_no, a.version, a.time_limit * 1000 as time_limit, a.coating_yn, 
                     a.paper_type, a.b_wgt, a.color, 
-                    a.p_type, a.p_wgt, a.p_color, 
+                    a.p_type, a.p_wgt, a.p_color, a.p_machine,
                     a.min_width, a.roll_max_width, a.min_re_count, a.max_re_count, 
                     d.std_length as sheet_length_re, d.std_roll_cnt, 
                     a.min_sc_width, a.max_sc_width, a.sheet_trim_size,                     
@@ -302,9 +302,9 @@ class VersionGetters:
 
             query = """
                 SELECT 
-                    a.plant, a.pm_no, a.schedule_unit, a.lot_no, a.version, a.coating_yn, 
+                    a.plant, a.pm_no, a.schedule_unit, a.lot_no, a.version, a.time_limit * 1000 as time_limit, a.coating_yn, 
                     a.paper_type, a.b_wgt, a.color, 
-                    a.p_type, a.p_wgt, a.p_color, 
+                    a.p_type, a.p_wgt, a.p_color, a.p_machine,
                     a.min_width, a.roll_max_width, a.min_re_count, a.max_re_count,
                     a.min_cm_width, a.max_cm_width, a.max_sl_count, a.ww_trim_size
                 FROM th_versions_manager a

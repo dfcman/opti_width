@@ -3,6 +3,8 @@ from ortools.linear_solver import pywraplp
 import random
 import logging
 import time
+import gurobipy as gp
+from gurobipy import GRB
 
 """
 [파일 설명: roll_optimize.py]
@@ -18,8 +20,7 @@ CG_MAX_ITERATIONS = 1000 # 안전장치 (최대 반복 횟수)
 CG_NO_IMPROVEMENT_LIMIT = 50  # 200 -> 50: 초기 패턴이 우수하면 빨리 넘어가도록 단축
 CG_SUBPROBLEM_TOP_N = 10      # Increased from 3
 SMALL_PROBLEM_THRESHOLD = 6  # Increased to force exhaustive search for narrow width ranges
-SOLVER_TIME_LIMIT_MS = 300000
-PATTERN_SETUP_COST = 1000.0 # 새로운 패턴 종류를 1개 사용할 때마다 1000mm의 손실과 동일한 페널티
+PATTERN_SETUP_COST = 1000000.0 # 새로운 패턴 종류를 1개 사용할 때마다 1000mm의 손실과 동일한 페널티
 TRIM_LOSS_PENALTY = 5.0      # 자투리 손실 1mm당 페널티
 MIXING_PENALTY = 100.0       # 공백이 1개 섞인 경우는 페널티 비용 팬텀 생성비용과 비교
 
@@ -56,15 +57,47 @@ class RollOptimize:
         -   과생산/부족생산 및 로스율 등의 지표를 집계하여 요약 정보를 제공합니다.
     """
     
-    def __init__(self, df_spec_pre, max_width=1000, min_width=0, max_pieces=8, lot_no=None, db=None, version=None, num_threads=4):
-        self.num_threads = num_threads
-        self.df_spec_pre = df_spec_pre
-        self.max_width = max_width
-        self.min_width = min_width
-        self.max_pieces = max_pieces
-        self.lot_no = lot_no
+    def __init__(
+        self, 
+        db=None, 
+        plant=None, 
+        pm_no=None, 
+        schedule_unit=None, 
+        lot_no=None, 
+        version=None, 
+        paper_type=None, 
+        b_wgt=None, 
+        color=None, 
+        p_type=None, 
+        p_wgt=None, 
+        p_color=None, 
+        p_machine=None, 
+        df_spec_pre=None, 
+        min_width=0, 
+        max_width=1000, 
+        max_pieces=8, 
+        time_limit=300000, 
+        num_threads=4
+    ):
         self.db = db
+        self.plant = plant
+        self.pm_no = pm_no
+        self.schedule_unit = schedule_unit
+        self.lot_no = lot_no
         self.version = version
+        self.paper_type = paper_type
+        self.b_wgt = b_wgt
+        self.color = color
+        self.p_type = paper_type
+        self.p_wgt = b_wgt
+        self.p_color = color
+        self.p_machine = pm_no
+        self.df_spec_pre = df_spec_pre
+        self.min_width = min_width
+        self.max_width = max_width
+        self.max_pieces = max_pieces
+        self.solver_time_limit_ms = time_limit  # 밀리초 단위 시간 제한
+        self.num_threads = num_threads
         self.patterns = []
         self.pattern_keys = set()
         self.demands = df_spec_pre.groupby('group_order_no')['주문수량'].sum().to_dict()
@@ -183,7 +216,7 @@ class RollOptimize:
         # 2. Random Shuffles (add multiple to increase diversity)
         # random.seed(41) # Ensure determinism
         random_shuffles = []
-        for _ in range(3):  # Increased from 8 to 10
+        for _ in range(5):  # Increased from 8 to 10
             items_copy = list(self.items)
             random.shuffle(items_copy)
             random_shuffles.append(items_copy)
@@ -408,8 +441,7 @@ class RollOptimize:
         # 1. [Final MIP 단계] Gurobi 직접 호출 시도 (Size-Limited License 활용)
         if is_final_mip:
             try:
-                import gurobipy as gp
-                from gurobipy import GRB
+                
                 
                 logging.info(f"[Final MIP] 총 {len(self.patterns)}개의 패턴 생성됨")
                 logging.info("Trying Gurobi Direct Solver roll_optimization(gurobipy)...")
@@ -478,7 +510,7 @@ class RollOptimize:
                 model.setObjective(gp.quicksum(obj_terms), GRB.MINIMIZE)
                 
                 # Optimize
-                model.setParam('TimeLimit', SOLVER_TIME_LIMIT_MS / 1000.0)
+                model.setParam('TimeLimit', self.solver_time_limit_ms / 1000.0)
                 model.optimize()
                 
                 # Check for optimal or feasible solution (even if time limit reached)
@@ -511,7 +543,7 @@ class RollOptimize:
              logging.info(f"Using solver: {solver_name} (Fallback/Default)")
 
         if is_final_mip and hasattr(solver, 'SetTimeLimit'):
-            solver.SetTimeLimit(SOLVER_TIME_LIMIT_MS)
+            solver.SetTimeLimit(self.solver_time_limit_ms)
         
         if hasattr(solver, 'SetNumThreads'):
             solver.SetNumThreads(self.num_threads)

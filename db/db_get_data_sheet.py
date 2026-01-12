@@ -99,7 +99,7 @@ class SheetGetters:
             sql_query = """
                 SELECT
                     a.plant, a.pm_no, a.schedule_unit, a.width, a.length, a.quality_grade, 
-                    a.order_ton_cnt, a.export_yn, a.order_no, a.color, a.order_gubun, a.pt_gubun, b.pack_type
+                    a.order_ton_cnt, a.export_yn, a.order_no, a.color, a.order_gubun, a.pt_gubun, b.pack_type, nvl(a.pattern, ' ') as pattern
                 FROM
                     h3t_production_order a, sapd12t_tmp b
                 WHERE a.paper_prod_seq = :p_paper_prod_seq
@@ -112,7 +112,7 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun, pack_type = row
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun, pack_type, pattern = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -127,7 +127,8 @@ class SheetGetters:
                     'color': color,
                     'order_gubun': order_gubun,
                     'pt_gubun': pt_gubun,
-                    'pack_type': pack_type
+                    'pack_type': pack_type,
+                    'pattern': pattern
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders

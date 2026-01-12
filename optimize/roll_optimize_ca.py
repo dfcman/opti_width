@@ -29,15 +29,19 @@ class RollOptimizeCa:
     def __init__(
         self,
         db=None,
+        plant=None,
+        pm_no=None,
+        schedule_unit=None,
         lot_no=None,
         version=None,
-        df_spec_pre=None,
         paper_type=None,
         b_wgt=0,
         color=None,
         p_type=None,
         p_wgt=0,
         p_color=None,
+        p_machine=None,
+        df_spec_pre=None,
         coating_yn='N',
         min_width=0,
         max_width=1000,
@@ -49,6 +53,9 @@ class RollOptimizeCa:
         num_threads=4
     ):
         self.db = db
+        self.plant = plant
+        self.pm_no = pm_no
+        self.schedule_unit = schedule_unit
         self.lot_no = lot_no
         self.version = version
         self.df_spec_pre = df_spec_pre.copy() if df_spec_pre is not None else pd.DataFrame()
@@ -60,6 +67,7 @@ class RollOptimizeCa:
         self.p_type = p_type
         self.p_wgt = float(p_wgt) if p_wgt else 0
         self.p_color = p_color
+        self.p_machine = p_machine
         self.coating_yn = coating_yn
         self.num_threads = num_threads
         
@@ -142,23 +150,28 @@ class RollOptimizeCa:
         self.max_demand = max(self.demands.values()) if self.demands else 1
 
     def _prepare_items(self):
-        # 1폭(단폭)도 ww_trim_size를 추가하고 min_cm_width~max_cm_width 범위 체크
+        # 복합폭 생성용 후보 (모든 지폭 포함, 범위 체크 없음)
+        all_base_for_composite = {}
+        for item, width in self.base_item_widths.items():
+            if width <= 0:
+                continue
+            all_base_for_composite[item] = width  # 원본 지폭 (trim 미포함)
+        
+        # 1폭(단폭)으로 패턴에 직접 사용 가능한 것 (범위 체크)
         for item, width in self.base_item_widths.items():
             if width <= 0:
                 continue
             width_with_trim = width + self.sl_trim
             
-            # 1폭도 min_cm_width~max_cm_width 범위 내에 있어야 함
+            # 1폭도 min_cm_width~max_cm_width 범위 내에 있어야 패턴에 직접 사용 가능
             if self.min_sl_width <= width_with_trim <= self.max_sl_width:
                 self.item_info[item] = width_with_trim  # trim 추가된 폭 저장
                 self.item_composition[item] = {item: 1}
                 self.item_piece_count[item] = 1
                 self.base_items.append(item)
 
-        # Add pure composite items first
-        for base_item, base_width in self.base_item_widths.items():
-            if base_width <= 0:
-                continue
+        # Add pure composite items (동일 규격 반복)
+        for base_item, base_width in all_base_for_composite.items():
             for num_repeats in range(self.composite_min, self.composite_max + 1):
                 composite_width = base_width * num_repeats
                 composite_w_with_trim = composite_width + self.sl_trim
@@ -169,16 +182,18 @@ class RollOptimizeCa:
                     if name not in self.item_info:
                         self._register_composite_item(name, composite_w_with_trim, composition, num_repeats)
 
+        # 혼합 복합폭 생성을 위한 후보 (복합폭 생성용 모든 지폭 사용)
         max_combo_pieces = min(self.max_pieces, self.composite_max)
         min_combo_pieces = min(max_combo_pieces, self.composite_min)
         if min_combo_pieces > max_combo_pieces:
             return
 
+        # 복합폭 생성용 후보: 모든 지폭 사용 (수요순 정렬)
         base_candidates = sorted(
-            self.base_items,
-            key=lambda key: (-self.demands.get(key, 0), -self.item_info[key])
+            all_base_for_composite.keys(),
+            key=lambda key: (-self.demands.get(key, 0), -all_base_for_composite[key])
         )[:COMPOSITE_BASE_CANDIDATES]
-        base_candidates = sorted(base_candidates, key=lambda key: self.item_info[key])
+        base_candidates = sorted(base_candidates, key=lambda key: all_base_for_composite[key])
 
         seen_compositions = set()
         composite_cap = COMPOSITE_GENERATION_LIMIT
@@ -205,7 +220,8 @@ class RollOptimizeCa:
 
             for idx in range(start_idx, len(base_candidates)):
                 base_item = base_candidates[idx]
-                width = self.item_info[base_item]
+                # 복합폭 생성용 후보에서 원본 지폭 사용 (trim 미포함)
+                width = all_base_for_composite.get(base_item, 0)
                 if width <= 0:
                     continue
                 
@@ -929,14 +945,19 @@ class RollOptimizeCa:
                         expanded_widths.extend([base_width] * qty)
                         expanded_groups.extend([base_item] * qty)
 
+                    # roll별 trim_loss 계산 (rollwidth - sum(widths))
+                    roll_widths_list = (expanded_widths + [0] * 7)[:7]
+                    roll_trim_loss = item_width - sum(roll_widths_list)
+                    
                     pattern_roll_details_for_db.append({
                         'rollwidth': item_width,
-                        'widths': (expanded_widths + [0] * 7)[:7],
+                        'widths': roll_widths_list,
                         'group_nos': (expanded_groups + [''] * 7)[:7],
                         'count': roll_count,
                         'prod_seq': prod_seq,
                         'roll_seq': roll_seq_counter,
-                        'pattern_length': self.pattern_length,  # [New] 롤 길이 추가
+                        'pattern_length': self.pattern_length,
+                        'loss_per_roll': roll_trim_loss,  # rollwidth - sum(widths)
                         'rs_gubun': 'W',
                         **common_props
                     })
@@ -965,7 +986,8 @@ class RollOptimizeCa:
             })
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
-            df_patterns = df_patterns[['pattern', 'pattern_width', 'count', 'loss_per_roll']]
+            df_patterns['std_length'] = self.std_length
+            df_patterns = df_patterns[['pattern', 'pattern_width', 'count', 'loss_per_roll', 'std_length']]
 
         df_demand = pd.DataFrame.from_dict(self.demands, orient='index', columns=['주문수량'])
         df_demand.index.name = 'group_order_no'

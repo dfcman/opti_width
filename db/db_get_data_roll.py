@@ -324,7 +324,7 @@ class RollGetters:
                     'b_wgt': b_wgt,
                     '지폭': int(width) if width else 0,
                     '가로': int(length) if length else 0,
-                    '주문수량': order_roll_cnt,
+                    '주문수량': int(order_roll_cnt) if order_roll_cnt else 0,
                     '주문톤': float(order_ton_cnt) if order_ton_cnt else 0,
                     '롤길이': int(roll_length) if roll_length else 0,
                     '등급': quality_grade,

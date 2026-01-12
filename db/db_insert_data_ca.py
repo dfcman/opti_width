@@ -5,7 +5,8 @@ class DataInserters:
     """천안 공장(5000) 전용 데이터 INSERT 함수들"""
     
     def insert_pattern_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit, max_width, 
-                                paper_type, b_wgt, pattern_details):
+                                paper_type, b_wgt, pattern_details, 
+                                p_machine=None, p_type=None, p_wgt=None, p_color=None):
         cursor = connection.cursor()
 
         insert_query = """
@@ -20,6 +21,7 @@ class DataInserters:
                 prod_amt, 
                 prod_wgt, 
                 prod_yn, 
+                jaego_yn,
                 spool_no, spool_seq, rs_gubun, p_machine,
                 rollwidth1, rollwidth2, rollwidth3, rollwidth4, rollwidth5, rollwidth6, rollwidth7, rollwidth8,
                 groupno1, groupno2, groupno3, groupno4, groupno5, groupno6, groupno7, groupno8
@@ -34,11 +36,13 @@ class DataInserters:
                 round(:b_wgt * (:w1 + :w2 + :w3 + :w4 + :w5 + :w6 + :w7 + :w8) * :length / 1000000, 0),
                 round(:b_wgt * (:w1 + :w2 + :w3 + :w4 + :w5 + :w6 + :w7 + :w8) * :length / 1000000, 1),
                 'N',
+                'N',
                 :spool_no, :spool_seq, :rs_gubun, :p_machine,
                 :w1, :w2, :w3, :w4, :w5, :w6, :w7, :w8,
                 :g1, :g2, :g3, :g4, :g5, :g6, :g7, :g8
             )
         """
+        
         
         total_seq = 0
         bind_vars_list = []
@@ -60,16 +64,15 @@ class DataInserters:
                     'color': str(pattern.get('color', '')),
                     'luster': int(pattern.get('luster', 0)),
                     'p_lot': str(pattern.get('p_lot', '')), 
-                    'p_type': paper_type,
-                    'p_wgt': b_wgt, 
-                    'p_color': str(pattern.get('color', '')), # [Mod] p_color added
+                    'p_type': p_type,
+                    'p_wgt': p_wgt, 
+                    'p_color': p_color,
                     'core': int(pattern.get('core', 0)),
                     'pattern': str(pattern.get('order_pattern', '')),
                     'spool_no': prod_seq, 
                     'spool_seq': 1,
-                    # 'rs_gubun': self._get_rs_gubun(pattern),
                     'rs_gubun': pattern['rs_gubun'],
-                    'p_machine': pm_no, 
+                    'p_machine': p_machine, 
                     'w1': pattern['widths'][0], 'w2': pattern['widths'][1],
                     'w3': pattern['widths'][2], 'w4': pattern['widths'][3],
                     'w5': pattern['widths'][4], 'w6': pattern['widths'][5],
@@ -88,7 +91,8 @@ class DataInserters:
         print(f"Prepared {total_seq} new pattern sequences for transaction.")
 
     def insert_roll_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit, max_width, 
-                                paper_type, b_wgt, pattern_roll_details):
+                                paper_type, b_wgt, pattern_roll_details,
+                                p_machine=None, p_type=None, p_wgt=None, p_color=None):
         cursor = connection.cursor()
 
         insert_query = """
@@ -113,7 +117,12 @@ class DataInserters:
 
         bind_vars_list = []
         for roll_detail in pattern_roll_details:
-            # for seq in range(roll_detail['count']):
+            prod_seq = roll_detail['prod_seq']
+            roll_seq = roll_detail['roll_seq']
+            pok_cnt_value = len([w for w in roll_detail['widths'] if w > 0])
+
+        bind_vars_list = []
+        for roll_detail in pattern_roll_details:
             prod_seq = roll_detail['prod_seq']
             roll_seq = roll_detail['roll_seq']
             pok_cnt_value = len([w for w in roll_detail['widths'] if w > 0])
@@ -134,12 +143,11 @@ class DataInserters:
                 'core': int(roll_detail.get('core', 0)),
                 'pattern': str(roll_detail.get('order_pattern', '')),
                 'p_lot': lot_no,
-                'p_type': paper_type,
-                'p_wgt': b_wgt,  
-                'p_machine': pm_no,
-                'p_color': str(roll_detail.get('color', '')), # [Mod] p_color added
-                'trim_loss': roll_detail.get('loss_per_roll', 0), # [Mod] trim_loss added
-                # 'rs_gubun': self._get_rs_gubun(roll_detail),
+                'p_type': p_type,
+                'p_wgt': p_wgt,  
+                'p_machine': p_machine,
+                'p_color': p_color,
+                'trim_loss': roll_detail.get('loss_per_roll', 0),
                 'rs_gubun': roll_detail['rs_gubun'],
                 'w1': roll_detail['widths'][0], 'w2': roll_detail['widths'][1],
                 'w3': roll_detail['widths'][2], 'w4': roll_detail['widths'][3],
@@ -159,7 +167,8 @@ class DataInserters:
         print(f"Prepared {len(bind_vars_list)} new roll sequences for transaction.")
 
     def insert_cut_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit, 
-                                paper_type, b_wgt, pattern_roll_cut_details):
+                                paper_type, b_wgt, pattern_roll_cut_details,
+                                p_machine=None, p_type=None, p_wgt=None, p_color=None):
         cursor = connection.cursor()
 
         insert_query = """
@@ -182,7 +191,6 @@ class DataInserters:
 
         bind_vars_list = []
         for cut_detail in pattern_roll_cut_details:
-            # for seq in range(cut_detail['count']):
             bind_vars = {
                 'plant': plant, 'pm_no': pm_no, 'schedule_unit': schedule_unit,
                 'lot_no': lot_no, 'version': version,
@@ -191,7 +199,7 @@ class DataInserters:
                 'seq': 1, 
                 'spool_no': cut_detail['prod_seq'], 
                 'spool_seq': 1,
-                'p_machine': pm_no,
+                'p_machine': p_machine,
                 'roll_seq': cut_detail['roll_seq'],
                 'cut_seq': cut_detail['cut_seq'], 
                 'width': cut_detail['width'],
@@ -203,10 +211,9 @@ class DataInserters:
                 'color': str(cut_detail.get('color', '')),
                 'luster': int(cut_detail.get('luster', 0)),
                 'p_lot': lot_no,
-                'p_type': paper_type,
-                'p_type': paper_type,
-                'p_wgt': b_wgt,
-                'p_color': str(cut_detail.get('color', '')) # [Mod] p_color added
+                'p_type': p_type,
+                'p_wgt': p_wgt,
+                'p_color': p_color
             }
             bind_vars_list.append(bind_vars)
 
@@ -216,7 +223,9 @@ class DataInserters:
         print(f"Prepared {len(bind_vars_list)} new cut sequences for transaction.")
 
 
-    def insert_sheet_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit, paper_type=None, b_wgt=None, sheet_details=None):
+    def insert_sheet_sequence(self, connection, lot_no, version, plant, pm_no, schedule_unit, 
+                               paper_type, b_wgt, sheet_details,
+                               p_machine=None, p_type=None, p_wgt=None, p_color=None):
         cursor = connection.cursor()
 
         insert_query = """
@@ -241,7 +250,6 @@ class DataInserters:
 
         bind_vars_list = []
         for sheet_detail in sheet_details:
-            # [Mod] CA 공장은 Unroll 하지 않음. count 값을 cut_cnt 에 입력.
             current_seq = sheet_detail.get('override_seq', 1)
             bind_vars = {
                     'plant': plant, 'pm_no': pm_no, 'schedule_unit': schedule_unit,
@@ -251,7 +259,7 @@ class DataInserters:
                     'seq': current_seq, 
                     'spool_no': sheet_detail['prod_seq'], 
                     'spool_seq': current_seq,
-                    'p_machine': pm_no,
+                    'p_machine': p_machine,
                     'roll_seq': sheet_detail['roll_seq'],
                     'cut_seq': sheet_detail['cut_seq'], 
                     'sheet_seq': sheet_detail['sheet_seq'],
@@ -260,16 +268,16 @@ class DataInserters:
                     'group_no': sheet_detail['group_no'], 
                     'order_no': sheet_detail['order_no'],
                     'sheet_cnt': sheet_detail['sheet_cnt'],
-                    'cut_cnt': sheet_detail.get('count', 1), # [New] Roll Count
+                    'cut_cnt': sheet_detail.get('count', 1),
                     'length': sheet_detail['pattern_length'],
                     'paper_type': paper_type,
                     'b_wgt': b_wgt,
                     'color': str(sheet_detail.get('color', '')),
                     'luster': int(sheet_detail.get('luster', 0)),
                     'p_lot': lot_no,
-                    'p_type': paper_type,
-                    'p_wgt': b_wgt,
-                    'p_color': str(sheet_detail.get('color', '')) # [Mod] p_color added
+                    'p_type': p_type,
+                    'p_wgt': p_wgt,
+                    'p_color': p_color
             }
             bind_vars_list.append(bind_vars)
 

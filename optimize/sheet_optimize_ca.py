@@ -50,33 +50,18 @@ import time
 import logging
 import gurobipy as gp
 from gurobipy import GRB
+import configparser
+import os
 
-# --- 최적화 설정 상수 ---
-# 비용 상수 (모든 목적 함수 항을 '비용'으로 통일하기 위해 사용)
-COST_PER_ROLL = 5000.0          # 롤 1개 교체/사용에 대한 비용 (예시)
-COST_PER_METER_MATERIAL = 0.8  # 원자재 1미터당 비용 (예시)
 
 # 페널티 값
 OVER_PROD_PENALTY = 20000000.0    # 과생산에 대한 페널티(1미터당 페널티 부여 값)
 UNDER_PROD_PENALTY = 10000000.0  # 부족생산에 대한 페널티
-PATTERN_COMPLEXITY_PENALTY = 1.0  #  (복잡도 페널티) "한 패턴에 여러 규격을 섞지 마라!" (작업자가 헷갈리지 않게 단순한 구성을 선호하게 만듦)
 PATTERN_COUNT_PENALTY = 1000.0       # "칼 세팅(패턴 변경) 횟수를 줄여라!" (생산 효율을 위해 전체 패턴 종류를 줄임)
-TRIM_PENALTY = 0          # 트림(loss) 면적(mm^2)당 페널티. 폐기물 비용.
-ITEM_SINGLE_STRIP_PENALTIES = {}
-DEFAULT_SINGLE_STRIP_PENALTY = 1000  # 지정되지 않은 단일폭은 기본적으로 패널티 없음
 DISALLOWED_SINGLE_BASE_WIDTHS = {}  # 단일 사용을 금지할 주문 폭 집합
-
-# [New] 단폭(x1) 아이템 사용 페널티
-# 패턴 내 단폭 아이템 개수에 비례하여 페널티 부여 (복합폭 x2 이상 사용 유도)
-SINGLE_STRIP_PENALTY = 5000.0  # 단폭(x1) 아이템 1개당 페널티
-
-# 솔버 멀티스레딩
-import configparser
-import os
-
-NUM_THREADS = 4
-
-
+DEFAULT_SINGLE_STRIP_PENALTY = 1000  # 지정되지 않은 단일폭은 기본적으로 패널티 없음
+SINGLE_STRIP_PENALTY = 5000.0  # 패턴 내 단폭 아이템 개수에 비례하여 페널티 부여 (복합폭 x2 이상 사용 유도)
+PATTERN_COMPLEXITY_PENALTY = 1.0  #  (복잡도 페널티) "한 패턴에 여러 규격을 섞지 마라!" (작업자가 헷갈리지 않게 단순한 구성을 선호하게 만듦)
 
 # 알고리즘 파라미터
 MIN_PIECES_PER_PATTERN = 1      # 패턴에 포함될 수 있는 최소 폭(piece)의 수
@@ -86,8 +71,13 @@ CG_MAX_ITERATIONS = 1000         # 열 생성(Column Generation) 최대 반복 �
 CG_NO_IMPROVEMENT_LIMIT = 50    # 개선 없는 경우, 열 생성 조기 종료 조건
 CG_SUBPROBLEM_TOP_N = 10         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
 # 나이프 로드 제약: 패턴 생산 횟수는 k1*a + k2*b 형태여야 함 (a,b>=0 정수)
-KNIFE_LOAD_K1 = 1
-KNIFE_LOAD_K2 = 1
+# KNIFE_LOAD_K1 = 1
+# KNIFE_LOAD_K2 = 1
+
+
+
+# TRIM_PENALTY = 0          # 트림(loss) 면적(mm^2)당 페널티. 폐기물 비용.
+# ITEM_SINGLE_STRIP_PENALTIES = {}
 
 class SheetOptimizeCa:
     """
@@ -100,25 +90,29 @@ class SheetOptimizeCa:
     def __init__(
             self,
             db=None,
+            plant=None,
+            pm_no=None,
+            schedule_unit=None,
             lot_no=None,
             version=None,
-            df_spec_pre=None,
-            max_width=None,
-            min_width=None,
-            max_pieces=None,
+            paper_type=None,
             b_wgt=None,
+            color=None,
+            p_type=None,
+            p_wgt=None,
+            p_color=None,
+            p_machine=None,
+            coating_yn=None,
+            df_spec_pre=None,
+            min_width=None,
+            max_width=None,
+            max_pieces=None,
             min_sheet_roll_length=None,
             max_sheet_roll_length=None,
             std_roll_cnt=None,
             sheet_trim=None,
             min_sc_width=None,
             max_sc_width=None,
-            color=None,
-            paper_type=None,
-            p_type=None,
-            p_wgt=None,
-            p_color=None,
-            coating_yn=None,
             min_cm_width=None,
             max_cm_width=None,
             max_sl_count=None,
@@ -149,6 +143,7 @@ class SheetOptimizeCa:
         self.p_type = p_type
         self.p_wgt = p_wgt
         self.p_color = p_color
+        self.p_machine = p_machine
         self.coating_yn = coating_yn
         self.min_cm_width = min_cm_width
         self.max_cm_width = max_cm_width
