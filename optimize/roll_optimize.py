@@ -22,7 +22,7 @@ CG_SUBPROBLEM_TOP_N = 10      # Increased from 3
 SMALL_PROBLEM_THRESHOLD = 6  # Increased to force exhaustive search for narrow width ranges
 PATTERN_SETUP_COST = 1000000.0 # 새로운 패턴 종류를 1개 사용할 때마다 1000mm의 손실과 동일한 페널티
 TRIM_LOSS_PENALTY = 5.0      # 자투리 손실 1mm당 페널티
-MIXING_PENALTY = 100.0       # 공백이 1개 섞인 경우는 페널티 비용 팬텀 생성비용과 비교
+MIXING_PENALTY = 10.0       # 공백이 1개 섞인 경우는 페널티 비용 패턴 생성비용과 비교
 
 
 
@@ -1038,7 +1038,7 @@ class RollOptimize:
         fulfillment_summary = fulfillment_summary[available_final_cols]
 
         return {
-            "pattern_result": df_patterns.sort_values('count', ascending=False),
+            "pattern_result": df_patterns.sort_values('count', ascending=False) if not df_patterns.empty else df_patterns,
             "pattern_details_for_db": pattern_details_for_db,
             "pattern_roll_details_for_db": pattern_roll_details_for_db,
             "pattern_roll_cut_details_for_db": pattern_roll_cut_details_for_db,

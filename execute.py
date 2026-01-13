@@ -1582,8 +1582,10 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
         connection.commit()
         logging.info("DB 트랜잭션이 성공적으로 커밋되었습니다.")
 
-        output_dir = 'results'
+        date_folder = time.strftime('%Y%m%d')
+        output_dir = os.path.join('results', date_folder)
         os.makedirs(output_dir, exist_ok=True)
+
         timestamp = time.strftime('%y%m%d%H%M%S')
         output_filename = f"{timestamp}_{lot_no}_{version}.csv"
         output_path = os.path.join(output_dir, output_filename)
@@ -1648,7 +1650,9 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
 
 def setup_logging(lot_no, version):
     """로그 설정을 초기화합니다. 각 lot마다 새로운 로그 파일을 생성합니다."""
-    log_dir = 'results'
+    # 날짜별 폴더 생성 (results/YYYYMMDD/)
+    date_folder = time.strftime('%Y%m%d')
+    log_dir = os.path.join('results', date_folder)
     os.makedirs(log_dir, exist_ok=True)
     timestamp = time.strftime('%y%m%d%H%M%S')
     log_filename = f"{timestamp}_{lot_no}_{version}.log"
@@ -1751,13 +1755,13 @@ def main():
                     min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re,
                     sheet_order_cnt, roll_order_cnt
                 ) = db.get_target_lot_st()
-            else: # 3000 or default
+            else:  # 3000 or default
                 ( 
-                    plant, pm_no, schedule_unit, lot_no, version, time_limit, min_width, 
+                    plant, pm_no, schedule_unit, lot_no, version, min_width, 
                     max_width, sheet_max_width, max_pieces, sheet_max_pieces, 
                     paper_type, b_wgt, color,
                     min_sc_width, max_sc_width, sheet_trim_size, sheet_length_re,
-                    sheet_order_cnt, roll_order_cnt
+                    sheet_order_cnt, roll_order_cnt, time_limit
                 ) = db.get_target_lot()
 
             if not lot_no:

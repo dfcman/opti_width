@@ -261,7 +261,13 @@ class SheetOptimize:
 
             sheets_per_roll = sheets_per_roll_length  # num_across is always 1
             # 그룹 전체에 대한 필요 롤 수 (반올림)
-            group_rolls_map[g_no] = int(round(total_sheets_needed / sheets_per_roll, 0))
+            # raw_rolls = total_sheets_needed / sheets_per_roll
+            # group_rolls_map[g_no] = int(math.floor(raw_rolls + 0.5))
+            
+            # 10% 이상이면 올림
+            raw_rolls = total_sheets_needed / sheets_per_roll
+            decimal_part = raw_rolls - int(raw_rolls)
+            group_rolls_map[g_no] = int(raw_rolls) + 1 if decimal_part >= 0.1 else int(raw_rolls)
 
         # 3. 계산된 그룹 롤 수를 개별 오더(row)에 배분
         def distribute_rolls(group_df):
@@ -1595,11 +1601,13 @@ class SheetOptimize:
         # 4. 과부족 및 생산톤 계산
         summary_df['과부족(롤)'] = summary_df['생산롤수'].astype(int) - summary_df['필요롤수'].astype(int)
         
-        # 0으로 나누기 오류를 방지하며 롤당 톤 계산
-        tons_per_roll = (summary_df['주문량(톤)'] / summary_df['필요롤수']).replace([float('inf'), -float('inf')], 0).fillna(0)
-        
-        summary_df['생산량(톤)'] = (summary_df['생산롤수'] * tons_per_roll).round(3)
-        summary_df['과부족(톤)'] = (summary_df['생산량(톤)'] - summary_df['주문량(톤)']).round(0)
+        # 실제 생산량 계산: (가로(mm) × 세로(mm) × b_wgt(g/m²) × 생산롤수) / 10^9
+        # 세로 = sheet_roll_length (롤 길이, mm 단위로 변환 필요시 확인)
+        # 쉬트지의 세로는 개별 쉬트 길이가 아니라 롤 길이(sheet_roll_length)를 사용
+        summary_df['생산량(톤)'] = (
+            summary_df['가로'] * self.sheet_roll_length * self.b_wgt * summary_df['생산롤수'] / 1e9
+        ).round(3)
+        summary_df['과부족(톤)'] = (summary_df['생산량(톤)'] - summary_df['주문량(톤)']).round(3)
 
         # 최종 컬럼 순서 정리
         return summary_df[[

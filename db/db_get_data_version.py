@@ -34,16 +34,15 @@ class VersionGetters:
                     a.min_sc_width, a.max_sc_width, a.sheet_trim_size, sheet_length_re,
                     ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type != '1')) as sheet_order_cnt,
                     ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type = '1')) as roll_order_cnt,
-                    a.time_limit * 1000 as time_limit
-                FROM th_versions_manager a, th_tar_std_length b, th_calculation_messages c
+                    --a.time_limit * 1000 as time_limit
+                    300 * 1000 as time_limit
+                FROM th_versions_manager a, th_tar_std_length b
                 WHERE a.plant = b.plant(+)
                 AND a.paper_type = b.paper_type(+)
                 AND a.b_wgt = b.b_wgt(+)
-                and a.lot_no = c.lot_no
-                and a.version = c.version
-                --and c.message_seq = '9'
-                and a.lot_no = '3260100412' and a.version = '01'
-                and LENGTH(c.version_id) > 0
+                and a.calc_successful = '9'
+                --and a.lot_no = '3260100412' and a.version = '01'
+                and LENGTH(a.version_id) > 0
                 ORDER BY a.plant, a.version_id, a.schedule_unit, a.lot_no, a.version DESC
                 FETCH FIRST 1 ROWS ONLY
             """

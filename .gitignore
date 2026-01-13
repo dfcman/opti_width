@@ -9,8 +9,9 @@ __pycache__/
 
 # CSV 결과 파일 제외
 *.csv
-results/*.log
-results/*.txt
+results/*/*.log
+results/*/*.csv
+results/*/*.txt
 
 # python virtual environment
 venv/
