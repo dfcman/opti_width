@@ -37,6 +37,10 @@ def process_sheet_lot(
         start_prod_seq=0, start_group_order_no=0
 ):
     """쉬트지 lot에 대한 전체 최적화 프로세스를 처리하고 결과를 반환합니다."""
+
+    if re_max_pieces > 4:
+        re_max_pieces = 4
+        logging.warning(f"max_pieces가 4보다 큽니다. max_pieces를 4로 설정합니다.")
     logging.info(f"\n{'='*60}")
     logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sheet Lot: {lot_no} (Version: {version}) 처리 시작")
     logging.info(f"적용 파라미터: min_width={re_min_width}, max_width={re_max_width}, max_pieces={re_max_pieces}, min_sc_width={min_sc_width}, max_sc_width={max_sc_width}, sheet_length_re={sheet_length_re}")
@@ -1441,6 +1445,21 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
     connection = None
     try:
         connection = db.pool.acquire()
+        
+        # 기존 최적화 결과 삭제 (동일 트랜잭션에서 처리)
+        cursor = connection.cursor()
+        tables_to_delete = [
+            "th_pattern_sequence",
+            "th_roll_sequence",
+            "th_cut_sequence",
+            "th_sheet_sequence",
+            "th_order_group",
+            "th_group_master"
+        ]
+        for table in tables_to_delete:
+            delete_query = f"DELETE FROM {table} WHERE lot_no = :lot_no AND version = :version"
+            cursor.execute(delete_query, lot_no=lot_no, version=version)
+            logging.info(f"Deleted data from {table} for lot {lot_no}, version {version}")
 
         if not final_df_orders.empty:
             # [Update] prod_wgt 계산 및 반영
@@ -1587,7 +1606,7 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
         os.makedirs(output_dir, exist_ok=True)
 
         timestamp = time.strftime('%y%m%d%H%M%S')
-        output_filename = f"{timestamp}_{lot_no}_{version}.csv"
+        output_filename = f"{lot_no}_{version}_{timestamp}.csv"
         output_path = os.path.join(output_dir, output_filename)
         final_pattern_result.to_csv(output_path, index=False, encoding='utf-8-sig')
         logging.info(f"\n[성공] 요약 결과가 다음 파일에 저장되었습니다: {output_path}")
@@ -1607,7 +1626,7 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
                 (final_fulfillment_summary['롤길이'] > 0)
             ]
             if not under_production_rolls.empty:
-                final_status = 1  # 일부 오더 초과(부족)
+                final_status = 0  # 일부 오더 초과(부족)
                 logging.warning(f"[경고] 초과(부족) 생산된 롤 오더가 있습니다:\n{under_production_rolls.to_string()}")
 
         
@@ -1622,10 +1641,10 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
                 (final_fulfillment_summary['롤길이'] == 0)
             ]  # 소수점 오차 고려
             if not under_production_sheets.empty:
-                final_status = 1  # 일부 오더 초과(부족)
+                final_status = 0  # 일부 오더 초과(부족)
                 logging.warning(f"[경고] 부족 생산된 쉬트 오더가 있습니다:\n{under_production_sheets.to_string()}")
             if not over_production_sheets.empty:
-                final_status = 1  # 일부 오더 초과(부족)
+                final_status = 0  # 일부 오더 초과(부족)
                 logging.warning(f"[경고] 초과 생산된 쉬트 오더가 있습니다:\n{over_production_sheets.to_string()}")
         
         return final_status
@@ -1655,7 +1674,7 @@ def setup_logging(lot_no, version):
     log_dir = os.path.join('results', date_folder)
     os.makedirs(log_dir, exist_ok=True)
     timestamp = time.strftime('%y%m%d%H%M%S')
-    log_filename = f"{timestamp}_{lot_no}_{version}.log"
+    log_filename = f"{lot_no}_{version}_{timestamp}.log"
     log_path = os.path.join(log_dir, log_filename)
 
     # 기존 핸들러 모두 제거 (이전 lot의 핸들러)
@@ -1771,7 +1790,6 @@ def main():
 
             setup_logging(lot_no, version)
             db.update_lot_status(lot_no=lot_no, version=version, status=8)
-            db.delete_optimization_results(lot_no, version)
             
 
             prod_seq_counter = 0

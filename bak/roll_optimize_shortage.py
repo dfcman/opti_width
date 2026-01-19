@@ -13,18 +13,16 @@ Column Generation(열 생성) 알고리즘을 기반으로 하여, 주문 요구
 폐기물(Trim Loss)과 패턴 교체 비용을 최소화하는 최적의 절단 패턴을 산출합니다.
 """
 
-# 페널티 값
-OVER_PROD_PENALTY  = 10000000.0        # 500000.0
-UNDER_PROD_PENALTY = 500000.0          # 10000000.0 
-PATTERN_SETUP_COST = 10000.0           # 새로운 패턴 종류를 1개 사용할 때마다 1000mm의 손실과 동일한 페널티
-TRIM_LOSS_PENALTY = 5.0                # 자투리 손실 1mm당 페널티
-MIXING_PENALTY = 10.0                  # 공백이 1개 섞인 경우는 페널티 비용 패턴 생성비용과 비교
-
-# 알고리즘 파라미터
-CG_MAX_ITERATIONS = 1000               # 안전장치 (최대 반복 횟수)
-CG_NO_IMPROVEMENT_LIMIT = 10           # 50 -> 10: 초기 패턴이 좋으면 빨리 종료 (DB 패턴 활용 시 불필요한 반복 방지)
-CG_SUBPROBLEM_TOP_N = 10               # Increased from 3
-SMALL_PROBLEM_THRESHOLD = 6            # Increased to force exhaustive search for narrow width ranges
+OVER_PROD_PENALTY  = 100000000.0
+UNDER_PROD_PENALTY = 50000000.0
+PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6
+CG_MAX_ITERATIONS = 1000 # 안전장치 (최대 반복 횟수)
+CG_NO_IMPROVEMENT_LIMIT = 50  # 200 -> 50: 초기 패턴이 우수하면 빨리 넘어가도록 단축
+CG_SUBPROBLEM_TOP_N = 10      # Increased from 3
+SMALL_PROBLEM_THRESHOLD = 6  # Increased to force exhaustive search for narrow width ranges
+PATTERN_SETUP_COST = 1000000.0 # 새로운 패턴 종류를 1개 사용할 때마다 1000mm의 손실과 동일한 페널티
+TRIM_LOSS_PENALTY = 5.0      # 자투리 손실 1mm당 페널티
+MIXING_PENALTY = 10.0       # 공백이 1개 섞인 경우는 페널티 비용 패턴 생성비용과 비교
 
 # paper_type별 지폭 범위 제한 (이 지종들은 4500~4700 범위의 지폭 조합 불가)
 DISALLOWED_PATTERN_WIDTH = {'6631', '6632'}
@@ -236,9 +234,9 @@ class RollOptimize:
         # sorted_by_area_desc = sorted(self.items, key=lambda item: self.item_info.get(item, 0) * self.demands.get(item, 0), reverse=True)
         
         # 2. Random Shuffles (add multiple to increase diversity)
-        random.seed(41) # Ensure determinism
+        # random.seed(41) # Ensure determinism
         random_shuffles = []
-        for _ in range(20):  # Increased from 8 to 20
+        for _ in range(10):  # Increased from 8 to 10
             items_copy = list(self.items)
             random.shuffle(items_copy)
             random_shuffles.append(items_copy)
@@ -640,21 +638,7 @@ class RollOptimize:
         solver.Minimize(objective)
 
         status = solver.Solve()
-        
-        # LP 상태 매핑
-        status_names = {
-            pywraplp.Solver.OPTIMAL: 'OPTIMAL',
-            pywraplp.Solver.FEASIBLE: 'FEASIBLE',
-            pywraplp.Solver.INFEASIBLE: 'INFEASIBLE',
-            pywraplp.Solver.UNBOUNDED: 'UNBOUNDED',
-            pywraplp.Solver.ABNORMAL: 'ABNORMAL',
-            pywraplp.Solver.NOT_SOLVED: 'NOT_SOLVED',
-        }
-        status_str = status_names.get(status, f'UNKNOWN({status})')
-        
         if status not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
-            if not is_final_mip:
-                logging.warning(f"[LP] Solver 상태: {status_str} - 해를 찾지 못함")
             return None
 
         solution = {
@@ -662,7 +646,6 @@ class RollOptimize:
             'pattern_counts': {j: var.solution_value() for j, var in x.items()},
             'over_production': {item: over_prod_vars[item].solution_value() for item in self.demands},
             'under_production': {item: under_prod_vars[item].solution_value() for item in self.demands},
-            'solver_status': status_str,
         }
         if not is_final_mip:
             solution['duals'] = {item: constraints[item].dual_value() for item in self.demands}
@@ -892,17 +875,6 @@ class RollOptimize:
  
     def run_optimize(self, start_prod_seq=0):
         logging.info(f"Starting run_optimize with {len(self.items)} items")
-
-        logging.info(f"OVER_PROD_PENALTY: {OVER_PROD_PENALTY}")
-        logging.info(f"UNDER_PROD_PENALTY: {UNDER_PROD_PENALTY}")
-        logging.info(f"PATTERN_SETUP_COST: {PATTERN_SETUP_COST}")
-        logging.info(f"TRIM_LOSS_PENALTY: {TRIM_LOSS_PENALTY}")
-        logging.info(f"MIXING_PENALTY: {MIXING_PENALTY}")
-        logging.info(f"CG_MAX_ITERATIONS: {CG_MAX_ITERATIONS}")
-        logging.info(f"CG_NO_IMPROVEMENT_LIMIT: {CG_NO_IMPROVEMENT_LIMIT}")
-        logging.info(f"CG_SUBPROBLEM_TOP_N: {CG_SUBPROBLEM_TOP_N}")
-        logging.info(f"SMALL_PROBLEM_THRESHOLD: {SMALL_PROBLEM_THRESHOLD}")
-
         start_time = time.time()
         
         if len(self.items) <= SMALL_PROBLEM_THRESHOLD:
@@ -919,28 +891,12 @@ class RollOptimize:
                 return {"error": "초기 유효 패턴을 생성하지 못했습니다."}
 
             no_improvement = 0
-            cg_iteration = 0
-            total_lp_time = 0
-            total_subproblem_time = 0
             for _ in range(CG_MAX_ITERATIONS):
-                cg_iteration += 1
-                
-                # LP 풀기 시간 측정
-                lp_start = time.time()
                 master_solution = self._solve_master_problem()
-                lp_elapsed = time.time() - lp_start
-                total_lp_time += lp_elapsed
-                
                 if not master_solution or 'duals' not in master_solution:
-                    logging.info(f"[CG Iter {cg_iteration}] LP 해 없음 또는 duals 없음 - CG 종료")
                     break
 
-                # 서브프로블럼 시간 측정
-                sub_start = time.time()
                 candidate_patterns = self._solve_subproblem(master_solution['duals'])
-                sub_elapsed = time.time() - sub_start
-                total_subproblem_time += sub_elapsed
-                
                 patterns_added = 0
                 for candidate in candidate_patterns:
                     pattern = candidate['pattern']
@@ -950,10 +906,6 @@ class RollOptimize:
                     if self._add_pattern(pattern):
                         patterns_added += 1
 
-                # 10회마다 또는 마지막에 로그 출력
-                if cg_iteration % 10 == 0:
-                    logging.info(f"[CG Iter {cg_iteration}] LP: {lp_elapsed:.3f}s, SubProb: {sub_elapsed:.3f}s, Patterns: {len(self.patterns)}, Added: {patterns_added}")
-
                 if patterns_added == 0:
                     no_improvement += 1
                 else:
@@ -961,8 +913,6 @@ class RollOptimize:
 
                 if no_improvement >= CG_NO_IMPROVEMENT_LIMIT:
                     break
-            
-            logging.info(f"[CG 완료] 총 {cg_iteration}회 반복, LP 총합: {total_lp_time:.2f}s, SubProb 총합: {total_subproblem_time:.2f}s")
 
         if not self.patterns:
             return {"error": "유효한 패턴을 생성하지 못했습니다."}

@@ -8,41 +8,91 @@ class PatternGetters:
             connection = self.pool.acquire()
             cursor = connection.cursor()
             # rollwidth 필드를 사용하여 지폭 값들을 가져옵니다.
+            # query = """
+
+            #     SELECT DISTINCT
+            #         rollwidth1, rollwidth2, rollwidth3, rollwidth4, 
+            #         rollwidth5, rollwidth6, rollwidth7, rollwidth8
+            #     FROM th_pattern_tot A
+            #     WHERE (a.rn) IN (
+            #         SELECT rn
+            #         FROM (
+            #             -- 1. UNPIVOT 수행
+            #             SELECT rn, width_val
+            #             FROM th_pattern_tot
+            #             UNPIVOT (
+            #                 width_val FOR col_name IN (
+            #                     rollwidth1, rollwidth2, rollwidth3, rollwidth4, 
+            #                     rollwidth5, rollwidth6, rollwidth7, rollwidth8
+            #                 )
+            #             )
+            #             where ( paper_type, b_wgt ) in (select paper_type, b_wgt from h3t_production_order where paper_prod_seq = :lot_no and rownum = 1 )
+            #         ) P
+            #         -- 2. 오더 테이블과 조인
+            #         LEFT JOIN (
+            #             SELECT DISTINCT width 
+            #             FROM h3t_production_order
+            #             WHERE paper_prod_seq = :lot_no -- 필요시 조건 유지
+            #             and rs_gubun = 'R'
+            #         ) O ON P.width_val = O.width
+                    
+            #         -- [핵심 수정] 0인 값은 비교 대상에서 제외합니다.
+            #         WHERE P.width_val > 0 
+            #         -- 3. 그룹핑 및 비교
+            #         GROUP BY rn
+            #         HAVING 
+            #             -- 0을 제외한 유효 지폭들이 모두 오더 목록에 있는지 확인
+            #             COUNT(P.width_val) = COUNT(O.width)
+            #     )
+                
+            # """
+
             query = """
-                SELECT DISTINCT
+
+                WITH Target_Info AS (
+                    /* 1. 기준이 되는 paper_type과 b_wgt를 사전에 추출 (1번만 수행) */
+                    SELECT paper_type, b_wgt
+                    FROM h3t_production_order
+                    WHERE paper_prod_seq = :lot_no 
+                    AND rownum = 1
+                ),
+                Allowed_Widths AS (
+                    /* 2. 허용되는 지폭(width) 목록을 인덱스 스캔이 가능하도록 구성 */
+                    SELECT DISTINCT width 
+                    FROM h3t_production_order
+                    WHERE paper_prod_seq = :lot_no
+                    AND rs_gubun = 'R'
+                )
+                SELECT 
                     rollwidth1, rollwidth2, rollwidth3, rollwidth4, 
                     rollwidth5, rollwidth6, rollwidth7, rollwidth8
-                FROM th_pattern_tot A
-                WHERE (a.rn) IN (
-                    SELECT rn
-                    FROM (
-                        -- 1. UNPIVOT 수행
-                        SELECT rn, width_val
-                        FROM th_pattern_tot
-                        UNPIVOT (
-                            width_val FOR col_name IN (
-                                rollwidth1, rollwidth2, rollwidth3, rollwidth4, 
-                                rollwidth5, rollwidth6, rollwidth7, rollwidth8
-                            )
-                        )
-                        --where ( paper_type, b_wgt ) in (select paper_type, b_wgt from h3t_production_order where paper_prod_seq = :lot_no and rownum = 1 )
-                    ) P
-                    -- 2. 오더 테이블과 조인
-                    LEFT JOIN (
-                        SELECT DISTINCT width 
-                        FROM h3t_production_order
-                        WHERE paper_prod_seq = :lot_no -- 필요시 조건 유지
-                        and rs_gubun = 'R'
-                    ) O ON P.width_val = O.width
-                    
-                    -- [핵심 수정] 0인 값은 비교 대상에서 제외합니다.
-                    WHERE P.width_val > 0 
-                    -- 3. 그룹핑 및 비교
-                    GROUP BY rn
-                    HAVING 
-                        -- 0을 제외한 유효 지폭들이 모두 오더 목록에 있는지 확인
-                        COUNT(P.width_val) = COUNT(O.width)
-                )
+                FROM (
+                    SELECT 
+                        row_number() over(order by rn desc) as r_num,
+                        p.*
+                    FROM th_pattern_tot p
+                    INNER JOIN Target_Info t 
+                        ON p.paper_type = t.paper_type 
+                    AND p.b_wgt = t.b_wgt
+                    WHERE NOT EXISTS (
+                        /* 3. 패턴의 지폭 중, 허용 목록(Allowed_Widths)에 없는 것이 하나라도 있으면 제외 */
+                        SELECT 1
+                        FROM (
+                            SELECT p.rollwidth1 as w FROM dual UNION ALL
+                            SELECT p.rollwidth2 FROM dual UNION ALL
+                            SELECT p.rollwidth3 FROM dual UNION ALL
+                            SELECT p.rollwidth4 FROM dual UNION ALL
+                            SELECT p.rollwidth5 FROM dual UNION ALL
+                            SELECT p.rollwidth6 FROM dual UNION ALL
+                            SELECT p.rollwidth7 FROM dual UNION ALL
+                            SELECT p.rollwidth8 FROM dual
+                        ) v
+                        WHERE v.w > 0 
+                        AND v.w NOT IN (SELECT width FROM Allowed_Widths)
+                    )
+                ) a
+                --WHERE r_num < 2000
+
             """
             cursor.execute(query, lot_no=lot_no)
             rows = cursor.fetchall()

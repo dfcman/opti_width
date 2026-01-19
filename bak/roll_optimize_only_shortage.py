@@ -13,18 +13,17 @@ Column Generation(열 생성) 알고리즘을 기반으로 하여, 주문 요구
 폐기물(Trim Loss)과 패턴 교체 비용을 최소화하는 최적의 절단 패턴을 산출합니다.
 """
 
-# 페널티 값
-OVER_PROD_PENALTY  = 10000000.0        # 500000.0
-UNDER_PROD_PENALTY = 500000.0          # 10000000.0 
-PATTERN_SETUP_COST = 10000.0           # 새로운 패턴 종류를 1개 사용할 때마다 1000mm의 손실과 동일한 페널티
-TRIM_LOSS_PENALTY = 5.0                # 자투리 손실 1mm당 페널티
-MIXING_PENALTY = 10.0                  # 공백이 1개 섞인 경우는 페널티 비용 패턴 생성비용과 비교
-
-# 알고리즘 파라미터
-CG_MAX_ITERATIONS = 1000               # 안전장치 (최대 반복 횟수)
-CG_NO_IMPROVEMENT_LIMIT = 10           # 50 -> 10: 초기 패턴이 좋으면 빨리 종료 (DB 패턴 활용 시 불필요한 반복 방지)
-CG_SUBPROBLEM_TOP_N = 10               # Increased from 3
-SMALL_PROBLEM_THRESHOLD = 6            # Increased to force exhaustive search for narrow width ranges
+# OVER_PROD_PENALTY는 더 이상 사용하지 않음 (초과 생산 불가 정책)
+# OVER_PROD_PENALTY  = 100000000.0
+UNDER_PROD_PENALTY = 50000000.0    # 부족 1롤당 페널티 (부족은 허용, 초과는 불가)
+PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6
+CG_MAX_ITERATIONS = 1000 # 안전장치 (최대 반복 횟수)
+CG_NO_IMPROVEMENT_LIMIT = 50  # 200 -> 50: 초기 패턴이 우수하면 빨리 넘어가도록 단축
+CG_SUBPROBLEM_TOP_N = 10      # Increased from 3
+SMALL_PROBLEM_THRESHOLD = 6  # Increased to force exhaustive search for narrow width ranges
+PATTERN_SETUP_COST = 1000000.0 # 새로운 패턴 종류를 1개 사용할 때마다 페널티
+TRIM_LOSS_PENALTY = 5.0      # 자투리 손실 1mm당 페널티
+MIXING_PENALTY = 10.0       # 공백이 1개 섞인 경우는 페널티 비용 패턴 생성비용과 비교
 
 # paper_type별 지폭 범위 제한 (이 지종들은 4500~4700 범위의 지폭 조합 불가)
 DISALLOWED_PATTERN_WIDTH = {'6631', '6632'}
@@ -226,28 +225,29 @@ class RollOptimize:
         # DB에서 기존 패턴 먼저 로드 (있는 경우)
         self._generate_initial_patterns_db()
 
-        sorted_by_demand = sorted(self.items, key=lambda item: self.demands.get(item, 0), reverse=True)
-        sorted_by_demand_asc = sorted(self.items, key=lambda item: self.demands.get(item, 0))
+        # sorted_by_demand = sorted(self.items, key=lambda item: self.demands.get(item, 0), reverse=True)
+        # sorted_by_demand_asc = sorted(self.items, key=lambda item: self.demands.get(item, 0))
         sorted_by_width_desc = sorted(self.items, key=lambda item: self.item_info.get(item, 0), reverse=True)
         sorted_by_width_asc = sorted(self.items, key=lambda item: self.item_info.get(item, 0))
+
 
         # New Heuristics
         # 1. Width * Demand (Area proxy)
         # sorted_by_area_desc = sorted(self.items, key=lambda item: self.item_info.get(item, 0) * self.demands.get(item, 0), reverse=True)
         
         # 2. Random Shuffles (add multiple to increase diversity)
-        random.seed(41) # Ensure determinism
+        random.seed(32) # Ensure determinism
         random_shuffles = []
-        for _ in range(20):  # Increased from 8 to 20
+        for _ in range(5):  # Increased from 8 to 10
             items_copy = list(self.items)
             random.shuffle(items_copy)
             random_shuffles.append(items_copy)
 
         heuristics = [
-            sorted_by_demand,  
+            # sorted_by_demand,  
             sorted_by_width_asc, 
             sorted_by_width_desc, 
-            sorted_by_demand_asc,
+            # sorted_by_demand_asc,
             # sorted_by_area_desc,
         ] + random_shuffles
 
@@ -284,168 +284,168 @@ class RollOptimize:
                 if current_width >= self.min_width:
                     self._add_pattern(current_pattern)
 
-        # === 새로운 휴리스틱 1: Best-Fit (남은 공간에 가장 잘 맞는 아이템 선택) ===
-        for item in self.items:
-            current_pattern = {item: 1}
-            current_width = self.item_info[item]
-            current_pieces = 1
+        # # === 새로운 휴리스틱 1: Best-Fit (남은 공간에 가장 잘 맞는 아이템 선택) ===
+        # for item in self.items:
+        #     current_pattern = {item: 1}
+        #     current_width = self.item_info[item]
+        #     current_pieces = 1
 
-            while current_pieces < self.max_pieces and current_width < self.max_width:
-                remaining_width = self.max_width - current_width
+        #     while current_pieces < self.max_pieces and current_width < self.max_width:
+        #         remaining_width = self.max_width - current_width
                 
-                # 남은 공간에 가장 잘 맞는 (가장 큰) 아이템 선택
-                candidates = [(i, self.item_info[i]) for i in self.items if self.item_info[i] <= remaining_width]
-                if not candidates:
-                    break
+        #         # 남은 공간에 가장 잘 맞는 (가장 큰) 아이템 선택
+        #         candidates = [(i, self.item_info[i]) for i in self.items if self.item_info[i] <= remaining_width]
+        #         if not candidates:
+        #             break
                 
-                # 남은 공간을 가장 많이 채우는 아이템 선택
-                best_item = max(candidates, key=lambda x: x[1])[0]
-                current_pattern[best_item] = current_pattern.get(best_item, 0) + 1
-                current_width += self.item_info[best_item]
-                current_pieces += 1
+        #         # 남은 공간을 가장 많이 채우는 아이템 선택
+        #         best_item = max(candidates, key=lambda x: x[1])[0]
+        #         current_pattern[best_item] = current_pattern.get(best_item, 0) + 1
+        #         current_width += self.item_info[best_item]
+        #         current_pieces += 1
 
-            if current_width >= self.min_width:
-                self._add_pattern(current_pattern)
+        #     if current_width >= self.min_width:
+        #         self._add_pattern(current_pattern)
 
-        # === 새로운 휴리스틱 2: min_width 타겟팅 (min_width에 가장 가까운 조합 찾기) ===
-        target_width = (self.min_width + self.max_width) // 2  # 중간값 타겟
+        # # === 새로운 휴리스틱 2: min_width 타겟팅 (min_width에 가장 가까운 조합 찾기) ===
+        # target_width = (self.min_width + self.max_width) // 2  # 중간값 타겟
         
-        for item in self.items:
-            current_pattern = {item: 1}
-            current_width = self.item_info[item]
-            current_pieces = 1
+        # for item in self.items:
+        #     current_pattern = {item: 1}
+        #     current_width = self.item_info[item]
+        #     current_pieces = 1
 
-            while current_pieces < self.max_pieces and current_width < target_width:
-                # 목표까지 남은 너비
-                remaining_to_target = target_width - current_width
-                remaining_to_max = self.max_width - current_width
+        #     while current_pieces < self.max_pieces and current_width < target_width:
+        #         # 목표까지 남은 너비
+        #         remaining_to_target = target_width - current_width
+        #         remaining_to_max = self.max_width - current_width
                 
-                # 목표에 가장 가깝게 채울 수 있는 아이템 선택
-                candidates = [(i, self.item_info[i]) for i in self.items 
-                              if self.item_info[i] <= remaining_to_max]
-                if not candidates:
-                    break
+        #         # 목표에 가장 가깝게 채울 수 있는 아이템 선택
+        #         candidates = [(i, self.item_info[i]) for i in self.items 
+        #                       if self.item_info[i] <= remaining_to_max]
+        #         if not candidates:
+        #             break
                 
-                # 목표와의 차이가 가장 작은 아이템 선택
-                best_item = min(candidates, key=lambda x: abs(remaining_to_target - x[1]))[0]
-                current_pattern[best_item] = current_pattern.get(best_item, 0) + 1
-                current_width += self.item_info[best_item]
-                current_pieces += 1
+        #         # 목표와의 차이가 가장 작은 아이템 선택
+        #         best_item = min(candidates, key=lambda x: abs(remaining_to_target - x[1]))[0]
+        #         current_pattern[best_item] = current_pattern.get(best_item, 0) + 1
+        #         current_width += self.item_info[best_item]
+        #         current_pieces += 1
 
-            if current_width >= self.min_width:
-                self._add_pattern(current_pattern)
+        #     if current_width >= self.min_width:
+        #         self._add_pattern(current_pattern)
 
-        # === 새로운 휴리스틱 3: 역순 채우기 (큰 아이템부터 시작하여 작은 것으로 채우기) ===
-        for item in sorted_by_width_desc:
-            current_pattern = {item: 1}
-            current_width = self.item_info[item]
-            current_pieces = 1
+        # # === 새로운 휴리스틱 3: 역순 채우기 (큰 아이템부터 시작하여 작은 것으로 채우기) ===
+        # for item in sorted_by_width_desc:
+        #     current_pattern = {item: 1}
+        #     current_width = self.item_info[item]
+        #     current_pieces = 1
 
-            # 같은 아이템으로 최대한 채우기
-            item_width = self.item_info[item]
-            while current_pieces < self.max_pieces and current_width + item_width <= self.max_width:
-                current_pattern[item] = current_pattern.get(item, 0) + 1
-                current_width += item_width
-                current_pieces += 1
+        #     # 같은 아이템으로 최대한 채우기
+        #     item_width = self.item_info[item]
+        #     while current_pieces < self.max_pieces and current_width + item_width <= self.max_width:
+        #         current_pattern[item] = current_pattern.get(item, 0) + 1
+        #         current_width += item_width
+        #         current_pieces += 1
 
-            # 작은 아이템으로 min_width까지 채우기
-            for small_item in sorted_by_width_asc:
-                if current_width >= self.min_width:
-                    break
-                if current_pieces >= self.max_pieces:
-                    break
+        #     # 작은 아이템으로 min_width까지 채우기
+        #     for small_item in sorted_by_width_asc:
+        #         if current_width >= self.min_width:
+        #             break
+        #         if current_pieces >= self.max_pieces:
+        #             break
                     
-                small_width = self.item_info[small_item]
-                while current_pieces < self.max_pieces and current_width + small_width <= self.max_width:
-                    current_pattern[small_item] = current_pattern.get(small_item, 0) + 1
-                    current_width += small_width
-                    current_pieces += 1
+        #         small_width = self.item_info[small_item]
+        #         while current_pieces < self.max_pieces and current_width + small_width <= self.max_width:
+        #             current_pattern[small_item] = current_pattern.get(small_item, 0) + 1
+        #             current_width += small_width
+        #             current_pieces += 1
                     
-                    if current_width >= self.min_width:
-                        break
+        #             if current_width >= self.min_width:
+        #                 break
 
-            if current_width >= self.min_width:
-                self._add_pattern(current_pattern)
+        #     if current_width >= self.min_width:
+        #         self._add_pattern(current_pattern)
 
-        # === 순수 아이템 패턴 (동일 아이템만으로 구성) ===
-        for item in self.items:
-            item_width = self.item_info.get(item, 0)
-            if item_width <= 0: continue
+        # # === 순수 아이템 패턴 (동일 아이템만으로 구성) ===
+        # for item in self.items:
+        #     item_width = self.item_info.get(item, 0)
+        #     if item_width <= 0: continue
 
-            num_items = min(int(self.max_width / item_width), self.max_pieces)
+        #     num_items = min(int(self.max_width / item_width), self.max_pieces)
             
-            while num_items > 0:
-                new_pattern = {item: num_items}
-                total_width = item_width * num_items
+        #     while num_items > 0:
+        #         new_pattern = {item: num_items}
+        #         total_width = item_width * num_items
                 
-                if total_width >= self.min_width:
-                    if self._add_pattern(new_pattern):
-                        break
+        #         if total_width >= self.min_width:
+        #             if self._add_pattern(new_pattern):
+        #                 break
                 
-                num_items -= 1
+        #         num_items -= 1
 
-        # === 강화된 폴백: 커버되지 않은 아이템 처리 ===
-        covered_items = {item for pattern in self.patterns for item in pattern}
-        uncovered_items = set(self.items) - covered_items
+        # # === 강화된 폴백: 커버되지 않은 아이템 처리 ===
+        # covered_items = {item for pattern in self.patterns for item in pattern}
+        # uncovered_items = set(self.items) - covered_items
 
-        if uncovered_items:
-            logging.info(f"[폴백] 커버되지 않은 지폭: {[self.item_info[i] for i in uncovered_items]}")
-            for item in uncovered_items:
-                item_width = self.item_info[item]
+        # if uncovered_items:
+        #     logging.info(f"[폴백] 커버되지 않은 지폭: {[self.item_info[i] for i in uncovered_items]}")
+        #     for item in uncovered_items:
+        #         item_width = self.item_info[item]
                 
-                # 시도 1: 같은 아이템 반복 + 다른 큰 아이템으로 채우기
-                pattern = {item: 1}
-                width = item_width
-                pieces = 1
+        #         # 시도 1: 같은 아이템 반복 + 다른 큰 아이템으로 채우기
+        #         pattern = {item: 1}
+        #         width = item_width
+        #         pieces = 1
                 
-                while pieces < self.max_pieces and width + item_width <= self.max_width:
-                    pattern[item] = pattern.get(item, 0) + 1
-                    width += item_width
-                    pieces += 1
+        #         while pieces < self.max_pieces and width + item_width <= self.max_width:
+        #             pattern[item] = pattern.get(item, 0) + 1
+        #             width += item_width
+        #             pieces += 1
                 
-                if width < self.min_width:
-                    for other_item in sorted_by_width_desc:
-                        if pieces >= self.max_pieces:
-                            break
-                        other_width = self.item_info[other_item]
+        #         if width < self.min_width:
+        #             for other_item in sorted_by_width_desc:
+        #                 if pieces >= self.max_pieces:
+        #                     break
+        #                 other_width = self.item_info[other_item]
                         
-                        while pieces < self.max_pieces and width + other_width <= self.max_width:
-                            pattern[other_item] = pattern.get(other_item, 0) + 1
-                            width += other_width
-                            pieces += 1
+        #                 while pieces < self.max_pieces and width + other_width <= self.max_width:
+        #                     pattern[other_item] = pattern.get(other_item, 0) + 1
+        #                     width += other_width
+        #                     pieces += 1
                             
-                            if width >= self.min_width:
-                                break
+        #                     if width >= self.min_width:
+        #                         break
                         
-                        if width >= self.min_width:
-                            break
+        #                 if width >= self.min_width:
+        #                     break
                 
-                if width >= self.min_width:
-                    self._add_pattern(pattern)
-                    logging.info(f"  -> 폴백 패턴 생성: {pattern} (너비: {width}mm)")
-                else:
-                    # 시도 2: 작은 아이템부터 채워서 min_width 충족 시도
-                    pattern2 = {item: 1}
-                    width2 = item_width
-                    pieces2 = 1
+        #         if width >= self.min_width:
+        #             self._add_pattern(pattern)
+        #             logging.info(f"  -> 폴백 패턴 생성: {pattern} (너비: {width}mm)")
+        #         else:
+        #             # 시도 2: 작은 아이템부터 채워서 min_width 충족 시도
+        #             pattern2 = {item: 1}
+        #             width2 = item_width
+        #             pieces2 = 1
                     
-                    for other_item in sorted_by_width_asc:
-                        if pieces2 >= self.max_pieces:
-                            break
-                        other_width = self.item_info[other_item]
+        #             for other_item in sorted_by_width_asc:
+        #                 if pieces2 >= self.max_pieces:
+        #                     break
+        #                 other_width = self.item_info[other_item]
                         
-                        while pieces2 < self.max_pieces and width2 + other_width <= self.max_width:
-                            pattern2[other_item] = pattern2.get(other_item, 0) + 1
-                            width2 += other_width
-                            pieces2 += 1
+        #                 while pieces2 < self.max_pieces and width2 + other_width <= self.max_width:
+        #                     pattern2[other_item] = pattern2.get(other_item, 0) + 1
+        #                     width2 += other_width
+        #                     pieces2 += 1
                     
-                    if width2 >= self.min_width:
-                        self._add_pattern(pattern2)
-                        logging.info(f"  -> 폴백 패턴 생성 (시도2): {pattern2} (너비: {width2}mm)")
-                    else:
-                        logging.warning(f"  -> [경고] 지폭 {item_width}mm에 대해 min_width({self.min_width}mm)를 충족하는 패턴을 생성하지 못함.")
-                        # 최소한 패턴은 추가하여 MIP에서 검토
-                        self._add_pattern(pattern)
+        #             if width2 >= self.min_width:
+        #                 self._add_pattern(pattern2)
+        #                 logging.info(f"  -> 폴백 패턴 생성 (시도2): {pattern2} (너비: {width2}mm)")
+        #             else:
+        #                 logging.warning(f"  -> [경고] 지폭 {item_width}mm에 대해 min_width({self.min_width}mm)를 충족하는 패턴을 생성하지 못함.")
+        #                 # 최소한 패턴은 추가하여 MIP에서 검토
+        #                 self._add_pattern(pattern)
 
         logging.info(f"[초기 패턴] 총 {len(self.patterns)}개의 초기 패턴 생성됨")
 
@@ -492,19 +492,18 @@ class RollOptimize:
                     x[j] = model.addVar(vtype=GRB.INTEGER, name=f"P_{j}")
                     y[j] = model.addVar(vtype=GRB.BINARY, name=f"y_{j}")
                 
-                over_prod_vars = {}
+                # under_prod_vars만 사용 (초과 생산 불가, 부족만 허용)
                 under_prod_vars = {}
                 for item in self.demands:
-                    over_prod_vars[item] = model.addVar(vtype=GRB.CONTINUOUS, name=f"Over_{item}")
                     under_prod_vars[item] = model.addVar(vtype=GRB.CONTINUOUS, name=f"Under_{item}")
                     
                 model.update()
                 
                 # Constraints
-                # 1. Demand Satisfaction
+                # 1. Demand Satisfaction: 생산량 + 부족 = 수요 (초과 불가)
                 for item, demand in self.demands.items():
                     production_expr = gp.quicksum(self.patterns[j].get(item, 0) * x[j] for j in range(len(self.patterns)))
-                    model.addConstr(production_expr == int(demand) + over_prod_vars[item] - under_prod_vars[item], name=f"demand_{item}")
+                    model.addConstr(production_expr + under_prod_vars[item] == int(demand), name=f"demand_{item}")
                 
                 # 2. Link x and y (Big-M)
                 M = sum(self.demands.values()) + 10
@@ -514,11 +513,8 @@ class RollOptimize:
                 # Objective Function
                 obj_terms = []
                 
-                # (1) Over-production Penalty
-                unique_widths_count = len(set(self.item_info.values()))
-                dynamic_over_prod_penalty = max(OVER_PROD_PENALTY, PATTERN_SETUP_COST * unique_widths_count * 20)
+                # (1) Under-production Penalty (부족 페널티만 적용)
                 for item in self.demands:
-                    obj_terms.append(over_prod_vars[item] * dynamic_over_prod_penalty)
                     obj_terms.append(under_prod_vars[item] * UNDER_PROD_PENALTY)
                     
                 # (2) Setup Cost
@@ -555,7 +551,7 @@ class RollOptimize:
                     solution = {
                         'objective': model.ObjVal,
                         'pattern_counts': {j: x[j].X for j in range(len(self.patterns))},
-                        'over_production': {item: over_prod_vars[item].X for item in self.demands},
+                        'over_production': {item: 0.0 for item in self.demands},  # 초과 생산 불가
                         'under_production': {item: under_prod_vars[item].X for item in self.demands}
                     }
                     return solution
@@ -586,21 +582,18 @@ class RollOptimize:
 
         x = {j: (solver.IntVar if is_final_mip else solver.NumVar)(0, solver.infinity(), f'P_{j}')
              for j in range(len(self.patterns))}
-        over_prod_vars = {item: solver.NumVar(0, solver.infinity(), f'Over_{item}') for item in self.demands}
+        # under_prod_vars만 사용 (초과 생산 불가, 부족만 허용)
         under_prod_vars = {item: solver.NumVar(0, solver.infinity(), f'Under_{item}') for item in self.demands}
 
         constraints = {}
         objective = 0
         
-        # Constraints: Demand
+        # Constraints: Demand - 생산량 + 부족 = 수요 (초과 불가)
         for item, demand in self.demands.items():
             production_expr = solver.Sum(self.patterns[j].get(item, 0) * x[j] for j in range(len(self.patterns)))
-            constraints[item] = solver.Add(production_expr == demand + over_prod_vars[item] - under_prod_vars[item], f'demand_{item}')
+            constraints[item] = solver.Add(production_expr + under_prod_vars[item] == demand, f'demand_{item}')
 
-        # Objective: Over-production Penalty (LP & MIP common)
-        unique_widths_count = len(set(self.item_info.values()))
-        dynamic_over_prod_penalty = max(OVER_PROD_PENALTY, PATTERN_SETUP_COST * unique_widths_count * 20)
-        objective += solver.Sum(dynamic_over_prod_penalty * over_prod_vars[item] for item in self.demands)
+        # Objective: Under-production Penalty (부족 페널티만 적용)
         objective += solver.Sum(UNDER_PROD_PENALTY * under_prod_vars[item] for item in self.demands)
 
         # MIP Specific Objective Terms
@@ -640,29 +633,14 @@ class RollOptimize:
         solver.Minimize(objective)
 
         status = solver.Solve()
-        
-        # LP 상태 매핑
-        status_names = {
-            pywraplp.Solver.OPTIMAL: 'OPTIMAL',
-            pywraplp.Solver.FEASIBLE: 'FEASIBLE',
-            pywraplp.Solver.INFEASIBLE: 'INFEASIBLE',
-            pywraplp.Solver.UNBOUNDED: 'UNBOUNDED',
-            pywraplp.Solver.ABNORMAL: 'ABNORMAL',
-            pywraplp.Solver.NOT_SOLVED: 'NOT_SOLVED',
-        }
-        status_str = status_names.get(status, f'UNKNOWN({status})')
-        
         if status not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
-            if not is_final_mip:
-                logging.warning(f"[LP] Solver 상태: {status_str} - 해를 찾지 못함")
             return None
 
         solution = {
             'objective': solver.Objective().Value(),
             'pattern_counts': {j: var.solution_value() for j, var in x.items()},
-            'over_production': {item: over_prod_vars[item].solution_value() for item in self.demands},
+            'over_production': {item: 0.0 for item in self.demands},  # 초과 생산 불가
             'under_production': {item: under_prod_vars[item].solution_value() for item in self.demands},
-            'solver_status': status_str,
         }
         if not is_final_mip:
             solution['duals'] = {item: constraints[item].dual_value() for item in self.demands}
@@ -892,17 +870,6 @@ class RollOptimize:
  
     def run_optimize(self, start_prod_seq=0):
         logging.info(f"Starting run_optimize with {len(self.items)} items")
-
-        logging.info(f"OVER_PROD_PENALTY: {OVER_PROD_PENALTY}")
-        logging.info(f"UNDER_PROD_PENALTY: {UNDER_PROD_PENALTY}")
-        logging.info(f"PATTERN_SETUP_COST: {PATTERN_SETUP_COST}")
-        logging.info(f"TRIM_LOSS_PENALTY: {TRIM_LOSS_PENALTY}")
-        logging.info(f"MIXING_PENALTY: {MIXING_PENALTY}")
-        logging.info(f"CG_MAX_ITERATIONS: {CG_MAX_ITERATIONS}")
-        logging.info(f"CG_NO_IMPROVEMENT_LIMIT: {CG_NO_IMPROVEMENT_LIMIT}")
-        logging.info(f"CG_SUBPROBLEM_TOP_N: {CG_SUBPROBLEM_TOP_N}")
-        logging.info(f"SMALL_PROBLEM_THRESHOLD: {SMALL_PROBLEM_THRESHOLD}")
-
         start_time = time.time()
         
         if len(self.items) <= SMALL_PROBLEM_THRESHOLD:
@@ -919,28 +886,12 @@ class RollOptimize:
                 return {"error": "초기 유효 패턴을 생성하지 못했습니다."}
 
             no_improvement = 0
-            cg_iteration = 0
-            total_lp_time = 0
-            total_subproblem_time = 0
             for _ in range(CG_MAX_ITERATIONS):
-                cg_iteration += 1
-                
-                # LP 풀기 시간 측정
-                lp_start = time.time()
                 master_solution = self._solve_master_problem()
-                lp_elapsed = time.time() - lp_start
-                total_lp_time += lp_elapsed
-                
                 if not master_solution or 'duals' not in master_solution:
-                    logging.info(f"[CG Iter {cg_iteration}] LP 해 없음 또는 duals 없음 - CG 종료")
                     break
 
-                # 서브프로블럼 시간 측정
-                sub_start = time.time()
                 candidate_patterns = self._solve_subproblem(master_solution['duals'])
-                sub_elapsed = time.time() - sub_start
-                total_subproblem_time += sub_elapsed
-                
                 patterns_added = 0
                 for candidate in candidate_patterns:
                     pattern = candidate['pattern']
@@ -950,10 +901,6 @@ class RollOptimize:
                     if self._add_pattern(pattern):
                         patterns_added += 1
 
-                # 10회마다 또는 마지막에 로그 출력
-                if cg_iteration % 10 == 0:
-                    logging.info(f"[CG Iter {cg_iteration}] LP: {lp_elapsed:.3f}s, SubProb: {sub_elapsed:.3f}s, Patterns: {len(self.patterns)}, Added: {patterns_added}")
-
                 if patterns_added == 0:
                     no_improvement += 1
                 else:
@@ -961,8 +908,6 @@ class RollOptimize:
 
                 if no_improvement >= CG_NO_IMPROVEMENT_LIMIT:
                     break
-            
-            logging.info(f"[CG 완료] 총 {cg_iteration}회 반복, LP 총합: {total_lp_time:.2f}s, SubProb 총합: {total_subproblem_time:.2f}s")
 
         if not self.patterns:
             return {"error": "유효한 패턴을 생성하지 못했습니다."}

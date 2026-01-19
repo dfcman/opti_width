@@ -16,10 +16,10 @@ Column Generation(열 생성) 알고리즘을 기반으로 하여, 주문 요구
 
 # --- 최적화 설정 상수 ---
 # 페널티 값
-OVER_PROD_PENALTY  = 500000000.0    # 과생산에 대한 페널티 (5억)
-UNDER_PROD_PENALTY = 25000000000.0  # 부족생산에 대한 페널티 (250억, 과생산보다 우선순위 높임)
-PATTERN_COMPLEXITY_PENALTY = 0.01  # 패턴 복잡성에 대한 페널티
-PIECE_COUNT_PENALTY = 10         # 패턴 내 롤(piece) 개수에 대한 페널티 (적은 롤 선호)
+OVER_PROD_PENALTY  = 10000000.0    # 과생산에 대한 페널티   500000.0
+UNDER_PROD_PENALTY = 500000.0     # 부족생산에 대한 페널티 10000000.0
+PATTERN_COMPLEXITY_PENALTY = 10   # 패턴 복잡성에 대한 페널티
+PIECE_COUNT_PENALTY = 10        # 패턴 내 복합롤 개수에 대한 페널티 
 
 # 알고리즘 파라미터
 MIN_PIECES_PER_PATTERN = 1      # 패턴에 포함될 수 있는 최소 폭(piece)의 수
@@ -27,6 +27,7 @@ SMALL_PROBLEM_THRESHOLD = 8     # 전체 탐색을 수행할 최대 주문 지�
 CG_MAX_ITERATIONS = 1000         # 열 생성(Column Generation) 최대 반복 횟수
 CG_NO_IMPROVEMENT_LIMIT = 50    # 개선 없는 경우, 열 생성 조기 종료 조건
 CG_SUBPROBLEM_TOP_N = 10         # 열 생성 시, 각 반복에서 추가할 상위 N개 신규 패턴
+SC_MIN_WIDTH_FOR_MACHINE = 800
 
 
 
@@ -208,6 +209,9 @@ class SheetOptimize:
                 if base_width > max_allowed_width:
                     continue
 
+                if base_width < SC_MIN_WIDTH_FOR_MACHINE:
+                    continue
+
                 if not (min_sc_width <= base_width <= max_sc_width):
                     continue
 
@@ -325,6 +329,8 @@ class SheetOptimize:
         for pattern_item_list in db_patterns_list:
             pattern_dict = dict(Counter(pattern_item_list))
             
+            """
+            # 강제 복구하는 로직은 주석처리함. 일단 제약사항에 맞는 복합폭으로만 이루어진 패턴만 가져옴.
             # DB 패턴 아이템이 items에 없으면 강제 복구 (Recover)
             for item_name in pattern_dict.keys():
                 if item_name not in self.items:
@@ -334,13 +340,22 @@ class SheetOptimize:
                          w = int(w_str)
                          c = int(c_str)
                          
+                         # 복합폭 계산
+                         composite_width = w * c + self.sheet_trim
+                         
+                         # 복합폭이 SC_MIN_WIDTH_FOR_MACHINE mm 미만이면 추가하지 않음
+                         if composite_width < SC_MIN_WIDTH_FOR_MACHINE:
+                             logging.warning(f"    - [Skip] DB 아이템 {item_name} 복합폭({composite_width}mm)이 {SC_MIN_WIDTH_FOR_MACHINE}mm 미만으로 복구하지 않음")
+                             continue
+                         
                          # 강제 추가
                          self.items.append(item_name)
-                         self.item_info[item_name] = w * c + self.sheet_trim
+                         self.item_info[item_name] = composite_width
                          self.item_composition[item_name] = {w: c}
                          logging.info(f"    -> [Recover] DB 패턴 아이템 복구: {item_name} (폭: {self.item_info[item_name]}mm)")
                      except Exception as e:
                          logging.warning(f"    - [Error] DB 아이템 {item_name} 파싱 실패: {e}")
+            """
 
             # DB의 패턴에 포함된 모든 아이템이 현재 주문에도 유효한지 확인 (이제 복구했으므로 거의 통과)
             is_valid = all(item_name in self.items for item_name in pattern_dict.keys())
@@ -349,14 +364,21 @@ class SheetOptimize:
                 initial_patterns_from_db.append(pattern_dict)
             else:
                 invalid_items = [name for name in pattern_dict if name not in self.items]
-                logging.info(f"    - 경고: DB 패턴 {pattern_dict}의 아이템 {invalid_items}이(가) 복구 실패하여 무시합니다.")
+                #logging.info(f"    - 경고: DB 패턴 {pattern_dict}의 아이템 {invalid_items}이(가) 복구 실패하여 무시합니다.")
 
         if initial_patterns_from_db:
             seen_patterns = {frozenset(p.items()) for p in self.patterns}
             added_count = 0
             skipped_count = 0
             for p_dict in initial_patterns_from_db:
-                # min_width/max_width 제약조건 검증 추가
+                # 1. 복합폭 개수(pieces) 제약조건 검증
+                pattern_pieces = sum(p_dict.values())
+                if pattern_pieces > self.max_pieces:
+                    logging.info(f"    - 경고: DB 패턴 {p_dict}의 복합폭 개수({pattern_pieces})가 max_pieces({self.max_pieces})를 초과하여 무시합니다.")
+                    skipped_count += 1
+                    continue
+                
+                # 2. min_width/max_width 제약조건 검증
                 pattern_width = sum(self.item_info.get(item, 0) * count for item, count in p_dict.items())
                 if pattern_width > self.max_width:
                     logging.info(f"    - 경고: DB 패턴 {p_dict}의 총 폭({pattern_width}mm)이 max_width({self.max_width}mm)를 초과하여 무시합니다.")
@@ -370,7 +392,7 @@ class SheetOptimize:
                     self.patterns.append(p_dict)
                     added_count += 1
             if skipped_count > 0:
-                logging.info(f"--- DB에서 {skipped_count}개의 패턴이 너비 제약조건 위반으로 제외되었습니다. ---")
+                logging.info(f"--- DB에서 {skipped_count}개의 패턴이 제약조건 위반(pieces/width)으로 제외되었습니다. ---")
             logging.info(f"--- DB에서 {added_count}개의 사용자 편집 패턴을 추가했습니다. ---")
 
     def _generate_initial_patterns(self):
@@ -804,6 +826,15 @@ class SheetOptimize:
             logging.info(f"--- [DEBUG] Entering _solve_master_problem(is_final_mip={is_final_mip}, Patterns={len(self.patterns)})")
             # [DEBUG]
             logging.debug(f"--- [DEBUG] Exact Match Widths: {sorted(list(self.exact_match_widths))}")
+
+            # [DEBUG] 생성된 패턴 목록 출력
+            logging.info("--- [DEBUG] 생성된 패턴 목록 ---")
+            for idx, pattern in enumerate(self.patterns):
+                widths = [self.item_info[item] for item in pattern for _ in range(pattern[item])]
+                total_width = sum(widths)
+                widths_str = ', '.join(map(str, sorted(widths, reverse=True)))
+                logging.info(f"  패턴 {idx}: [{widths_str}] = {total_width}mm")
+            logging.info("--- [DEBUG] 패턴 목록 끝 ---")
             
             try:
                 logging.info("Trying Gurobi Direct Solver SheetOptimize (gurobipy)...")
@@ -845,8 +876,7 @@ class SheetOptimize:
 
                 # Objective
                 total_rolls = gp.quicksum(x[j] for j in range(len(self.patterns)))
-                local_over_penalty = 5000000.0
-                total_over_prod_penalty = gp.quicksum(local_over_penalty * var for var in over_prod_vars.values())
+                total_over_prod_penalty = gp.quicksum(OVER_PROD_PENALTY * var for var in over_prod_vars.values())
                 total_under_prod_penalty = gp.quicksum(UNDER_PROD_PENALTY * var for var in under_prod_vars.values())
                 total_complexity_penalty = gp.quicksum(PATTERN_COMPLEXITY_PENALTY * len(self.patterns[j]) * x[j] for j in range(len(self.patterns)))
                 
@@ -926,10 +956,7 @@ class SheetOptimize:
         # 롤 개수가 많을수록 페널티가 급격히 증가하여, 적은 롤 개수의 패턴을 선호하게 함
         # 수정: item_composition의 values sum(쉬트 수)이 아니라, item 자체의 수(부모 롤 수)를 기준으로 페널티 부과
         total_piece_penalty = solver.Sum(
-            PIECE_COUNT_PENALTY * (sum(
-                count 
-                for item, count in self.patterns[j].items()
-            ) ** 2) * x[j] 
+            PIECE_COUNT_PENALTY * (sum(count for item, count in self.patterns[j].items()) ** 2) * x[j] 
             for j in range(len(self.patterns))
         )
 
@@ -1165,10 +1192,11 @@ class SheetOptimize:
             self._generate_initial_patterns()
             
             initial_pattern_count = len(self.patterns)
-            # min_width와 max_width 제약조건 모두 적용하여 필터링
+            # min_width, max_width, max_pieces 제약조건 모두 적용하여 필터링
             self.patterns = [p for p in self.patterns 
-                             if self.min_width - 200 <= sum(self.item_info[i] * c for i, c in p.items()) <= self.max_width]
-            logging.info(f"--- 초기 패턴 필터링: {initial_pattern_count}개 -> {len(self.patterns)}개 (너비 범위 {self.min_width}~{self.max_width}mm 적용)")
+                             if self.min_width - 200 <= sum(self.item_info[i] * c for i, c in p.items()) <= self.max_width
+                             and sum(p.values()) <= self.max_pieces]
+            logging.info(f"--- 초기 패턴 필터링: {initial_pattern_count}개 -> {len(self.patterns)}개 (너비 범위 {self.min_width}~{self.max_width}mm, 최대 {self.max_pieces}폭 적용)")
 
             if not self.patterns:
                 return {"error": "초기 유효 패턴을 생성할 수 없습니다. 제약조건이 너무 엄격할 수 있습니다."}
