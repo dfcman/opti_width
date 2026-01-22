@@ -65,7 +65,7 @@ def process_sheet_lot(
     # --- [New Grouping Logic] ---
     df_orders, df_groups, last_group_order_no = apply_sheet_grouping(df_orders, start_group_order_no, lot_no)
     
-    logging.info(f"--- Lot {df_groups.to_string()} 그룹마스터 정보 ---")
+    logging.info(f"--- Lot {df_groups.to_string()} \n그룹마스터 정보 ---")
 
     all_results = {
         "pattern_result": [],
@@ -1633,11 +1633,11 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
         # 쉬트 최적화 결과 확인 (과부족(톤) 컨럼이 있는 경우)
         if '과부족(톤)' in final_fulfillment_summary.columns:
             under_production_sheets = final_fulfillment_summary[
-                (final_fulfillment_summary['과부족(톤)'] < -2) & 
+                (final_fulfillment_summary['과부족(톤)'] < -1) & 
                 (final_fulfillment_summary['롤길이'] == 0)
             ]  # 소수점 오차 고려
             over_production_sheets = final_fulfillment_summary[
-                (final_fulfillment_summary['과부족(톤)'] >= 2) & 
+                (final_fulfillment_summary['과부족(톤)'] >= 1) & 
                 (final_fulfillment_summary['롤길이'] == 0)
             ]  # 소수점 오차 고려
             if not under_production_sheets.empty:

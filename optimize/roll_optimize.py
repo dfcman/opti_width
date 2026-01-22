@@ -902,6 +902,7 @@ class RollOptimize:
         logging.info(f"CG_NO_IMPROVEMENT_LIMIT: {CG_NO_IMPROVEMENT_LIMIT}")
         logging.info(f"CG_SUBPROBLEM_TOP_N: {CG_SUBPROBLEM_TOP_N}")
         logging.info(f"SMALL_PROBLEM_THRESHOLD: {SMALL_PROBLEM_THRESHOLD}")
+        logging.info(f"SOLVER_TIME_LIMIT_MS: {self.solver_time_limit_ms}")
 
         start_time = time.time()
         

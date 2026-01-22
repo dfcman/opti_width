@@ -19,10 +19,11 @@ class SheetGetters:
             sql_query = """
                 SELECT
                     a.plant, a.pm_no, a.schedule_unit, a.paper_type, a.b_wgt, a.width, a.length, a.quality_grade, a.order_ton_cnt, a.export_yn, a.order_no, a.color, a.order_gubun,
-                    CASE WHEN a.export_yn = 'N' AND a.width <= 600
-                            THEN '2' --내수, SHEET 지폭 600이하는 무조건 SKID_TYPE으로, 2012.10.05, LSY
-                            ELSE NVL(a.pt_gubun,'1')
-                    END PT_GUBUN,
+                    --CASE WHEN a.export_yn = 'N' AND a.width <= 600
+                    --        THEN '2' --내수, SHEET 지폭 600이하는 무조건 SKID_TYPE으로, 2012.10.05, LSY
+                    --        ELSE NVL(a.pt_gubun,'1')
+                    --END PT_GUBUN,
+                    NVL(a.pt_gubun,'1') as PT_GUBUN,
                     d.gen_hcode, f.dir_gubun, e.regular_gubun, e.pack_type,
                     a.rs_gubun, a.nation_code, a.customer_name, a.skid_yn, e.pte_gubun, a.dia, a.core
                 FROM

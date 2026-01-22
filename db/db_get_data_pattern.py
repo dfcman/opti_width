@@ -141,11 +141,11 @@ class PatternGetters:
                                 width5, width6, width7, width8
                             )
                         )
-                        WHERE (paper_type, b_wgt) IN (
-                            SELECT paper_type, b_wgt 
-                            FROM h3t_production_order 
-                            WHERE paper_prod_seq = :lot_no AND ROWNUM = 1
-                        )
+                        --WHERE (paper_type, b_wgt) IN (
+                        --    SELECT paper_type, b_wgt 
+                        --    FROM h3t_production_order 
+                        --    WHERE paper_prod_seq = :lot_no AND ROWNUM = 1
+                        --)
                     ) P
                     -- 2. 오더 테이블과 조인 (지폭 추출: "710x4" → 710)
                     LEFT JOIN (

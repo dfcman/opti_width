@@ -41,7 +41,7 @@ class VersionGetters:
                 AND a.paper_type = b.paper_type(+)
                 AND a.b_wgt = b.b_wgt(+)
                 and a.calc_successful = '9'
-                --and a.lot_no = '3260200113' and a.version = '03'
+                --and a.lot_no = '3260200110' and a.version = '03'
                 and LENGTH(a.version_id) > 0
                 ORDER BY a.plant, a.version_id, a.schedule_unit, a.lot_no, a.version DESC
                 FETCH FIRST 1 ROWS ONLY
