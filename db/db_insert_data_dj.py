@@ -35,7 +35,7 @@ class DataInserters:
                 'N',
                 :spool_no, :spool_seq, :rs_gubun, :p_machine,
                 :w1, :w2, :w3, :w4, :w5, :w6, :w7, :w8,
-                :g1, :g2, :g3, :g4, :g5, :g6, :g7, :g8
+                nvl(:g1, '0'), nvl(:g2, '0'), nvl(:g3, '0'), nvl(:g4, '0'), nvl(:g5, '0'), nvl(:g6, '0'), nvl(:g7, '0'), nvl(:g8, '0')
             )
         """
         
@@ -105,7 +105,7 @@ class DataInserters:
                 :dia, round(:b_wgt * :rollwidth * :length / 1000000,1), 
                 :cut_cnt, :color, :luster, :core, :pattern, :p_lot, :p_type, :p_wgt, :p_machine, 
                 :w1, :w2, :w3, :w4, :w5, :w6, :w7,
-                :g1, :g2, :g3, :g4, :g5, :g6, :g7
+                nvl(:g1, '0'), nvl(:g2, '0'), nvl(:g3, '0'), nvl(:g4, '0'), nvl(:g5, '0'), nvl(:g6, '0'), nvl(:g7, '0')
             )
         """
 

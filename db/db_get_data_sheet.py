@@ -25,7 +25,7 @@ class SheetGetters:
                     --END PT_GUBUN,
                     NVL(a.pt_gubun,'1') as PT_GUBUN,
                     d.gen_hcode, f.dir_gubun, e.regular_gubun, e.pack_type,
-                    a.rs_gubun, a.nation_code, a.customer_name, a.skid_yn, e.pte_gubun, a.dia, a.core
+                    a.rs_gubun, a.nation_code, a.customer_name, a.skid_yn, e.pte_gubun, a.dia, a.core, a.nation_code
                 FROM
                     h3t_production_order a, h3t_production_order_param b, batch_master@paper33_link c, th_mst_commoncode d, sapd12t_tmp e, sapd11t_tmp f
                 WHERE a.order_no = b.order_no(+)
@@ -44,7 +44,7 @@ class SheetGetters:
             rows = cursor.fetchall()
             raw_orders = []
             for row in rows:
-                plant, pm_no, schedule_unit, paper_type, b_wgt, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun, gen_hcode, dir_gubun, regular_gubun, pack_type, rs_gubun, nation_code, customer_name, skid_yn, pte_gubun, dia, core  = row
+                plant, pm_no, schedule_unit, paper_type, b_wgt, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun, gen_hcode, dir_gubun, regular_gubun, pack_type, rs_gubun, nation_code, customer_name, skid_yn, pte_gubun, dia, core, nation_code  = row
                 export_type = '수출' if export_yn == 'Y' else '내수'
                 raw_orders.append({
                     'plant': plant,
@@ -71,7 +71,8 @@ class SheetGetters:
                     'skid_yn': skid_yn,
                     'pte_gubun': pte_gubun,
                     'dia': dia,
-                    'core': core
+                    'core': core,
+                    'nation_code': nation_code
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders

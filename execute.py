@@ -38,9 +38,9 @@ def process_sheet_lot(
 ):
     """쉬트지 lot에 대한 전체 최적화 프로세스를 처리하고 결과를 반환합니다."""
 
-    if re_max_pieces > 4:
-        re_max_pieces = 4
-        logging.warning(f"max_pieces가 4보다 큽니다. max_pieces를 4로 설정합니다.")
+    # if re_max_pieces > 4:
+    #     re_max_pieces = 4
+    #     logging.warning(f"max_pieces가 4보다 큽니다. max_pieces를 4로 설정합니다.")
     logging.info(f"\n{'='*60}")
     logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Sheet Lot: {lot_no} (Version: {version}) 처리 시작")
     logging.info(f"적용 파라미터: min_width={re_min_width}, max_width={re_max_width}, max_pieces={re_max_pieces}, min_sc_width={min_sc_width}, max_sc_width={max_sc_width}, sheet_length_re={sheet_length_re}")

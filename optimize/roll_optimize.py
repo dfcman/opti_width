@@ -27,7 +27,7 @@ CG_SUBPROBLEM_TOP_N = 10               # Increased from 3
 SMALL_PROBLEM_THRESHOLD = 6            # Increased to force exhaustive search for narrow width ranges
 
 # paper_type별 지폭 범위 제한 (이 지종들은 4500~4700 범위의 지폭 조합 불가)
-DISALLOWED_PATTERN_WIDTH = {'6631', '6632'}
+DISALLOWED_PATTERN_WIDTH = {'6631', '6218'}
 
 
 

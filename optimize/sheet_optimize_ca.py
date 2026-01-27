@@ -55,9 +55,9 @@ import os
 
 
 # 페널티 값
-OVER_PROD_PENALTY = 20000000.0    # 과생산에 대한 페널티(1미터당 페널티 부여 값)
-UNDER_PROD_PENALTY = 10000000.0  # 부족생산에 대한 페널티
-PATTERN_COUNT_PENALTY = 1000.0       # "칼 세팅(패턴 변경) 횟수를 줄여라!" (생산 효율을 위해 전체 패턴 종류를 줄임)
+OVER_PROD_PENALTY = 1000000.0    # 과생산에 대한 페널티(1미터당 페널티 부여 값)
+UNDER_PROD_PENALTY = 500000.0  # 부족생산에 대한 페널티
+PATTERN_COUNT_PENALTY = 100.0       # "칼 세팅(패턴 변경) 횟수를 줄여라!" (생산 효율을 위해 전체 패턴 종류를 줄임)
 DISALLOWED_SINGLE_BASE_WIDTHS = {}  # 단일 사용을 금지할 주문 폭 집합
 DEFAULT_SINGLE_STRIP_PENALTY = 1000  # 지정되지 않은 단일폭은 기본적으로 패널티 없음
 SINGLE_STRIP_PENALTY = 5000.0  # 패턴 내 단폭 아이템 개수에 비례하여 페널티 부여 (복합폭 x2 이상 사용 유도)
