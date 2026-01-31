@@ -56,7 +56,7 @@ import os
 
 # 페널티 값
 OVER_PROD_PENALTY = 1000000.0    # 과생산에 대한 페널티(1미터당 페널티 부여 값)
-UNDER_PROD_PENALTY = 500000.0  # 부족생산에 대한 페널티
+UNDER_PROD_PENALTY = 500000.0  # 부족생산에 대한 페널티(1미터당 페널티 부여 값)
 PATTERN_COUNT_PENALTY = 100.0       # "칼 세팅(패턴 변경) 횟수를 줄여라!" (생산 효율을 위해 전체 패턴 종류를 줄임)
 DISALLOWED_SINGLE_BASE_WIDTHS = {}  # 단일 사용을 금지할 주문 폭 집합
 DEFAULT_SINGLE_STRIP_PENALTY = 1000  # 지정되지 않은 단일폭은 기본적으로 패널티 없음
@@ -312,8 +312,8 @@ class SheetOptimizeCa:
                     if base_width <= self.original_max_width:
                         # 조합 구성 카운팅 (예: (710, 710, 850) → {710: 2, 850: 1})
                         comp_counts = Counter(combo)
-                        # 아이템 명명: 정렬된 "지폭x개수" 조합 (예: "710x2+850x1")
-                        item_name = "+".join(sorted([f"{w}x{c}" for w, c in comp_counts.items()]))
+                        # 아이템 명명: 지폭 내림차순 정렬된 "지폭x개수" 조합 (예: "900x1+720x1")
+                        item_name = "+".join([f"{w}x{c}" for w, c in sorted(comp_counts.items(), key=lambda x: x[0], reverse=True)])
 
                         if item_name not in items:
                             items.append(item_name)
@@ -1169,7 +1169,17 @@ class SheetOptimizeCa:
                 for item_name in self.patterns[j]['composition']:
                     item_aggregated_counts[item_name] = item_aggregated_counts.get(item_name, 0) + count_int
 
-            # 2. 패턴별 조정 적용
+            # [New] 지폭별 scale factor 개별 계산
+            # 각 지폭의 ratio를 미리 계산해둠
+            width_ratios = {}
+            for w, demand_m in self.demands_in_meters.items():
+                prod_m = solver_prod_by_width.get(w, 0)
+                if prod_m > 0:
+                    width_ratios[w] = demand_m / prod_m
+                else:
+                    width_ratios[w] = 1.0  # 생산량 없으면 기본값
+
+            # 2. 패턴별 조정 적용 (패턴별 개별 scale factor 적용)
             for j, count in list(final_solution['pattern_counts'].items()):
                 if count < 0.99: 
                     continue
@@ -1177,8 +1187,24 @@ class SheetOptimizeCa:
                 count_int = int(round(count))
                 current_length = self.patterns[j]['length']
 
+                # [Fix] 패턴별 개별 scale factor 계산
+                # 해당 패턴에 포함된 지폭들의 min ratio 사용 (과생산 최소화)
+                pattern_scale_factor = float('inf')
+                for item_name in self.patterns[j]['composition']:
+                    for base_w in self.item_composition[item_name]:
+                        if base_w in width_ratios:
+                            if width_ratios[base_w] < pattern_scale_factor:
+                                pattern_scale_factor = width_ratios[base_w]
+                
+                # 생산량 없는 경우 기본값
+                if pattern_scale_factor == float('inf'):
+                    pattern_scale_factor = 1.0
+                
+                # [Safety Margin] 2% 여유 적용
+                pattern_scale_factor = pattern_scale_factor * 1.02
+
                 # 보정된 필요 총 길이 (과생산 제거)
-                optimized_total_len = (count_int * current_length) * scale_factor
+                optimized_total_len = (count_int * current_length) * pattern_scale_factor
                 
                 # [Modified] Ensure count is at least std_roll_cnt IF aggregated count is insufficient
                 # Only enforce minimum if ANY item in this pattern has a LOW aggregated count.
@@ -1209,7 +1235,7 @@ class SheetOptimizeCa:
                 if new_length < self.min_sheet_roll_length:
                     logging.warning(f"[Constraint Warning] 패턴 {j} 길이 조정: {current_length:.1f} -> {new_length:.1f} (최소 {self.min_sheet_roll_length} 미만). Over-production 보정 및 배수 적용 결과.")
 
-                logging.info(f"[Constraint Adjustment] Pattern {j} Count {count_int} -> {new_count} (Min {self.std_roll_cnt}). Length {current_length:.1f} -> {new_length:.1f} (Scale: {scale_factor:.4f})")
+                logging.info(f"[Constraint Adjustment] Pattern {j} Count {count_int} -> {new_count} (Min {self.std_roll_cnt}). Length {current_length:.1f} -> {new_length:.1f} (Scale: {pattern_scale_factor:.4f})")
                 
                 # 결과 업데이트
                 final_solution['pattern_counts'][j] = float(new_count)
@@ -1265,9 +1291,9 @@ class SheetOptimizeCa:
         최적화 결과로부터 DB 저장용 상세 정보를 생성합니다.
         
         이 메서드는 3가지 수준의 상세 데이터를 생성합니다:
-        1. pattern_details_for_db: 패턴 수준 (TH_ROLL_SEQUENCE)
-        2. pattern_roll_details_for_db: 복합폭/롤 수준 (TH_ROLL_DETAIL)
-        3. pattern_roll_cut_details_for_db: 개별 지폭 커팅 수준 (TH_CUT_DETAIL)
+        1. pattern_details_for_db: 패턴 수준 (TH_PATTERN_SEQUENCE)
+        2. pattern_roll_details_for_db: 복합폭/롤 수준 (TH_ROLL_SEQUENCE)
+        3. pattern_roll_cut_details_for_db: 개별 지폭 커팅 수준 (TH_CUT_SEQUENCE)
         
         또한 주문 이행 상황을 추적하여 demand_tracker를 업데이트합니다.
         
@@ -1291,9 +1317,9 @@ class SheetOptimizeCa:
 
         # 결과 저장 리스트 초기화
         result_patterns = []               # 요약 결과용
-        pattern_details_for_db = []        # TH_ROLL_SEQUENCE 테이블용
-        pattern_roll_details_for_db = []   # TH_ROLL_DETAIL 테이블용
-        pattern_roll_cut_details_for_db = []  # TH_CUT_DETAIL 테이블용
+        pattern_details_for_db = []        # TH_PATTERN_SEQUENCE 테이블용
+        pattern_roll_details_for_db = []   # TH_ROLL_SEQUENCE 테이블용
+        pattern_roll_cut_details_for_db = []  # TH_CUT_SEQUENCE 테이블용
         prod_seq_counter = start_prod_seq  # 생산 시퀀스 카운터
         total_cut_seq_counter = 0          # 전체 커팅 시퀀스 카운터
 
@@ -1393,10 +1419,11 @@ class SheetOptimizeCa:
                     
                     base_widths_for_item = []      # 이 복합 아이템에 포함된 기본 지폭들
                     base_group_nos_for_item = []   # 각 기본 지폭에 매핑된 주문 번호
+                    base_rs_gubuns_for_item = []   # 각 기본 지폭에 매핑된 주문 번호
                     assigned_group_no_for_composite = None
 
-                    # 각 기본 지폭별로 주문 연결 (FIFO 방식)
-                    for base_width, num_of_base in base_width_dict.items():
+                    # 각 기본 지폭별로 주문 연결 (FIFO 방식) - 지폭 내림차순 정렬
+                    for base_width, num_of_base in sorted(base_width_dict.items(), key=lambda x: x[0], reverse=True):
                         for _ in range(num_of_base):
                             # 아직 이행되지 않은 주문 중 해당 지폭 찾기
                             target_indices = demand_tracker[
@@ -1418,6 +1445,7 @@ class SheetOptimizeCa:
                             
                             base_widths_for_item.append(base_width)
                             base_group_nos_for_item.append(assigned_group_no)
+                            base_rs_gubuns_for_item.append('S')
 
                             # 복합 아이템의 대표 그룹오더는 첫 번째 기본 지폭의 그룹
                             if assigned_group_no_for_composite is None:
@@ -1426,17 +1454,20 @@ class SheetOptimizeCa:
                     composite_widths_for_db.append(composite_width)
                     composite_group_nos_for_db.append(assigned_group_no_for_composite if assigned_group_no_for_composite is not None else "")
 
-                    # TH_ROLL_DETAIL 레코드 생성
+                    # TH_ROLL_SEQUENCE 레코드 생성
                     pattern_roll_details_for_db.append({
                         'rollwidth': composite_width,
                         'pattern_length': pattern_length,
                         'widths': (base_widths_for_item + [0] * 7)[:7],  # 최대 7개 지폭
                         'group_nos': (base_group_nos_for_item + [''] * 7)[:7],
+                        'rs_gubuns': (base_rs_gubuns_for_item + [''] * 7)[:7],
                         'count': roll_count,
                         'prod_seq': prod_seq_counter,
                         'roll_seq': roll_seq_counter,
-                        'rs_gubun': 'S',  # Sheet 구분
-                        'loss_per_roll': pattern['loss_per_roll'], # [New] trim_loss added
+                        'rs_gubun': 'T' if self.coating_yn == 'Y' else 'S',  # Sheet 구분
+                        'trim_loss': self.ww_trim_size,
+                        'sc_trim': self.sheet_trim,
+                        'sl_trim': self.ww_trim_size_sheet if self.coating_yn == 'Y' else 0, 
                         **common_props
                     })
 
@@ -1455,7 +1486,7 @@ class SheetOptimizeCa:
                             # 무게 계산: 평량(g/m²) × 폭(m) × 길이(m)
                             weight = (self.b_wgt * (width / 1000) * pattern_length)
 
-                            # TH_CUT_DETAIL 레코드 생성
+                            # TH_CUT_SEQUENCE 레코드 생성
                             pattern_roll_cut_details_for_db.append({
                                 'prod_seq': prod_seq_counter,
                                 'unit_no': prod_seq_counter,
@@ -1468,18 +1499,18 @@ class SheetOptimizeCa:
                                 'pattern_length': pattern_length,
                                 'count': roll_count,
                                 'cut_cnt': roll_count,
-                                'rs_gubun': 'S',  # Sheet 구분
+                                'rs_gubun': 'T' if self.coating_yn == 'Y' else 'S',  # Sheet 구분
                                 **common_props
                             })
 
-            # TH_ROLL_SEQUENCE 레코드 생성 (패턴 수준)
+            # TH_PATTERN_SEQUENCE 레코드 생성 (패턴 수준)
             pattern_details_for_db.append({
                 'pattern_length': pattern_length,
                 'count': roll_count,
                 'widths': (composite_widths_for_db + [0] * 8)[:8],  # 최대 8개 복합폭
                 'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
                 'prod_seq': prod_seq_counter,
-                'rs_gubun': 'S',  # Sheet 구분
+                'rs_gubun': 'T' if self.coating_yn == 'Y' else 'S',  # Sheet 구분
                 **common_props # [Mod] Add common props (color, p_lot, etc)
             })
 

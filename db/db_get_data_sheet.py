@@ -130,7 +130,7 @@ class SheetGetters:
                     'order_gubun': order_gubun,
                     'pt_gubun': pt_gubun,
                     'pack_type': pack_type,
-                    'pattern': pattern
+                    'order_pattern': pattern
                 })
             print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
             return raw_orders

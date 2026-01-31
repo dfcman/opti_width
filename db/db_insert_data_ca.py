@@ -100,16 +100,20 @@ class DataInserters:
                 module, plant, pm_no, schedule_unit, paper_type, b_wgt,
                 lot_no, version, prod_seq, unit_no, seq, roll_seq, pok_cnt,
                 rollwidth, length, spool_no, spool_seq, rs_gubun,
-                dia, weight, trim_loss, 
+                dia, weight, trim_loss, sc_trim, sl_trim, sl_cut_yn,
                 cut_cnt, color, luster, core, pattern, p_lot, p_type, p_wgt, p_color, p_machine, 
+                roll_width1, 
+                rs_gubun1, rs_gubun2, rs_gubun3, rs_gubun4, rs_gubun5, rs_gubun6, rs_gubun7,
                 width1, width2, width3, width4, width5, width6, width7,
                 group1, group2, group3, group4, group5, group6, group7
             ) values (
                 'C', :plant, :pm_no, :schedule_unit, :paper_type, :b_wgt,
                 :lot_no, :version, :prod_seq, :unit_no, :seq, :roll_seq, :pok_cnt,
                 :rollwidth, :length, :spool_no, :spool_seq, :rs_gubun,
-                :dia, round(:b_wgt * :rollwidth * :length / 1000000,1), :trim_loss, 
+                :dia, round(:b_wgt * :rollwidth * :length / 1000000,1), :trim_loss, :sc_trim, :sl_trim, 'N',
                 :cut_cnt, :color, :luster, :core, :pattern, :p_lot, :p_type, :p_wgt, :p_color, :p_machine, 
+                :roll_width1,
+                :rs_gubun1, :rs_gubun2, :rs_gubun3, :rs_gubun4, :rs_gubun5, :rs_gubun6, :rs_gubun7, 
                 :w1, :w2, :w3, :w4, :w5, :w6, :w7,
                 :g1, :g2, :g3, :g4, :g5, :g6, :g7
             )
@@ -147,15 +151,31 @@ class DataInserters:
                 'p_wgt': p_wgt,  
                 'p_machine': p_machine,
                 'p_color': p_color,
-                'trim_loss': roll_detail.get('loss_per_roll', 0),
+                'trim_loss': roll_detail.get('trim_loss', 0),
+                'sc_trim': roll_detail.get('sc_trim', 0),
+                'sl_trim': roll_detail.get('sl_trim', 0),
                 'rs_gubun': roll_detail['rs_gubun'],
-                'w1': roll_detail['widths'][0], 'w2': roll_detail['widths'][1],
-                'w3': roll_detail['widths'][2], 'w4': roll_detail['widths'][3],
-                'w5': roll_detail['widths'][4], 'w6': roll_detail['widths'][5],
+                'rs_gubun1': roll_detail['rs_gubuns'][0], 
+                'rs_gubun2': roll_detail['rs_gubuns'][1],
+                'rs_gubun3': roll_detail['rs_gubuns'][2],
+                'rs_gubun4': roll_detail['rs_gubuns'][3],
+                'rs_gubun5': roll_detail['rs_gubuns'][4],
+                'rs_gubun6': roll_detail['rs_gubuns'][5],
+                'rs_gubun7': roll_detail['rs_gubuns'][6],
+                'roll_width1': int(roll_detail['rollwidth']) - int(roll_detail.get('sl_trim', 0)),
+                'w1': roll_detail['widths'][0], 
+                'w2': roll_detail['widths'][1],
+                'w3': roll_detail['widths'][2], 
+                'w4': roll_detail['widths'][3],
+                'w5': roll_detail['widths'][4], 
+                'w6': roll_detail['widths'][5],
                 'w7': roll_detail['widths'][6],
-                'g1': roll_detail['group_nos'][0][:15], 'g2': roll_detail['group_nos'][1][:15],
-                'g3': roll_detail['group_nos'][2][:15], 'g4': roll_detail['group_nos'][3][:15],
-                'g5': roll_detail['group_nos'][4][:15], 'g6': roll_detail['group_nos'][5][:15],
+                'g1': roll_detail['group_nos'][0][:15], 
+                'g2': roll_detail['group_nos'][1][:15],
+                'g3': roll_detail['group_nos'][2][:15], 
+                'g4': roll_detail['group_nos'][3][:15],
+                'g5': roll_detail['group_nos'][4][:15], 
+                'g6': roll_detail['group_nos'][5][:15],
                 'g7': roll_detail['group_nos'][6][:15]
             }
             bind_vars_list.append(bind_vars)
@@ -327,9 +347,9 @@ class DataInserters:
 
         insert_query = """
             insert into th_order_group (
-                plant, pm_no, schedule_unit, lot_no, version, group_no, order_no
+                plant, pm_no, schedule_unit, lot_no, version, group_no, order_no, prod_wgt
             ) values (
-                :plant, :pm_no, :schedule_unit, :lot_no, :version, :group_no, :order_no
+                :plant, :pm_no, :schedule_unit, :lot_no, :version, :group_no, :order_no, :prod_wgt
             )
         """
 
@@ -344,29 +364,22 @@ class DataInserters:
         
         df_to_insert = df_copy.rename(columns={k: v for k, v in rename_map.items() if k in df_copy.columns})
         
+        # prod_wgt 컬럼이 없으면 0으로 초기화
+        if 'prod_wgt' not in df_to_insert.columns:
+            df_to_insert['prod_wgt'] = 0
+        
         # DB에 저장할 최종 컬럼 목록을 선택합니다.
-        final_cols = ['lot_no', 'version', 'plant', 'pm_no', 'schedule_unit', 'group_no', 'order_no']
+        final_cols = ['lot_no', 'version', 'plant', 'pm_no', 'schedule_unit', 'group_no', 'order_no', 'prod_wgt']
         
         print(f"Before drop_duplicates: {len(df_to_insert)} rows")
         # 중복 제거 (PK 위반 방지)
-        df_to_insert = df_to_insert.drop_duplicates(subset=final_cols)
+        df_to_insert = df_to_insert.drop_duplicates(subset=['lot_no', 'version', 'plant', 'pm_no', 'schedule_unit', 'group_no', 'order_no'])
         print(f"After drop_duplicates: {len(df_to_insert)} rows")
         
         # Check for remaining duplicates (should be 0)
-        dups = df_to_insert[df_to_insert.duplicated(subset=final_cols, keep=False)]
+        dups = df_to_insert[df_to_insert.duplicated(subset=['lot_no', 'version', 'plant', 'pm_no', 'schedule_unit', 'group_no', 'order_no'], keep=False)]
         if not dups.empty:
-            print(f"WARNING: Duplicates found after drop_duplicates:\n{dups}")
-
-        # 데이터 타입 변환 (DB_TYPE_NUMBER 오류 방지)
-        # plant, lot_no, group_no 등이 숫자로 된 문자열일 경우 숫자로 변환 시도
-        # version, schedule_unit, order_no 도 추가
-        # for col in ['plant', 'lot_no', 'group_no', 'version', 'schedule_unit', 'order_no']:
-        #     if col in df_to_insert.columns:
-        #         try:
-        #             df_to_insert[col] = pd.to_numeric(df_to_insert[col])
-        #         except Exception:
-        #             pass # 변환 실패 시 원래 값 유지 (문자열이 필요한 컬럼일 수도 있음)
-
+            print(f"WARNING: Duplicates found after drop_duplicates:\\n{dups}")
 
         bind_vars_list = df_to_insert[final_cols].to_dict('records')
 

@@ -116,9 +116,9 @@ class VersionGetters:
                     ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type != '1')) as sheet_order_cnt,
                     ((select count(*) from  sapd12t_tmp s12 where s12.lot_no = a.lot_no and fact_status = '3' and pack_type = '1')) as roll_order_cnt
                 FROM th_versions_manager a
-                where a.calc_successful = '9'
-                --   5251204230   5251200302   5251200178  5251200510 5251200012  5251201860 5251200705 5251201794 5251203330 5251203142
-                --where lot_no = '5251203330' and version = '01'
+                --where a.calc_successful = '9'
+                -- 5260109085  5260106006  5260104276 5260200180 5260200182  5260200528
+                where lot_no = '5260200180' and version = '01'
                 ORDER BY a.plant, a.version_id, a.schedule_unit, a.lot_no, a.version
                 FETCH FIRST 1 ROWS ONLY
             """

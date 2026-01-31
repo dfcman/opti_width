@@ -1071,12 +1071,16 @@ class RollOptimize:
                     
                     new_group_nos = [''] * 8
                     new_group_nos[0] = group_no
+
+                    new_rs_gubuns = [''] * 8
+                    new_rs_gubuns[0] = 'R'
                     
                     pattern_roll_details_for_db.append({
                         'rollwidth': roll_width,
                         'pattern_length': roll_length,
                         'widths': new_widths,
                         'group_nos': new_group_nos,
+                        'rs_gubuns': new_rs_gubuns,
                         'count': int(round(count)),
                         'prod_seq': prod_seq,
                         'roll_seq': roll_seq_counter,

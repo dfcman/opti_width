@@ -15,6 +15,7 @@ from optimize.sheet_optimize import SheetOptimize
 from optimize.sheet_optimize_var import SheetOptimizeVar
 from optimize.sheet_optimize_ca import SheetOptimizeCa
 from db.db_connector import Database
+from collections import defaultdict
 
 # Load configuration
 config = configparser.ConfigParser()
@@ -478,17 +479,17 @@ def process_sheet_lot_ca(
     df_orders['lot_no'] = lot_no
     df_orders['version'] = version
 
-    group_cols = ['가로', '세로', '등급', 'pattern']
+    group_cols = ['가로', '세로', '등급', 'order_pattern']
     df_orders['가로'] = pd.to_numeric(df_orders['가로'])
     df_orders['세로'] = pd.to_numeric(df_orders['세로'])
     df_orders['등급'] = df_orders['등급'].astype(str)
-    df_orders['pattern'] = df_orders['pattern'].astype(str)
+    df_orders['order_pattern'] = df_orders['order_pattern'].astype(str)
     
     df_groups = df_orders.groupby(group_cols).agg(
         대표오더번호=('order_no', 'first')
     ).reset_index()
     df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
-    df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
+    df_groups['group_order_no'] = [f"50{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
     last_group_order_no = start_group_order_no + len(df_groups)
     
     df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
@@ -503,16 +504,16 @@ def process_sheet_lot_ca(
         "fulfillment_summary": []
     }
     
-    # 등급 + pattern 조합으로 그룹핑 (각 조합별로 별도 최적화)
-    grouping_cols = ['등급', 'pattern']
+    # 등급 + order_pattern 조합으로 그룹핑 (각 조합별로 별도 최적화)
+    grouping_cols = ['등급', 'order_pattern']
     unique_groups = df_orders[grouping_cols].drop_duplicates()
     prod_seq_counter = start_prod_seq
     
     for _, grp_row in unique_groups.iterrows():
         grade = grp_row['등급']
-        pattern = grp_row['pattern']
+        pattern = grp_row['order_pattern']
         logging.info(f"\n--- 등급 {grade}, pattern {pattern}에 대한 쉬트지(CA) 최적화 시작 ---")
-        df_subset = df_orders[(df_orders['등급'] == grade) & (df_orders['pattern'] == pattern)].copy()
+        df_subset = df_orders[(df_orders['등급'] == grade) & (df_orders['order_pattern'] == pattern)].copy()
         
         if df_subset.empty:
             continue
@@ -601,10 +602,10 @@ def process_sheet_lot_ca(
     return final_results, df_orders, prod_seq_counter, last_group_order_no
 
 def process_roll_lot_ca(
-        db, plant, pm_no, schedule_unit, lot_no, version, 
+        db, plant, pm_no, schedule_unit, lot_no, version, time_limit, 
         paper_type, b_wgt, color, 
         p_type, p_wgt, p_color, p_machine,
-        re_min_width, re_max_width, re_max_pieces, time_limit, 
+        re_min_width, re_max_width, re_max_pieces, 
         start_prod_seq=0, start_group_order_no=0
 ):
     """롤지 lot에 대한 전체 최적화 프로세스를 처리하고 결과를 반환합니다."""
@@ -635,7 +636,7 @@ def process_roll_lot_ca(
     ).reset_index()
     df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
     
-    df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
+    df_groups['group_order_no'] = [f"50{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
     last_group_order_no = start_group_order_no + len(df_groups)
     
     df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
@@ -790,6 +791,7 @@ def process_roll_lot_ca(
                         'pattern_length': entry.get('pattern_length', 0),
                         'widths': [width] + [0]*7,
                         'group_nos': [group_no] + ['']*7,
+                        'rs_gubuns': ['R'] + ['']*7,
                         'count': count,
                         'prod_seq': prod_seq_counter,
                         'roll_seq': roll_seq_counter,
@@ -1042,7 +1044,7 @@ def process_sheet_lot_var(
         대표오더번호=('order_no', 'first')
     ).reset_index()
     df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
-    df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
+    df_groups['group_order_no'] = [f"80{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
     last_group_order_no = start_group_order_no + len(df_groups)
     
     df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
@@ -1086,7 +1088,7 @@ def process_sheet_lot_var(
     return results, df_orders, prod_seq_counter, last_group_order_no
 
 
-def process_roll_sl_lot(
+def process_roll_st_lot(
         db, plant, pm_no, schedule_unit, lot_no, version, 
         re_min_width, re_max_width, re_max_pieces, 
         paper_type, b_wgt, color,
@@ -1120,7 +1122,7 @@ def process_roll_sl_lot(
         대표오더번호=('order_no', 'first')
     ).reset_index()
     df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
-    df_groups['group_order_no'] = [f"30{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
+    df_groups['group_order_no'] = [f"50{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
     last_group_order_no = start_group_order_no + len(df_groups)
 
     df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
@@ -1377,13 +1379,13 @@ def generate_allocated_sheet_details(df_orders, source_details, b_wgt=None, unro
             
     # Post-process to fix PK uniqueness
     # Let's adjust sheet_seq grouping by parent keys
-    # Keys identifying a Cut: (prod_seq, roll_seq, cut_seq)
+    # Keys identifying a Cut: (prod_seq, unit_no, seq, roll_seq, cut_seq)
     
-    from collections import defaultdict
+        
     seq_tracker = defaultdict(int)
     
     for entry in allocated_details:
-        key = (entry.get('prod_seq'), entry.get('roll_seq'), entry.get('cut_seq'))
+        key = (entry.get('prod_seq'), entry.get('unit_no'), entry.get('seq'), entry.get('roll_seq'), entry.get('cut_seq'))
         seq_tracker[key] += 1
         entry['sheet_seq'] = seq_tracker[key]
         entry['override_seq'] = seq_tracker[key] 
@@ -1479,8 +1481,10 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
                     # pattern_length covers both sheet total length and roll length
                     pattern_length = detail.get('pattern_length', 0)
                     
-                    # Weight (kg) = (pattern_length * width * b_wgt) / 10^6
-                    wgt_kg = (pattern_length * width * b_wgt_val) / 10**6
+                    # Weight (kg) = (pattern_length * width * b_wgt) / 10^6 * count
+                    # [Fix] count 값 반영 (Plant 5000의 경우 unroll_by_count=False로 count가 1이 아닌 원본 값 유지)
+                    count = detail.get('count', 1)
+                    wgt_kg = (pattern_length * width * b_wgt_val * count) / 10**6
                     
                     prod_wgt_map[order_no] = prod_wgt_map.get(order_no, 0) + wgt_kg
             
@@ -1509,6 +1513,7 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
                 'core': 'first'
             }
             
+            logging.info(f"\n\n# ================= {final_df_orders} ================== #\n")
             # agg_dict에 있는 컬럼이 실제로 존재하는지 확인 후 필터링
             valid_agg_dict = {k: v for k, v in agg_dict.items() if k in final_df_orders.columns}
             
@@ -1524,7 +1529,7 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
 
 
 
-        if plant == 5000:
+        if plant == '5000':
             
             logging.info("\n\n# ================= 패턴 상세 정보 (final_pattern_details_for_db) ================== #\n")
             logging.info(f"롤 재단 상세 정보 개수: {len(final_pattern_details_for_db)}")
@@ -1536,6 +1541,7 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
 
             if final_pattern_roll_details_for_db:
                 logging.info("\n\n# ================= 패턴롤 정보 (final_pattern_roll_details_for_db) ================== #\n")
+                # logging.info(f"final_pattern_roll_details_for_db: {final_pattern_roll_details_for_db}")
                 logging.info(f"롤 재단 상세 정보 개수: {len(final_pattern_roll_details_for_db)}")
                 db.insert_roll_sequence(
                     connection, lot_no, version, plant, pm_no, schedule_unit, re_max_width, 
@@ -1825,9 +1831,10 @@ def main():
                         )
                     else:
                         roll_results, roll_df_orders, prod_seq_counter, group_order_no_counter = process_roll_lot_ca(
-                            db, plant, pm_no, schedule_unit, lot_no, version, paper_type, b_wgt, color, time_limit, 
-                            min_width, max_width, max_pieces, 
+                            db, plant, pm_no, schedule_unit, lot_no, version, time_limit, 
+                            paper_type, b_wgt, color, 
                             p_type, p_wgt, p_color, p_machine,
+                            min_width, max_width, max_pieces, 
                             start_prod_seq=prod_seq_counter, start_group_order_no=group_order_no_counter
                         )
                 else:
@@ -1838,7 +1845,7 @@ def main():
                         min_sl_width, max_sl_width, sl_trim_size
                     ) = db.get_lot_param_roll_sl(lot_no=lot_no, version=version)
                     
-                    roll_results, roll_df_orders, prod_seq_counter, group_order_no_counter = process_roll_sl_lot(
+                    roll_results, roll_df_orders, prod_seq_counter, group_order_no_counter = process_roll_st_lot(
                         db, plant, pm_no, schedule_unit, lot_no, version, paper_type, b_wgt, color, time_limit, 
                         min_width, max_width, max_pieces, 
                         min_sl_width, max_sl_width, sl_trim_size,
@@ -1851,6 +1858,12 @@ def main():
             if sheet_order_cnt > 0: 
                 logging.info(f"쉬트지 오더 {sheet_order_cnt}건 처리 시작.")
                 if plant == '3000':
+                    # 표준길이 검증
+                    if not sheet_length_re:
+                        logging.error(f"[에러] Lot {lot_no}에 대한 표준길이(sheet_length_re)가 없어 최적화를 수행할 수 없습니다. 상태를 2(에러)로 변경합니다.")
+                        db.update_lot_status(lot_no=lot_no, version=version, status=2)
+                        continue
+                    
                     sheet_results, sheet_df_orders, prod_seq_counter, group_order_no_counter = process_sheet_lot(
                         db, plant, pm_no, schedule_unit, lot_no, version, paper_type, b_wgt, color, time_limit, 
                         min_width, sheet_max_width, sheet_max_pieces, 
@@ -1866,6 +1879,9 @@ def main():
                         min_sc_width, max_sc_width, sheet_trim_size, 
                         min_cm_width, max_cm_width, max_sl_count, ww_trim_size, ww_trim_size_sheet
                     ) = db.get_lot_param_sheet_ca(lot_no=lot_no, version=version)
+                    
+                    # [DEBUG] p_type, p_wgt, p_color, p_machine 값 확인
+                    logging.info(f"[DEBUG] p_type={p_type}, p_wgt={p_wgt}, p_color={p_color}, p_machine={p_machine}")
 
                     sheet_results, sheet_df_orders, prod_seq_counter, group_order_no_counter = process_sheet_lot_ca(
                         db, plant, pm_no, schedule_unit, lot_no, version, coating_yn,
@@ -1904,6 +1920,10 @@ def main():
                 _p_type = _locals.get('p_type')
                 _p_wgt = _locals.get('p_wgt')
                 _p_color = _locals.get('p_color')
+                
+                # [DEBUG] save_results 호출 전 값 확인
+                logging.info(f"[DEBUG] save_results 호출 전: _p_type={_p_type}, _p_wgt={_p_wgt}, _p_color={_p_color}, _p_machine={_p_machine}")
+                
                 final_status = save_results(
                     db, lot_no, version, plant, pm_no, schedule_unit, max_width, paper_type, b_wgt, 
                     all_results, all_df_orders,

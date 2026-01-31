@@ -1,30 +1,79 @@
+"""
+롤지 복합폭(CA) 최적화 모듈 (roll_optimize_ca.py)
+
+대형 원단 롤을 복합폭 단위로 절단할 때, 손실(trim loss)을 최소화하면서
+주문 수량을 충족시키는 최적의 절단 패턴을 찾는 알고리즘을 구현합니다.
+
+[주요 알고리즘]
+- Column Generation: 대규모 문제에서 효율적인 패턴 탐색
+- Dynamic Programming: 서브문제(Knapsack) 해결
+- Mixed Integer Programming (MIP): 최종 정수해 도출
+
+[특징]
+- 복합폭(여러 롤을 합친 폭) 자동 생성 및 최적화
+- Gurobi 우선, OR-Tools(SCIP) 폴백 지원
+- 패턴 종류 수 최소화 페널티 적용 (셋업 비용 고려)
+
+[핵심 제약조건]
+- 최소/최대 슬리터 폭 (min_cm_width, max_cm_width)
+- 최대 슬리터 수 (max_sl_count)
+- 소폭 롤 개수 제한 (MAX_SMALL_WIDTH_PER_PATTERN)
+"""
 import pandas as pd
 import logging
 from ortools.linear_solver import pywraplp
 import gurobipy as gp
 from gurobipy import GRB
 
-OVER_PROD_PENALTY = 5000.0  # 주문량 초과 생산에 대한 페널티
-UNDER_PROD_PENALTY = 50000.0  # 주문량 미달 생산에 대한 페널티
-PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6  # (열 생성) 새로운 패턴이 유의미하다고 판단하는 기준값
-CG_MAX_ITERATIONS = 200  # (열 생성) 최대 반복 횟수
-CG_NO_IMPROVEMENT_LIMIT = 25  # (열 생성) 목적 함수 값 개선이 없을 때 조기 중단을 위한 반복 횟수
-CG_SUBPROBLEM_TOP_N = 1  # (열 생성) 각 반복에서 서브문제로부터 가져올 상위 N개 유의미한 패턴
-SMALL_PROBLEM_THRESHOLD = 10  # 문제 크기가 이 값보다 작거나 같으면, 모든 가능한 패턴을 생성하여 최적화 시도
-FINAL_MIP_TIME_LIMIT_MS = 60000  # 최종 정수 계획법(MIP) 문제 풀이에 대한 시간 제한 (밀리초)
+# ============================================================
+# 전역 상수 정의
+# ============================================================
 
+# --- 생산량 페널티 ---
+OVER_PROD_PENALTY  = 500000.0  # 주문량 초과 생산에 대한 페널티  500000
+UNDER_PROD_PENALTY = 1000000.0  # 주문량 미달 생산에 대한 페널티
 
-COMPOSITE_USAGE_PENALTY = 0  # 복합폭 사용 시 추가 부담 (복합폭을 만드는 로직이라 0으로 처리)
-PATTERN_COUNT_PENALTY = 500.0  # 패턴 종류 개수를 줄이기 위한 페널티 (새로운 패턴 사용 시 부과)
-COMPOSITE_BASE_CANDIDATES = 20  # 복합폭 생성 시 고려할 기본 롤(가장 수요가 많은)의 후보 개수
-COMPOSITE_GENERATION_LIMIT = 2000  # 생성할 수 있는 복합폭 종류의 최대 개수 (성능 제한용)
+# --- Column Generation(열 생성) 파라미터 ---
+PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6  # 새로운 패턴이 유의미하다고 판단하는 기준값
+CG_MAX_ITERATIONS = 200  # 최대 반복 횟수
+CG_NO_IMPROVEMENT_LIMIT = 25  # 목적 함수 값 개선이 없을 때 조기 중단을 위한 반복 횟수
+CG_SUBPROBLEM_TOP_N = 1  # 각 반복에서 서브문제로부터 가져올 상위 N개 패턴
+
+# --- 문제 크기 및 시간 제한 ---
+SMALL_PROBLEM_THRESHOLD = 10  # 이 값 이하이면 모든 가능한 패턴을 열거
+FINAL_MIP_TIME_LIMIT_MS = 180000  # 최종 MIP 풀이 시간 제한 (60초)
+
+# --- 복합폭 및 패턴 관련 페널티 ---
+COMPOSITE_USAGE_PENALTY = 0  # 복합폭 사용 페널티 (복합폭 생성 최적화이므로 0)
+PATTERN_COUNT_PENALTY = 5000.0  # 패턴 종류 개수 페널티 (셋업 비용)
+COMPOSITE_BASE_CANDIDATES = 20  # 복합폭 생성 시 고려할 기본 롤 후보 개수
+COMPOSITE_GENERATION_LIMIT = 2000  # 생성 가능한 복합폭 종류의 최대 개수
+
+# --- 소폭 제한 ---
 SMALL_WIDTH_LIMIT = 480  # 소폭 판정 기준(mm)
 MAX_SMALL_WIDTH_PER_PATTERN = 2  # 한 패턴에서 허용되는 소폭 롤 수
+
+# --- 기타 페널티 ---
 OVER_PROD_WEIGHT_CAP = 6.0  # 소량 주문에 대한 초과 페널티 가중치 상한
-MIXED_COMPOSITE_PENALTY = 500.0  # 서로 다른 규격 조합 복합롤에 대한 추가 패널티
+MIXED_COMPOSITE_PENALTY = 500.0  # 서로 다른 규격 조합 복합롤에 대한 추가 페널티
 
 
 class RollOptimizeCa:
+    """
+    롤지 복합폭(CA) 최적화 클래스
+    
+    복합폭 단위로 절단 패턴을 구성하여 주문을 충족시키는 최적화를 수행합니다.
+    
+    [주요 기능]
+    - 단폭/순수복합폭/혼합복합폭 아이템 자동 생성
+    - Column Generation 기반 효율적 패턴 탐색
+    - Gurobi/OR-Tools 이중 솔버 지원
+    - 패턴 종류 수 최소화 (Big-M 제약)
+    
+    [최적화 목표]
+    minimize: trim_loss + over_prod_penalty + under_prod_penalty 
+              + pattern_count_penalty + composite_penalty + mixed_penalty
+    """
 
     def __init__(
         self,
@@ -52,6 +101,37 @@ class RollOptimizeCa:
         ww_trim_size=0,
         num_threads=4
     ):
+        """
+        최적화 객체 초기화
+        
+        Args:
+            db: 데이터베이스 연결 객체
+            plant: 공장 코드 (2000, 3000, 5000, 8000)
+            pm_no: PM 번호
+            schedule_unit: 스케줄 단위
+            lot_no: Lot 번호
+            version: 버전
+            paper_type: 지종
+            b_wgt: 평량 (g/m²)
+            color: 색상
+            p_type: 생산 지종
+            p_wgt: 생산 평량
+            p_color: 생산 색상
+            p_machine: 생산 머신
+            df_spec_pre: 주문 데이터 DataFrame (필수 컬럼: group_order_no, 지폭/width, 주문수량/주문롤수)
+            coating_yn: 코팅 여부 ('Y'/'N')
+            min_width: 패턴 최소 폭 (mm)
+            max_width: 패턴 최대 폭 (mm)
+            max_pieces: 패턴당 최대 피스 수
+            min_cm_width: 복합폭 최소 폭 (mm)
+            max_cm_width: 복합폭 최대 폭 (mm)
+            max_sl_count: 복합폭당 최대 슬리터 수
+            ww_trim_size: 슬리터 트림 사이즈 (mm)
+            num_threads: 솔버 스레드 수
+        
+        Raises:
+            KeyError: 필수 컬럼(주문수량, 지폭)이 없는 경우
+        """
         self.db = db
         self.plant = plant
         self.pm_no = pm_no
@@ -150,7 +230,22 @@ class RollOptimizeCa:
         self.max_demand = max(self.demands.values()) if self.demands else 1
 
     def _prepare_items(self):
-        # 복합폭 생성용 후보 (모든 지폭 포함, 범위 체크 없음)
+        """
+        기본 아이템(단폭)과 복합폭 아이템을 생성하여 등록합니다.
+        
+        [처리 순서]
+        1. 단폭(1폭) 아이템 등록 - min_cm_width~max_cm_width 범위 내
+        2. 순수 복합폭 생성 - 동일 규격 N개 조합 (예: 500*3)
+        3. 혼합 복합폭 생성 - 서로 다른 규격 조합 (예: 500*2+600*1)
+        
+        수정 대상:
+            self.item_info: 아이템별 폭 정보
+            self.item_composition: 아이템별 구성 정보
+            self.item_piece_count: 아이템별 피스 수
+            self.base_items: 단폭 아이템 리스트
+            self.composite_items: 복합폭 아이템 리스트
+        """
+        # --- 복합폭 생성용 후보 (모든 지폭 포함, 범위 체크 없음) ---
         all_base_for_composite = {}
         for item, width in self.base_item_widths.items():
             if width <= 0:
@@ -240,16 +335,25 @@ class RollOptimizeCa:
         backtrack(0, {}, 0, 0)
 
     def _clear_patterns(self):
+        """패턴 저장소를 초기화합니다."""
         self.patterns = []
         self.pattern_keys = set()
 
     def _rebuild_pattern_cache(self):
+        """패턴 중복 검사용 캐시를 재구축합니다."""
         self.pattern_keys = {frozenset(p.items()) for p in self.patterns}
 
     def _small_units_for_item(self, item_name):
         """
-        Returns the count of small-width (<= limit) rolls contributed by an item.
-        Only pure single-width items (단폭) are subject to the cap; composite items are ignored.
+        아이템이 포함하는 소폭 롤 개수를 반환합니다.
+        
+        단폭(1폭) 아이템만 소폭 제한 대상이며, 복합폭은 0을 반환합니다.
+        
+        Args:
+            item_name: 아이템 이름
+        
+        Returns:
+            int: 소폭 롤 개수 (0 또는 1)
         """
         piece_count = self.item_piece_count.get(item_name, 0)
         if piece_count != 1:
@@ -264,10 +368,27 @@ class RollOptimizeCa:
         return 0
 
     def _count_small_width_units(self, pattern):
-        """패턴 내부의 소폭(기준 이하) 롤 수를 계산합니다."""
+        """
+        패턴 내부의 소폭(기준 이하) 롤 수를 계산합니다.
+        
+        Args:
+            pattern: {아이템명: 개수} 딕셔너리
+        
+        Returns:
+            int: 패턴 내 소폭 롤 총 개수
+        """
         return sum(self._small_units_for_item(item_name) * count for item_name, count in pattern.items())
 
     def _is_mixed_composite(self, item_name):
+        """
+        아이템이 혼합 복합폭(서로 다른 규격 조합)인지 판정합니다.
+        
+        Args:
+            item_name: 아이템 이름
+        
+        Returns:
+            bool: 혼합 복합폭이면 True
+        """
         composition = self.item_composition.get(item_name, {})
         if not composition:
             return False
@@ -276,12 +397,32 @@ class RollOptimizeCa:
         return True
 
     def _count_mixed_composites(self, pattern):
+        """
+        패턴 내 혼합 복합폭 아이템 개수를 계산합니다.
+        
+        Args:
+            pattern: {아이템명: 개수} 딕셔너리
+        
+        Returns:
+            int: 혼합 복합폭 아이템 총 개수
+        """
         return sum(
             count for item_name, count in pattern.items()
             if self._is_mixed_composite(item_name)
         )
 
     def _add_pattern(self, pattern):
+        """
+        유효한 패턴을 패턴 리스트에 추가합니다.
+        
+        중복 패턴과 소폭 제한 초과 패턴은 추가되지 않습니다.
+        
+        Args:
+            pattern: {아이템명: 개수} 딕셔너리
+        
+        Returns:
+            bool: 추가 성공 여부
+        """
         key = frozenset(pattern.items())
         if key in self.pattern_keys:
             return False
@@ -292,19 +433,72 @@ class RollOptimizeCa:
         return True
 
     def _count_pattern_pieces(self, pattern):
+        """
+        패턴의 총 피스 수를 계산합니다.
+        
+        Args:
+            pattern: {아이템명: 개수} 딕셔너리
+        
+        Returns:
+            int: 총 피스 수
+        """
         return sum(self.item_piece_count[item] * count for item, count in pattern.items())
 
     def _count_pattern_composite_units(self, pattern):
+        """
+        패턴의 복합폭 단위 수를 계산합니다.
+        
+        복합폭 단위 = (아이템 피스 수 - 1) * 개수
+        
+        Args:
+            pattern: {아이템명: 개수} 딕셔너리
+        
+        Returns:
+            int: 복합폭 단위 총 수
+        """
         return sum(max(0, self.item_piece_count[item] - 1) * count for item, count in pattern.items())
 
     def _effective_demand(self, item):
+        """
+        아이템의 실효 수요를 계산합니다.
+        
+        복합폭의 경우 구성 요소의 수요 합산.
+        
+        Args:
+            item: 아이템 이름
+        
+        Returns:
+            float: 실효 수요량
+        """
         composition = self.item_composition[item]
         return sum(self.demands.get(base_item, 0) * qty for base_item, qty in composition.items())
 
     def _format_width(self, value):
+        """
+        폭 값을 포맷팅합니다 (정수면 정수로, 아니면 소수 2자리).
+        
+        Args:
+            value: 폭 값
+        
+        Returns:
+            int or float: 포맷된 폭 값
+        """
         return int(value) if abs(value - int(value)) < 1e-6 else round(value, 2)
 
     def _format_item_label(self, item_name):
+        """
+        아이템의 레이블을 포맷합니다.
+        
+        단폭: "500"
+        순수 복합폭: "1000(500*2)"
+        혼합 복합폭: "1100(500*1+600*1)"
+        
+        Args:
+            item_name: 아이템 이름
+        
+        Returns:
+            str: 포맷된 레이블
+        """
         composition = self.item_composition[item_name]
         item_width = self.item_info[item_name]
         if len(composition) == 1:
@@ -320,12 +514,33 @@ class RollOptimizeCa:
         return f"{self._format_width(item_width)}(" + '+'.join(parts) + ")"
 
     def _register_composite_item(self, name, width, composition, piece_count):
+        """
+        복합폭 아이템을 등록합니다.
+        
+        Args:
+            name: 복합폭 이름
+            width: 총 폭 (트림 포함)
+            composition: 구성 딕셔너리 {base_item: count}
+            piece_count: 총 피스 수
+        """
         self.item_info[name] = width
         self.item_composition[name] = dict(composition)
         self.item_piece_count[name] = piece_count
         self.composite_items.append(name)
 
     def _make_composite_name(self, composition):
+        """
+        복합폭 구성에서 고유 이름을 생성합니다.
+        
+        순수 복합폭: "{item}__x{qty}"
+        혼합 복합폭: "mix__{item1}x{qty1}__{item2}x{qty2}..."
+        
+        Args:
+            composition: 구성 딕셔너리 {base_item: count}
+        
+        Returns:
+            str: 생성된 이름
+        """
         items = sorted(composition.items())
         if len(items) == 1:
             item, qty = items[0]
@@ -334,15 +549,25 @@ class RollOptimizeCa:
         return f"mix__{'__'.join(parts)}"
 
     def _generate_initial_patterns(self):
+        """
+        휴리스틱 기반으로 초기 패턴을 생성합니다.
+        
+        [생성 전략]
+        1. 수요순/폭순 정렬 후 Greedy 방식으로 패턴 구성
+        2. 단일 아이템 반복 패턴 생성
+        3. 미커버 아이템 보완 패턴 생성
+        
+        대규모 문제에서 Column Generation의 시작점 역할을 합니다.
+        
+        수정 대상:
+            self.patterns: 생성된 패턴들이 추가됨
+        """
         self._clear_patterns()
         if not self.items:
             return
 
-        sorted_by_demand = sorted(
-            self.items,
-            key=lambda i: (self._effective_demand(i), self.item_info[i]),
-            reverse=True
-        )
+        # --- 정렬 기준별 아이템 리스트 준비 ---
+        sorted_by_demand = sorted(self.items, key=lambda i: (self._effective_demand(i), self.item_info[i]), reverse=True)
         sorted_by_width_desc = sorted(self.items, key=lambda i: self.item_info[i], reverse=True)
         sorted_by_width_asc = sorted(self.items, key=lambda i: self.item_info[i])
 
@@ -466,11 +691,23 @@ class RollOptimizeCa:
                 self._add_pattern(pattern)
 
     def _generate_all_patterns(self):
+        """
+        소규모 문제용 - 모든 가능한 패턴을 열거합니다 (Brute-force).
+        
+        Backtracking을 사용하여 min_width/max_width, max_pieces, 
+        소폭 제한을 만족하는 모든 패턴을 생성합니다.
+        
+        SMALL_PROBLEM_THRESHOLD(기본 10) 이하의 아이템 수에서만 사용됩니다.
+        
+        수정 대상:
+            self.patterns: 생성된 모든 유효 패턴들
+        """
         all_patterns = []
         seen_patterns = set()
         item_list = list(self.items)
 
         def add_pattern(pattern):
+            """유효한 패턴을 리스트에 추가"""
             if not pattern:
                 return
             key = frozenset(pattern.items())
@@ -478,6 +715,7 @@ class RollOptimizeCa:
                 return
             total_width = sum(self.item_info[item] * count for item, count in pattern.items())
             total_pieces = sum(pattern.values())
+            # 모든 제약조건 확인
             if (
                 self.min_width <= total_width <= self.max_width
                 and total_pieces <= self.max_pieces
@@ -514,8 +752,38 @@ class RollOptimizeCa:
         self._rebuild_pattern_cache()
 
     def _solve_master_problem(self, is_final_mip=False):
+        """
+        마스터 문제를 풀이합니다 (LP 또는 MIP).
+        
+        [결정 변수]
+        - x[j]: 패턴 j의 사용 횟수
+        - y[j]: 패턴 j의 사용 여부 (Binary, MIP만)
+        - over_prod_vars[item]: 아이템별 초과 생산량
+        - under_prod_vars[item]: 아이템별 미달 생산량
+        
+        [제약조건]
+        - 생산량 + 미달량 = 수요량 + 초과량 (각 아이템별)
+        - x[j] <= M * y[j] (Big-M, MIP만)
+        
+        [목적함수]
+        minimize: trim_loss + over_penalty + under_penalty 
+                  + pattern_count_penalty + composite_penalty + mixed_penalty
+        
+        Args:
+            is_final_mip: True이면 정수해(MIP), False이면 연속해(LP)
+        
+        Returns:
+            dict: {
+                'objective': 목적함수 값,
+                'pattern_counts': {패턴인덱스: 사용횟수},
+                'over_production': {아이템: 초과량},
+                'under_production': {아이템: 미달량},
+                'duals': {아이템: 쌍대값} (LP만)
+            }
+            또는 None (해 없음)
+        """
         # ============================================================
-        # 1. [Final MIP] Try Gurobi Direct Solver
+        # 1. [Final MIP] Gurobi 직접 솔버 시도
         # ============================================================
         if is_final_mip:
             try:
@@ -727,8 +995,27 @@ class RollOptimizeCa:
         return solution
 
     def _solve_subproblem(self, duals):
+        """
+        Column Generation의 서브문제를 풀이합니다.
+        
+        마스터 문제의 쌍대 변수(dual values)를 사용하여
+        최적화에 도움이 되는 새로운 패턴을 탐색합니다.
+        
+        [알고리즘]
+        Dynamic Programming을 사용한 Knapsack 문제
+        - 상태: (pieces, width)
+        - 값: 쌍대값 기반 패턴 가치
+        
+        Args:
+            duals: {아이템: 쌍대값} - 마스터 문제의 제약조건 쌍대값
+        
+        Returns:
+            list: 상위 N개 유망 패턴 [{'pattern': dict, 'value': float, ...}, ...]
+        """
         width_limit = self.max_width
         piece_limit = self.max_pieces
+        
+        # --- 아이템별 가치 계산 ---
         item_details = []
         for item in self.items:
             item_width = self.item_info[item]
@@ -736,10 +1023,11 @@ class RollOptimizeCa:
             if item_width <= 0 or item_pieces > piece_limit:
                 continue
             composition = self.item_composition[item]
+            # 쌍대값 기반 아이템 가치 계산
             item_value = sum(duals.get(base, 0) * qty for base, qty in composition.items())
-            if self._is_mixed_composite(item):
+            if self._is_mixed_composite(item):  # 혼합 복합폭 페널티
                 item_value -= MIXED_COMPOSITE_PENALTY * 0.05
-            if item_value <= 0:
+            if item_value <= 0:  # 가치 없는 아이템 제외
                 continue
             item_details.append((item, item_width, item_pieces, item_value))
         if not item_details:
@@ -812,9 +1100,41 @@ class RollOptimizeCa:
         return candidate_patterns[:CG_SUBPROBLEM_TOP_N]
 
     def run_optimize(self, start_prod_seq=0):
+        """
+        메인 최적화 실행 함수입니다.
+        
+        [처리 흐름]
+        1. 패턴 생성 (문제 크기에 따라 방식 선택)
+           - 소규모: 모든 패턴 열거 (Brute-force)
+           - 대규모: 휴리스틱 초기 패턴 생성
+        2. 패턴 유효성 검증 및 필터링
+        3. Column Generation 반복 (대규모 문제만)
+           - LP 마스터 문제 풀이
+           - 서브문제로 새 패턴 탐색
+           - 유망 패턴 추가
+        4. 최종 MIP 풀이
+        5. 결과 포맷팅
+        
+        Args:
+            start_prod_seq: 시작 생산 순서 번호
+        
+        Returns:
+            dict: 최적화 결과
+                - pattern_result: 패턴 요약 DataFrame
+                - pattern_details_for_db: DB 저장용 상세
+                - pattern_roll_details_for_db: 롤별 상세
+                - pattern_roll_cut_details_for_db: 절단별 상세
+                - fulfillment_summary: 주문 충족 현황 DataFrame
+                - composite_usage: 복합폭 사용 정보
+                - last_prod_seq: 마지막 생산 순서
+            또는 {\"error\": \"에러 메시지\"} (실패 시)
+        """
+        # --- 1단계: 패턴 생성 (문제 크기에 따라 방식 선택) ---
         if len(self.base_items) <= SMALL_PROBLEM_THRESHOLD:
+            # 소규모 문제: 모든 패턴 열거
             self._generate_all_patterns()
         else:
+            # 대규모 문제: 휴리스틱 초기 패턴 생성
             self._generate_initial_patterns()
 
         if not self.patterns:
@@ -823,6 +1143,7 @@ class RollOptimizeCa:
         if not self.patterns:
             return {"error": "유효한 패턴을 생성하지 못했습니다."}
 
+        # --- 2단계: 패턴 유효성 검증 및 필터링 ---
         self.patterns = [
             pattern for pattern in self.patterns
             if self.min_width <= sum(self.item_info[item] * count for item, count in pattern.items()) <= self.max_width
@@ -834,9 +1155,10 @@ class RollOptimizeCa:
 
         self._rebuild_pattern_cache()
 
+        # --- 3단계: Column Generation (대규모 문제만) ---
         if len(self.base_items) > SMALL_PROBLEM_THRESHOLD:
             best_objective = None
-            stagnation_count = 0
+            stagnation_count = 0  # 개선 없는 반복 카운터
             for iteration in range(CG_MAX_ITERATIONS):
                 master_solution = self._solve_master_problem(is_final_mip=False)
                 if not master_solution:
@@ -859,18 +1181,46 @@ class RollOptimizeCa:
                     break
             self._rebuild_pattern_cache()
 
+        # --- 4단계: 최종 MIP 풀이 ---
         final_solution = self._solve_master_problem(is_final_mip=True)
         if not final_solution:
             return {"error": f"최종 해를 찾지 못했습니다. {self.min_width}mm 이상을 충족하는 주문이 부족합니다."}
 
+        # --- 5단계: 결과 포맷팅 ---
         return self._format_results(final_solution, start_prod_seq)
 
     def _format_results(self, final_solution, start_prod_seq=0):
-        result_patterns = []
-        pattern_details_for_db = []
-        pattern_roll_details_for_db = []
-        pattern_roll_cut_details_for_db = []  # [New] execute.py 호환성을 위해 추가
-        composite_usage = []
+        """
+        최적화 결과를 DB/출력용 형태로 변환합니다.
+        
+        [처리 내용]
+        - 패턴별 레이블 생성
+        - DB 저장용 상세 정보 구성
+        - 주문 충족 현황 요약 생성
+        - 복합폭 사용 정보 추출
+        - 절단별 상세 정보 생성 (복합폭 → 개별 지폭 분리)
+        
+        Args:
+            final_solution: _solve_master_problem의 MIP 결과
+            start_prod_seq: 시작 생산 순서 번호
+        
+        Returns:
+            dict: {
+                "pattern_result": DataFrame - 패턴 요약
+                "pattern_details_for_db": list - DB 저장용 패턴 상세
+                "pattern_roll_details_for_db": list - DB 저장용 롤별 상세
+                "pattern_roll_cut_details_for_db": list - 절단별 상세
+                "fulfillment_summary": DataFrame - 주문 충족 현황
+                "composite_usage": list - 복합폭 사용 정보
+                "last_prod_seq": int - 마지막 생산 순서
+            }
+        """
+        # --- 결과 저장소 초기화 ---
+        result_patterns = []           # 패턴 요약 (출력용)
+        pattern_details_for_db = []    # DB 저장용 패턴 상세
+        pattern_roll_details_for_db = []  # DB 저장용 롤별 상세
+        pattern_roll_cut_details_for_db = []  # 절단별 상세 (복합폭 분리)
+        composite_usage = []           # 복합폭 사용 정보
 
         production_counts = {item: 0 for item in self.demands}
         prod_seq = start_prod_seq
@@ -938,12 +1288,14 @@ class RollOptimizeCa:
                     roll_seq_counter += 1
                     expanded_widths = []
                     expanded_groups = []
+                    expanded_rs_gubuns = []
                     for base_item, qty in composition.items():
                         base_width = self.base_item_widths.get(base_item, 0)
                         if base_width <= 0:
                             base_width = item_width / max(1, self.item_piece_count[item_name])
                         expanded_widths.extend([base_width] * qty)
                         expanded_groups.extend([base_item] * qty)
+                        expanded_rs_gubuns.extend('R')
 
                     # roll별 trim_loss 계산 (rollwidth - sum(widths))
                     roll_widths_list = (expanded_widths + [0] * 7)[:7]
@@ -953,6 +1305,7 @@ class RollOptimizeCa:
                         'rollwidth': item_width,
                         'widths': roll_widths_list,
                         'group_nos': (expanded_groups + [''] * 7)[:7],
+                        'rs_gubuns': (expanded_rs_gubuns + [''] * 7)[:7],
                         'count': roll_count,
                         'prod_seq': prod_seq,
                         'roll_seq': roll_seq_counter,

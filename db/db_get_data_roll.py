@@ -192,6 +192,7 @@ class RollGetters:
                         AND b.paper_type = g.paper_type(+)
                         AND b.b_wgt = g.b_wgt(+)
                         AND b.rs_gubun = g.rs_gubun(+)
+                        AND b.rs_gubun = 'R'
                         AND CASE WHEN :v_ca_sl_cnt > 0 THEN b.roll_length
                                  WHEN SUBSTR(b.pm_no, 1, 2) = 'PM' THEN 0
                                  WHEN SUBSTR(b.pm_no, 1, 2) = 'SP' THEN 0
@@ -274,6 +275,7 @@ class RollGetters:
                     AND b.paper_type = d.paper_type(+)
                     AND b.b_wgt = d.b_wgt(+)
                     AND b.rs_gubun = d.rs_gubun(+)
+                    AND b.rs_gubun = 'R'
                     AND CASE WHEN :v_ca_sl_cnt > 0 THEN b.roll_length
                              WHEN SUBSTR(b.pm_no, 1, 2) = 'PM' THEN 0
                              WHEN SUBSTR(b.pm_no, 1, 2) = 'SP' THEN 0

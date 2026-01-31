@@ -250,7 +250,7 @@ class DataInserters:
                     'p_machine': pm_no,
                     'roll_seq': sheet_detail['roll_seq'],
                     'cut_seq': sheet_detail['cut_seq'], 
-                    'sheet_seq': sheet_detail['sheet_seq'],
+                    'sheet_seq': '1',
                     'pack_type': sheet_detail['pack_type'],
                     'width': sheet_detail['width'],
                     'group_no': sheet_detail['group_no'], 
