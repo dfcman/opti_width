@@ -91,7 +91,6 @@ class PatternGetters:
                         AND v.w NOT IN (SELECT width FROM Allowed_Widths)
                     )
                 ) a
-                --WHERE r_num < 2000
 
             """
             cursor.execute(query, lot_no=lot_no)

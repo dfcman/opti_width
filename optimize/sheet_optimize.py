@@ -492,7 +492,7 @@ class SheetOptimize:
         # 2. Random Shuffles (add multiple to increase diversity)
         random.seed(28) # Ensure determinism
         random_shuffles = []
-        for _ in range(1000):
+        for _ in range(200):
             items_copy = list(self.items)
             random.shuffle(items_copy)
             random_shuffles.append(items_copy)

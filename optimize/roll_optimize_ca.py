@@ -30,8 +30,15 @@ from gurobipy import GRB
 # ============================================================
 
 # --- 생산량 페널티 ---
-OVER_PROD_PENALTY  = 500000.0  # 주문량 초과 생산에 대한 페널티  500000
-UNDER_PROD_PENALTY = 1000000.0  # 주문량 미달 생산에 대한 페널티
+OVER_PROD_PENALTY  = 50000.0  # 주문량 초과 생산에 대한 페널티  500000
+UNDER_PROD_PENALTY = 100000.0  # 주문량 미달 생산에 대한 페널티
+
+
+# --- 복합폭 및 패턴 관련 페널티 ---
+COMPOSITE_USAGE_PENALTY = 0  # 복합폭 사용 페널티 (복합폭 생성 최적화이므로 0)
+PATTERN_COUNT_PENALTY = 5000.0  # 패턴 종류 개수 페널티 (셋업 비용)
+COMPOSITE_BASE_CANDIDATES = 20  # 복합폭 생성 시 고려할 기본 롤 후보 개수
+COMPOSITE_GENERATION_LIMIT = 2000  # 생성 가능한 복합폭 종류의 최대 개수
 
 # --- Column Generation(열 생성) 파라미터 ---
 PATTERN_VALUE_THRESHOLD = 1.0 + 1e-6  # 새로운 패턴이 유의미하다고 판단하는 기준값
@@ -43,11 +50,6 @@ CG_SUBPROBLEM_TOP_N = 1  # 각 반복에서 서브문제로부터 가져올 상�
 SMALL_PROBLEM_THRESHOLD = 10  # 이 값 이하이면 모든 가능한 패턴을 열거
 FINAL_MIP_TIME_LIMIT_MS = 180000  # 최종 MIP 풀이 시간 제한 (60초)
 
-# --- 복합폭 및 패턴 관련 페널티 ---
-COMPOSITE_USAGE_PENALTY = 0  # 복합폭 사용 페널티 (복합폭 생성 최적화이므로 0)
-PATTERN_COUNT_PENALTY = 5000.0  # 패턴 종류 개수 페널티 (셋업 비용)
-COMPOSITE_BASE_CANDIDATES = 20  # 복합폭 생성 시 고려할 기본 롤 후보 개수
-COMPOSITE_GENERATION_LIMIT = 2000  # 생성 가능한 복합폭 종류의 최대 개수
 
 # --- 소폭 제한 ---
 SMALL_WIDTH_LIMIT = 480  # 소폭 판정 기준(mm)
@@ -56,6 +58,13 @@ MAX_SMALL_WIDTH_PER_PATTERN = 2  # 한 패턴에서 허용되는 소폭 롤 수
 # --- 기타 페널티 ---
 OVER_PROD_WEIGHT_CAP = 6.0  # 소량 주문에 대한 초과 페널티 가중치 상한
 MIXED_COMPOSITE_PENALTY = 500.0  # 서로 다른 규격 조합 복합롤에 대한 추가 페널티
+
+# --- 패턴 내 복합롤 개수 제한 ---
+MAX_COMPOSITE_WITHOUT_PENALTY = 2  # 패턴당 페널티 없이 허용되는 복합롤(아이템) 개수
+EXTRA_COMPOSITE_PENALTY = 100000.0  # 기준 초과 시 복합롤 1개당 페널티 (높은 값 = 사실상 금지)
+
+# --- 복합롤 롤길이 제약 ---
+ALLOW_DIFF_LENGTH_COMPOSITE = 'N'  # 'Y': 롤길이가 달라도 복합롤 생성 가능, 'N': 같은 롤길이끼리만 복합롤 생성
 
 
 class RollOptimizeCa:
@@ -206,10 +215,13 @@ class RollOptimizeCa:
         
         # 아이템별 rolls_per_pattern 계산 (각 group_order_no별로 std_length / roll_length)
         self.item_rolls_per_pattern = {}
+        # 아이템별 롤길이 저장 (복합롤 생성 시 롤길이 체크용)
+        self.item_roll_lengths = {}
         for _, row in self.df_spec_pre.drop_duplicates(subset=['group_order_no']).iterrows():
             group_no = row['group_order_no']
             item_std_length = int(pd.to_numeric(row.get('std_length', 0), errors='coerce') or 0)
             item_roll_length = int(pd.to_numeric(row.get('롤길이', 0), errors='coerce') or 0)
+            self.item_roll_lengths[group_no] = item_roll_length  # 롤길이 저장
             if item_std_length > 0 and item_roll_length > 0:
                 self.item_rolls_per_pattern[group_no] = item_std_length // item_roll_length
             else:
@@ -266,6 +278,7 @@ class RollOptimizeCa:
                 self.base_items.append(item)
 
         # Add pure composite items (동일 규격 반복)
+        # 순수 복합폭은 동일 규격 반복이므로 롤길이 체크 불필요
         for base_item, base_width in all_base_for_composite.items():
             for num_repeats in range(self.composite_min, self.composite_max + 1):
                 composite_width = base_width * num_repeats
@@ -278,8 +291,10 @@ class RollOptimizeCa:
                         self._register_composite_item(name, composite_w_with_trim, composition, num_repeats)
 
         # 혼합 복합폭 생성을 위한 후보 (복합폭 생성용 모든 지폭 사용)
-        max_combo_pieces = min(self.max_pieces, self.composite_max)
-        min_combo_pieces = min(max_combo_pieces, self.composite_min)
+        # max_combo_pieces: 복합롤 1개에 들어가는 규격(지폭) 개수 제한 = max_sl_count
+        # (max_pieces는 패턴에 들어가는 복합롤 개수이므로 여기서는 사용하지 않음)
+        max_combo_pieces = self.composite_max  # = max_sl_count
+        min_combo_pieces = self.composite_min
         if min_combo_pieces > max_combo_pieces:
             return
 
@@ -293,7 +308,16 @@ class RollOptimizeCa:
         seen_compositions = set()
         composite_cap = COMPOSITE_GENERATION_LIMIT
 
-        def backtrack(start_idx, composition, total_width, total_pieces):
+        def backtrack(start_idx, composition, total_width, total_pieces, current_roll_length):
+            """혼합 복합폭 생성을 위한 백트래킹 함수
+            
+            Args:
+                start_idx: 탐색 시작 인덱스
+                composition: 현재 구성 {item: count}
+                total_width: 현재까지의 총 폭
+                total_pieces: 현재까지의 총 피스 수
+                current_roll_length: 현재 복합폭의 롤길이 (첫 아이템의 롤길이)
+            """
             nonlocal composite_cap
             
             composite_w_with_trim = total_width + self.sl_trim
@@ -323,8 +347,17 @@ class RollOptimizeCa:
                 if (total_width + width + self.sl_trim) > self.max_sl_width:
                     continue
                 
+                # 롤길이가 다른 경우 복합롤 생성 제한 체크
+                candidate_roll_length = self.item_roll_lengths.get(base_item, 0)
+                if ALLOW_DIFF_LENGTH_COMPOSITE == 'N' and current_roll_length is not None:
+                    if candidate_roll_length != current_roll_length:
+                        continue  # 롤길이가 다르면 해당 아이템 skip
+                
+                # 첫 아이템인 경우 현재 롤길이 설정
+                new_roll_length = current_roll_length if current_roll_length is not None else candidate_roll_length
+                
                 composition[base_item] = composition.get(base_item, 0) + 1
-                should_stop = backtrack(idx, composition, total_width + width, total_pieces + 1)
+                should_stop = backtrack(idx, composition, total_width + width, total_pieces + 1, new_roll_length)
                 composition[base_item] -= 1
                 if composition[base_item] == 0:
                     del composition[base_item]
@@ -332,7 +365,58 @@ class RollOptimizeCa:
                     return True
             return False
 
-        backtrack(0, {}, 0, 0)
+        backtrack(0, {}, 0, 0, None)
+        
+        # === 생성된 복합롤 정보 로깅 ===
+        logging.info(f"\n{'='*60}")
+        logging.info(f"[복합롤 생성 결과] 단폭: {len(self.base_items)}개, 복합폭: {len(self.composite_items)}개")
+        logging.info(f"{'='*60}")
+        
+        # 단폭(1폭) 아이템 출력
+        if self.base_items:
+            logging.info("[단폭 아이템 (패턴에 직접 사용 가능)]")
+            for item in self.base_items:
+                width = self.item_info[item]
+                roll_length = self.item_roll_lengths.get(item, 0)
+                demand = self.demands.get(item, 0)
+                logging.info(f"  - {item}: 폭={width}mm, 롤길이={roll_length}mm, 수요={demand}")
+        
+        # 복합폭 아이템 출력 (순수 복합폭 / 혼합 복합폭 구분)
+        if self.composite_items:
+            pure_composites = []  # 동일 규격 반복
+            mixed_composites = []  # 서로 다른 규격 조합
+            
+            for item in self.composite_items:
+                composition = self.item_composition[item]
+                if len(composition) == 1:
+                    pure_composites.append(item)
+                else:
+                    mixed_composites.append(item)
+            
+            if pure_composites:
+                logging.info(f"\n[순수 복합폭 (동일 규격 반복)] - {len(pure_composites)}개")
+                for item in pure_composites[:20]:  # 최대 20개만 출력
+                    width = self.item_info[item]
+                    label = self._format_item_label(item)
+                    logging.info(f"  - {label}")
+                if len(pure_composites) > 20:
+                    logging.info(f"  ... 외 {len(pure_composites) - 20}개")
+            
+            if mixed_composites:
+                logging.info(f"\n[혼합 복합폭 (서로 다른 규격 조합)] - {len(mixed_composites)}개")
+                for item in mixed_composites[:30]:  # 최대 30개만 출력
+                    width = self.item_info[item]
+                    label = self._format_item_label(item)
+                    composition = self.item_composition[item]
+                    # 롤길이 정보 추가
+                    roll_lengths = [self.item_roll_lengths.get(base, 0) for base in composition.keys()]
+                    unique_lengths = list(set(roll_lengths))
+                    len_info = f"롤길이={unique_lengths}" if len(unique_lengths) > 1 else f"롤길이={unique_lengths[0]}mm"
+                    logging.info(f"  - {label} ({len_info})")
+                if len(mixed_composites) > 30:
+                    logging.info(f"  ... 외 {len(mixed_composites) - 30}개")
+        
+        logging.info(f"{'='*60}\n")
 
     def _clear_patterns(self):
         """패턴 저장소를 초기화합니다."""
@@ -457,6 +541,21 @@ class RollOptimizeCa:
             int: 복합폭 단위 총 수
         """
         return sum(max(0, self.item_piece_count[item] - 1) * count for item, count in pattern.items())
+
+    def _count_pattern_item_count(self, pattern):
+        """
+        패턴 내 복합롤(아이템) 개수를 계산합니다.
+        
+        패턴에 포함된 아이템의 종류 수 (한 패턴에 복합롤이 몇 개 들어가는지)
+        예: {A: 2, B: 1} -> 2개 (아이템 종류가 2개)
+        
+        Args:
+            pattern: {아이템명: 개수} 딕셔너리
+        
+        Returns:
+            int: 패턴 내 아이템(복합롤) 종류 수
+        """
+        return len(pattern)
 
     def _effective_demand(self, item):
         """
@@ -787,6 +886,7 @@ class RollOptimizeCa:
         # ============================================================
         if is_final_mip:
             try:
+                logging.info(f"[Final MIP] 총 {len(self.patterns)}개의 패턴 생성됨")
                 logging.info("Trying Gurobi Direct Solver RollOptimizeCA (gurobipy)...")
                 model = gp.Model("RollOptimizationCA")
                 model.setParam("OutputFlag", 0)
@@ -842,6 +942,11 @@ class RollOptimizeCa:
                     j: self._count_mixed_composites(pattern)
                     for j, pattern in enumerate(self.patterns)
                 }
+                # 패턴 내 복합롤(아이템) 개수 계산 (기준 초과 시 페널티 부여용)
+                pattern_item_counts = {
+                    j: self._count_pattern_item_count(pattern)
+                    for j, pattern in enumerate(self.patterns)
+                }
 
                 # Objective: Minimize total cost
                 total_trim_loss = gp.quicksum(pattern_trim[j] * x[j] for j in range(len(self.patterns)))
@@ -870,10 +975,18 @@ class RollOptimizeCa:
                     MIXED_COMPOSITE_PENALTY * pattern_mixed_counts[j] * x[j] 
                     for j in range(len(self.patterns))
                 )
+                
+                # # 패턴 내 복합롤 개수가 기준(MAX_COMPOSITE_WITHOUT_PENALTY) 초과 시 페널티
+                # # 예: MAX_COMPOSITE_WITHOUT_PENALTY=2이면, 3개 이상일 때 (개수-2) * EXTRA_COMPOSITE_PENALTY 적용
+                # total_extra_composite_penalty = gp.quicksum(
+                #     EXTRA_COMPOSITE_PENALTY * max(0, pattern_item_counts[j] - MAX_COMPOSITE_WITHOUT_PENALTY) * x[j]
+                #     for j in range(len(self.patterns))
+                # )
 
                 model.setObjective(
                     total_trim_loss + total_over_penalty + total_under_penalty +
-                    total_pattern_count_penalty + total_composite_penalty + total_mixed_penalty,
+                    total_pattern_count_penalty + total_composite_penalty + total_mixed_penalty +
+                    # total_extra_composite_penalty,
                     GRB.MINIMIZE
                 )
 
@@ -951,6 +1064,11 @@ class RollOptimizeCa:
             j: self._count_mixed_composites(pattern)
             for j, pattern in enumerate(self.patterns)
         }
+        # 패턴 내 복합롤(아이템) 개수 계산 (기준 초과 시 페널티 부여용)
+        pattern_item_counts = {
+            j: self._count_pattern_item_count(pattern)
+            for j, pattern in enumerate(self.patterns)
+        }
 
         total_trim_loss = solver.Sum(pattern_trim[j] * x[j] for j in range(len(self.patterns)))
         over_prod_terms = []
@@ -976,6 +1094,12 @@ class RollOptimizeCa:
         total_mixed_penalty = solver.Sum(
             MIXED_COMPOSITE_PENALTY * pattern_mixed_counts[j] * x[j] for j in range(len(self.patterns))
         )
+        
+        # # 패턴 내 복합롤 개수가 기준(MAX_COMPOSITE_WITHOUT_PENALTY) 초과 시 페널티
+        # total_extra_composite_penalty = solver.Sum(
+        #     EXTRA_COMPOSITE_PENALTY * max(0, pattern_item_counts[j] - MAX_COMPOSITE_WITHOUT_PENALTY) * x[j]
+        #     for j in range(len(self.patterns))
+        # )
 
         solver.Minimize(total_trim_loss + total_over_penalty + total_under_penalty +
                         total_pattern_count_penalty + total_composite_penalty + total_mixed_penalty)

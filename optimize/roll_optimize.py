@@ -17,8 +17,8 @@ Column Generation(열 생성) 알고리즘을 기반으로 하여, 주문 요구
 OVER_PROD_PENALTY  = 10000000.0        # 500000.0
 UNDER_PROD_PENALTY = 500000.0          # 10000000.0 
 PATTERN_SETUP_COST = 10000.0           # 새로운 패턴 종류를 1개 사용할 때마다 1000mm의 손실과 동일한 페널티
-TRIM_LOSS_PENALTY = 5.0                # 자투리 손실 1mm당 페널티
-MIXING_PENALTY = 10.0                  # 공백이 1개 섞인 경우는 페널티 비용 패턴 생성비용과 비교
+TRIM_LOSS_PENALTY = 5.0                  # 자투리 손실 1mm당 페널티  5.0
+MIXING_PENALTY = 10.0                     # 공백이 1개 섞인 경우는 페널티 비용 패턴 생성비용과 비교  10.0
 
 # 알고리즘 파라미터
 CG_MAX_ITERATIONS = 1000               # 안전장치 (최대 반복 횟수)
@@ -122,6 +122,26 @@ class RollOptimize:
             self.sep_qt_info = df_spec_pre.set_index('group_order_no')['sep_qt'].to_dict()
         else:
             self.sep_qt_info = {item: '' for item in self.items}
+        
+        # 동적 페널티 계산: 지폭 종류/오더 건수에 따라 조절
+        num_unique_widths = len(set(self.item_info.values()))
+        num_items = len(self.items)
+        
+        # # 기본 페널티 값 설정
+        # if num_unique_widths > 50:
+        #     # 지폭 종류가 많으면 페널티 감소
+        #     self.mixing_penalty = MIXING_PENALTY * 0.1
+        #     self.setup_cost = PATTERN_SETUP_COST * 0.1
+        #     logging.info(f"[페널티 조정] 지폭 종류={num_unique_widths} -> 페널티 감소")
+        # else:
+        #     self.mixing_penalty = MIXING_PENALTY
+        #     self.setup_cost = PATTERN_SETUP_COST
+
+        self.mixing_penalty = MIXING_PENALTY
+        self.setup_cost = PATTERN_SETUP_COST
+        self.over_prod_penalty = OVER_PROD_PENALTY
+        self.under_prod_penalty = UNDER_PROD_PENALTY
+        self.trim_loss_penalty = TRIM_LOSS_PENALTY
 
     def _clear_patterns(self):
         self.patterns = []
@@ -163,6 +183,9 @@ class RollOptimize:
 
         logging.info("\n--- DB에서 기존 롤 패턴을 불러와 초기 패턴을 생성합니다. ---")
         db_patterns = self.db.get_roll_patterns_from_db(self.lot_no, self.version)
+
+        # logging.info(f"--- DB 패턴 리스트 결과:={db_patterns} ---")
+        # logging.info(f"-------------------------------------------------\n")
 
         if not db_patterns:
             logging.info("--- DB에 저장된 기존 롤 패턴이 없습니다. ---")
@@ -218,6 +241,10 @@ class RollOptimize:
             #  for p, t_width in out_of_range_details:
             #      logging.info(f"  Widths: {p}, Total: {t_width}")
 
+        # for idx, pattern in enumerate(self.patterns):  # 생성된 패턴 확인
+        #     widths = [self.item_info[item] for item in pattern for _ in range(pattern[item])]
+        #     logging.info(f"  패턴 {idx}: {sorted(widths, reverse=True)} = {sum(widths)}mm")
+
     def _generate_initial_patterns(self):
         self._clear_patterns()
         if not self.items:
@@ -238,7 +265,7 @@ class RollOptimize:
         # 2. Random Shuffles (add multiple to increase diversity)
         random.seed(41) # Ensure determinism
         random_shuffles = []
-        for _ in range(20):  # Increased from 8 to 20
+        for _ in range(200):  # Increased from 8 to 20
             items_copy = list(self.items)
             random.shuffle(items_copy)
             random_shuffles.append(items_copy)
@@ -516,31 +543,33 @@ class RollOptimize:
                 
                 # (1) Over-production Penalty
                 unique_widths_count = len(set(self.item_info.values()))
-                dynamic_over_prod_penalty = max(OVER_PROD_PENALTY, PATTERN_SETUP_COST * unique_widths_count * 20)
+                # dynamic_over_prod_penalty = max(self.over_prod_penalty, self.setup_cost * unique_widths_count * 20)
+                dynamic_over_prod_penalty = self.over_prod_penalty
+
                 for item in self.demands:
                     obj_terms.append(over_prod_vars[item] * dynamic_over_prod_penalty)
-                    obj_terms.append(under_prod_vars[item] * UNDER_PROD_PENALTY)
+                    obj_terms.append(under_prod_vars[item] * self.under_prod_penalty)
                     
                 # (2) Setup Cost
                 for j in range(len(self.patterns)):
-                    obj_terms.append(y[j] * PATTERN_SETUP_COST)
+                    obj_terms.append(y[j] * self.setup_cost)
                     
                 # (3) Trim Loss
                 for j, pattern in enumerate(self.patterns):
                     loss = self.max_width - sum(self.item_info[item] * count for item, count in pattern.items())
                     if loss > 0:
-                        obj_terms.append(x[j] * loss * TRIM_LOSS_PENALTY)
+                        obj_terms.append(x[j] * loss * self.trim_loss_penalty)
                         
                 # (4) Mixing Penalty
                 for j, pattern in enumerate(self.patterns):
                     sep_qts = [self.sep_qt_info[item] for item in pattern for _ in range(pattern[item]) if self.sep_qt_info[item].strip()]
                     unique_sep_qts = set(sep_qts)
                     if len(unique_sep_qts) > 1:
-                        obj_terms.append(x[j] * MIXING_PENALTY * 50)
+                        obj_terms.append(x[j] * self.mixing_penalty * 50)
                     elif len(unique_sep_qts) == 1:
                         empty_count = sum(count for item, count in pattern.items() if not self.sep_qt_info[item].strip())
                         if empty_count > 0:
-                            obj_terms.append(x[j] * MIXING_PENALTY * empty_count)
+                            obj_terms.append(x[j] * self.mixing_penalty * empty_count)
 
                 model.setObjective(gp.quicksum(obj_terms), GRB.MINIMIZE)
                 
@@ -599,9 +628,9 @@ class RollOptimize:
 
         # Objective: Over-production Penalty (LP & MIP common)
         unique_widths_count = len(set(self.item_info.values()))
-        dynamic_over_prod_penalty = max(OVER_PROD_PENALTY, PATTERN_SETUP_COST * unique_widths_count * 20)
+        dynamic_over_prod_penalty = max(self.over_prod_penalty, self.setup_cost * unique_widths_count * 20)
         objective += solver.Sum(dynamic_over_prod_penalty * over_prod_vars[item] for item in self.demands)
-        objective += solver.Sum(UNDER_PROD_PENALTY * under_prod_vars[item] for item in self.demands)
+        objective += solver.Sum(self.under_prod_penalty * under_prod_vars[item] for item in self.demands)
 
         # MIP Specific Objective Terms
         if is_final_mip:
@@ -613,12 +642,12 @@ class RollOptimize:
                 solver.Add(x[j] <= M * y[j])
 
             # Setup Cost (MIP only, uses binary variable y)
-            objective += solver.Sum(y[j] * PATTERN_SETUP_COST for j in range(len(self.patterns)))
+            objective += solver.Sum(y[j] * self.setup_cost for j in range(len(self.patterns)))
 
         # [Common Objective] Trim Loss
         # LP 단계에서도 트림 손실 비용을 반영해야, Dual 값이 "트림을 줄이는 패턴"에 대한 가치를 반영하게 됨.
         objective += solver.Sum(
-            (self.max_width - sum(self.item_info[item] * count for item, count in pattern.items())) * x[j] * TRIM_LOSS_PENALTY
+            (self.max_width - sum(self.item_info[item] * count for item, count in pattern.items())) * x[j] * self.trim_loss_penalty
             for j, pattern in enumerate(self.patterns)
         )
 
@@ -629,11 +658,11 @@ class RollOptimize:
             unique_sep_qts = set(sep_qts)
             
             if len(unique_sep_qts) > 1:
-                total_mixing_penalty += x[j] * MIXING_PENALTY * 50
+                total_mixing_penalty += x[j] * self.mixing_penalty * 50
             elif len(unique_sep_qts) == 1:
                 empty_count = sum(count for item, count in pattern.items() if not self.sep_qt_info[item].strip())
                 if empty_count > 0:
-                    total_mixing_penalty += x[j] * MIXING_PENALTY * empty_count
+                    total_mixing_penalty += x[j] * self.mixing_penalty * empty_count
         
         objective += total_mixing_penalty
 
@@ -692,7 +721,7 @@ class RollOptimize:
             # So, Effective Item Value in DP = Dual + Width * TRIM_LOSS_PENALTY
             # Threshold to beat = SetupCost + MaxW * TRIM_LOSS_PENALTY
             
-            target_threshold = PATTERN_SETUP_COST + self.max_width * TRIM_LOSS_PENALTY
+            target_threshold = self.setup_cost + self.max_width * self.trim_loss_penalty
             
             # [DEBUG] 로그: Dual 값 통계 및 Threshold 확인
             max_dual = max(duals.values()) if duals else 0
@@ -705,7 +734,7 @@ class RollOptimize:
                 item_dual = duals.get(item, 0)
                 
                 # Add implicit value from saving trim loss
-                item_effective_value = item_dual + item_width * TRIM_LOSS_PENALTY
+                item_effective_value = item_dual + item_width * self.trim_loss_penalty
                 
                 if item_effective_value <= 0:
                     continue
@@ -770,11 +799,11 @@ class RollOptimize:
                     unique_sep_qts = set(sep_qts)
                     mixing_cost = 0
                     if len(unique_sep_qts) > 1:
-                        mixing_cost = MIXING_PENALTY * 50
+                        mixing_cost = self.mixing_penalty * 50
                     elif len(unique_sep_qts) == 1:
                         empty_count = sum(count for item, count in pattern.items() if not self.sep_qt_info[item].strip())
                         if empty_count > 0:
-                            mixing_cost = MIXING_PENALTY * empty_count
+                            mixing_cost = self.mixing_penalty * empty_count
                             
                     real_reduced_cost = reduced_cost - mixing_cost
                     if real_reduced_cost <= 1.0:
@@ -893,16 +922,16 @@ class RollOptimize:
     def run_optimize(self, start_prod_seq=0):
         logging.info(f"Starting run_optimize with {len(self.items)} items")
 
-        logging.info(f"OVER_PROD_PENALTY: {OVER_PROD_PENALTY}")
-        logging.info(f"UNDER_PROD_PENALTY: {UNDER_PROD_PENALTY}")
-        logging.info(f"PATTERN_SETUP_COST: {PATTERN_SETUP_COST}")
-        logging.info(f"TRIM_LOSS_PENALTY: {TRIM_LOSS_PENALTY}")
-        logging.info(f"MIXING_PENALTY: {MIXING_PENALTY}")
+        logging.info(f"over_prod_penalty: {self.over_prod_penalty}")
+        logging.info(f"under_prod_penalty: {self.under_prod_penalty}")
+        logging.info(f"setup_cost: {self.setup_cost}")
+        logging.info(f"trim_loss_penalty: {self.trim_loss_penalty}")
+        logging.info(f"mixing_penalty: {self.mixing_penalty}")
+        logging.info(f"SOLVER_TIME_LIMIT_MS: {self.solver_time_limit_ms}")
         logging.info(f"CG_MAX_ITERATIONS: {CG_MAX_ITERATIONS}")
         logging.info(f"CG_NO_IMPROVEMENT_LIMIT: {CG_NO_IMPROVEMENT_LIMIT}")
         logging.info(f"CG_SUBPROBLEM_TOP_N: {CG_SUBPROBLEM_TOP_N}")
         logging.info(f"SMALL_PROBLEM_THRESHOLD: {SMALL_PROBLEM_THRESHOLD}")
-        logging.info(f"SOLVER_TIME_LIMIT_MS: {self.solver_time_limit_ms}")
 
         start_time = time.time()
         
