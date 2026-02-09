@@ -30,8 +30,8 @@ from gurobipy import GRB
 # ============================================================
 
 # --- 생산량 페널티 ---
-OVER_PROD_PENALTY  = 50000.0  # 주문량 초과 생산에 대한 페널티  500000
-UNDER_PROD_PENALTY = 100000.0  # 주문량 미달 생산에 대한 페널티
+OVER_PROD_PENALTY  = 500000.0  # 주문량 초과 생산에 대한 페널티  500000
+UNDER_PROD_PENALTY = 1000000.0  # 주문량 미달 생산에 대한 페널티
 
 
 # --- 복합폭 및 패턴 관련 페널티 ---
@@ -57,14 +57,13 @@ MAX_SMALL_WIDTH_PER_PATTERN = 2  # 한 패턴에서 허용되는 소폭 롤 수
 
 # --- 기타 페널티 ---
 OVER_PROD_WEIGHT_CAP = 6.0  # 소량 주문에 대한 초과 페널티 가중치 상한
-MIXED_COMPOSITE_PENALTY = 500.0  # 서로 다른 규격 조합 복합롤에 대한 추가 페널티
-
-# --- 패턴 내 복합롤 개수 제한 ---
-MAX_COMPOSITE_WITHOUT_PENALTY = 2  # 패턴당 페널티 없이 허용되는 복합롤(아이템) 개수
-EXTRA_COMPOSITE_PENALTY = 100000.0  # 기준 초과 시 복합롤 1개당 페널티 (높은 값 = 사실상 금지)
+MIXED_COMPOSITE_PENALTY = 50.0  # 서로 다른 규격 조합 복합롤에 대한 추가 페널티
 
 # --- 복합롤 롤길이 제약 ---
 ALLOW_DIFF_LENGTH_COMPOSITE = 'N'  # 'Y': 롤길이가 달라도 복합롤 생성 가능, 'N': 같은 롤길이끼리만 복합롤 생성
+
+# --- 2단계 최적화(Two-Stage) 파라미터 ---
+TWO_STAGE_TOLERANCE = 0.05  # Stage 1 비용 대비 허용 오차 (10%)
 
 
 class RollOptimizeCa:
@@ -557,21 +556,6 @@ class RollOptimizeCa:
         """
         return len(pattern)
 
-    def _effective_demand(self, item):
-        """
-        아이템의 실효 수요를 계산합니다.
-        
-        복합폭의 경우 구성 요소의 수요 합산.
-        
-        Args:
-            item: 아이템 이름
-        
-        Returns:
-            float: 실효 수요량
-        """
-        composition = self.item_composition[item]
-        return sum(self.demands.get(base_item, 0) * qty for base_item, qty in composition.items())
-
     def _format_width(self, value):
         """
         폭 값을 포맷팅합니다 (정수면 정수로, 아니면 소수 2자리).
@@ -975,18 +959,10 @@ class RollOptimizeCa:
                     MIXED_COMPOSITE_PENALTY * pattern_mixed_counts[j] * x[j] 
                     for j in range(len(self.patterns))
                 )
-                
-                # # 패턴 내 복합롤 개수가 기준(MAX_COMPOSITE_WITHOUT_PENALTY) 초과 시 페널티
-                # # 예: MAX_COMPOSITE_WITHOUT_PENALTY=2이면, 3개 이상일 때 (개수-2) * EXTRA_COMPOSITE_PENALTY 적용
-                # total_extra_composite_penalty = gp.quicksum(
-                #     EXTRA_COMPOSITE_PENALTY * max(0, pattern_item_counts[j] - MAX_COMPOSITE_WITHOUT_PENALTY) * x[j]
-                #     for j in range(len(self.patterns))
-                # )
 
                 model.setObjective(
                     total_trim_loss + total_over_penalty + total_under_penalty +
-                    total_pattern_count_penalty + total_composite_penalty + total_mixed_penalty +
-                    # total_extra_composite_penalty,
+                    total_pattern_count_penalty + total_composite_penalty + total_mixed_penalty,
                     GRB.MINIMIZE
                 )
 
@@ -1117,6 +1093,292 @@ class RollOptimizeCa:
         if not is_final_mip:
             solution['duals'] = {item: constraints[item].dual_value() for item in self.demands}
         return solution
+
+    def solve_two_stage(self, tolerance=None):
+        """
+        2단계 최적화(2-Stage Optimization)를 수행합니다.
+        
+        [Stage 1] 수율+손실 최적화
+        - Over/Under Penalty + Trim Loss + 복합폭 페널티 최소화
+        - 이론적 최적 수율 및 손실 확보
+        
+        [Stage 2] 패턴 개수 최소화
+        - Stage 1의 최적 비용에 Tolerance(허용 오차)를 적용하여 제약조건으로 추가
+        - 패턴 종류 개수(y의 합)를 직접 최소화
+        
+        Args:
+            tolerance: Stage 1 비용 대비 허용 오차 (기본 TWO_STAGE_TOLERANCE 상수 사용)
+        
+        Returns:
+            dict: {
+                'objective': 목적함수 값,
+                'pattern_counts': {패턴인덱스: 사용횟수},
+                'over_production': {아이템: 초과량},
+                'under_production': {아이템: 미달량},
+            }
+            또는 None (해 없음)
+        """
+        # tolerance가 None이면 상수 사용
+        if tolerance is None:
+            tolerance = TWO_STAGE_TOLERANCE
+        
+        try:
+            logging.info(f"\n{'='*60}")
+            logging.info("[2-Stage Optimization] 시작")
+            logging.info(f"총 {len(self.patterns)}개의 패턴에 대해 2단계 최적화 수행")
+            logging.info(f"Tolerance: {tolerance*100:.1f}%")
+            logging.info(f"{'='*60}")
+            
+            model = gp.Model("RollOptimizationCA_TwoStage")
+            model.setParam("OutputFlag", 0)
+            model.setParam("LogToConsole", 0)
+            model.setParam("TimeLimit", FINAL_MIP_TIME_LIMIT_MS / 1000.0)
+            
+            # ============================================================
+            # 변수 선언
+            # ============================================================
+            # Variables: x (Pattern Counts)
+            x = {}
+            for j in range(len(self.patterns)):
+                x[j] = model.addVar(vtype=GRB.INTEGER, name=f'P_{j}')
+            
+            # Variables: y (Binary - 패턴 사용 여부)
+            y = {}
+            for j in range(len(self.patterns)):
+                y[j] = model.addVar(vtype=GRB.BINARY, name=f'Y_{j}')
+            
+            # Variables: Over/Under Production
+            over_prod_vars = {}
+            under_prod_vars = {}
+            for item, demand in self.demands.items():
+                over_prod_vars[item] = model.addVar(vtype=GRB.CONTINUOUS, name=f'Over_{item}')
+                under_prod_vars[item] = model.addVar(lb=0, ub=max(0, demand), vtype=GRB.CONTINUOUS, name=f'Under_{item}')
+            
+            model.update()
+            
+            # ============================================================
+            # 제약조건: 수요 충족
+            # ============================================================
+            for item, demand in self.demands.items():
+                item_rpp = self.item_rolls_per_pattern.get(item, 1)
+                production_expr = gp.quicksum(
+                    sum(self.item_composition[item_name].get(item, 0) * count 
+                        for item_name, count in self.patterns[j].items()) * x[j] * item_rpp
+                    for j in range(len(self.patterns))
+                )
+                model.addConstr(
+                    production_expr + under_prod_vars[item] == demand + over_prod_vars[item],
+                    name=f'demand_{item}'
+                )
+            
+            # Constraint: x[j] <= M * y[j] (패턴 사용 시 y[j]=1)
+            M = sum(self.demands.values()) + 1
+            for j in range(len(self.patterns)):
+                model.addConstr(x[j] <= M * y[j], name=f'link_{j}')
+            
+            # ============================================================
+            # 패턴 메트릭 사전 계산
+            # ============================================================
+            pattern_trim = {
+                j: self.max_width - sum(self.item_info[item] * count for item, count in pattern.items())
+                for j, pattern in enumerate(self.patterns)
+            }
+            pattern_composite_units = {
+                j: self._count_pattern_composite_units(pattern)
+                for j, pattern in enumerate(self.patterns)
+            }
+            pattern_mixed_counts = {
+                j: self._count_mixed_composites(pattern)
+                for j, pattern in enumerate(self.patterns)
+            }
+            
+            # ============================================================
+            # [Stage 1] 수율 최적화 (Over/Under Penalty만)
+            # ============================================================
+            logging.info("\n[Stage 1] 수율 최적화 시작 (Over/Under Penalty만 최소화)")
+            
+            # Over production penalty with weight
+            over_prod_terms = []
+            base_demand = max(self.max_demand, 1)
+            for item in self.demands:
+                demand = max(self.demands[item], 1)
+                weight = min(OVER_PROD_WEIGHT_CAP, base_demand / demand)
+                over_prod_terms.append(OVER_PROD_PENALTY * weight * over_prod_vars[item])
+            total_over_penalty = gp.quicksum(over_prod_terms) if over_prod_terms else 0
+            
+            total_under_penalty = gp.quicksum(UNDER_PROD_PENALTY * under_prod_vars[item] for item in self.demands)
+
+             # Trim Loss
+            total_trim_loss = gp.quicksum(pattern_trim[j] * x[j] for j in range(len(self.patterns)))
+            
+            
+            # 복합폭 사용 페널티
+            total_composite_penalty = gp.quicksum(
+                self.composite_penalty * pattern_composite_units[j] * x[j] 
+                for j in range(len(self.patterns))
+            )
+            
+            # 혼합 복합폭 페널티
+            total_mixed_penalty = gp.quicksum(
+                MIXED_COMPOSITE_PENALTY * pattern_mixed_counts[j] * x[j] 
+                for j in range(len(self.patterns))
+            )
+            
+            # Stage 1 목적함수: Over/Under Penalty만
+            stage1_objective = total_over_penalty + total_under_penalty + total_trim_loss + total_composite_penalty + total_mixed_penalty
+            
+            model.setObjective(stage1_objective, GRB.MINIMIZE)
+            model.optimize()
+            
+            if model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL) and not (model.Status == GRB.TIME_LIMIT and model.SolCount > 0):
+                logging.warning(f"[Stage 1] 실패 (Status={model.Status}). 기존 방식으로 폴백.")
+                return self._solve_master_problem(is_final_mip=True)
+            
+            stage1_cost = model.ObjVal
+            logging.info(f"[Stage 1] 완료 - 최적 비용: {stage1_cost:.2f}")
+            
+            # Stage 1 결과 저장 (수율 정보)
+            stage1_over_prod = sum(over_prod_vars[item].X for item in self.demands)
+            stage1_under_prod = sum(under_prod_vars[item].X for item in self.demands)
+            logging.info(f"[Stage 1] 초과 생산 합계: {stage1_over_prod:.1f}, 미달 생산 합계: {stage1_under_prod:.1f}")
+            
+            # ============================================================
+            # [Stage 2] 패턴 최적화 (수율 제약 하에 Trim Loss + 패턴 페널티 최소화)
+            # ============================================================
+            logging.info(f"\n[Stage 2] 패턴 최적화 시작 (수율 제약: Cost <= {stage1_cost:.2f} * {1 + tolerance})")
+            
+            # 수율 제약 추가: Stage 1 비용 + Tolerance 이내로 유지
+            cutoff_cost = stage1_cost * (1.0 + tolerance)
+            model.addConstr(stage1_objective <= cutoff_cost, "Efficiency_Constraint")
+            
+            # Stage 2 목적함수: 패턴 개수(y의 합) 최소화
+            # 수율 제약이 걸려 있으므로 수율은 유지하면서 패턴 개수만 줄임
+            stage2_objective = gp.quicksum(y[j] for j in range(len(self.patterns)))
+            
+            model.setObjective(stage2_objective, GRB.MINIMIZE)
+            # model.setParam('MIPGap', 0.02)  # 패턴 개수 최소화에서 약간의 갭 허용
+            model.optimize()
+            
+            if model.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL) and not (model.Status == GRB.TIME_LIMIT and model.SolCount > 0):
+                logging.warning(f"[Stage 2] 실패 (Status={model.Status}). Stage 1 결과 사용.")
+                # Stage 1 결과로 다시 최적화
+                model.setObjective(stage1_objective, GRB.MINIMIZE)
+                model.optimize()
+            
+            status_msg = "Optimal" if model.Status == GRB.OPTIMAL else "Feasible"
+            logging.info(f"[Stage 2] 완료 - 상태: {status_msg}, 목적함수: {model.ObjVal:.2f}")
+            
+            # 최종 결과 출력
+            used_patterns = sum(1 for j in range(len(self.patterns)) if x[j].X > 0.5)
+            total_trim = sum(pattern_trim[j] * x[j].X for j in range(len(self.patterns)))
+            logging.info(f"[2-Stage 결과] 사용 패턴 수: {used_patterns}, 총 Trim Loss: {total_trim:.0f}")
+            logging.info(f"{'='*60}\n")
+            
+            solution = {
+                'objective': model.ObjVal,
+                'pattern_counts': {j: x[j].X for j in range(len(self.patterns))},
+                'over_production': {item: over_prod_vars[item].X for item in self.demands},
+                'under_production': {item: under_prod_vars[item].X for item in self.demands},
+            }
+            return solution
+            
+        except Exception as e:
+            logging.warning(f"[2-Stage Optimization] 실패: {e}. 기존 방식으로 폴백.")
+            return self._solve_master_problem(is_final_mip=True)
+
+    def _select_best_solution(self, solution1, solution2):
+        """
+        두 솔루션을 비교하여 더 좋은 해를 선택합니다.
+        
+        [비교 우선순위]
+        1. 미달 생산 합계 (낮을수록 좋음) - 가장 중요
+        2. 패턴 개수 (적을수록 좋음)
+        3. Trim Loss 합계 (낮을수록 좋음)
+        
+        Args:
+            solution1: 방식 1 (단일 MIP) 솔루션
+            solution2: 방식 2 (2-Stage) 솔루션
+        
+        Returns:
+            더 좋은 솔루션 또는 None
+        """
+        # 둘 다 실패한 경우
+        if not solution1 and not solution2:
+            logging.warning("[솔루션 비교] 두 방식 모두 해를 찾지 못함")
+            return None
+        
+        # 하나만 성공한 경우
+        if not solution1:
+            logging.info("[솔루션 비교] 방식 1 실패 → 방식 2 (2-Stage) 선택")
+            return solution2
+        if not solution2:
+            logging.info("[솔루션 비교] 방식 2 실패 → 방식 1 (단일 MIP) 선택")
+            return solution1
+        
+        # 둘 다 성공한 경우 - 비교
+        def calc_metrics(solution, name):
+            """솔루션 메트릭 계산"""
+            under_prod = sum(solution.get('under_production', {}).values())
+            over_prod = sum(solution.get('over_production', {}).values())
+            pattern_count = sum(1 for cnt in solution.get('pattern_counts', {}).values() if cnt > 0.5)
+            
+            # Trim Loss 계산
+            trim_loss = 0
+            for j, cnt in solution.get('pattern_counts', {}).items():
+                if cnt > 0.5:
+                    pattern = self.patterns[j]
+                    pattern_width = sum(self.item_info[item] * count for item, count in pattern.items())
+                    trim_loss += (self.max_width - pattern_width) * cnt
+            
+            return {
+                'name': name,
+                'under_prod': under_prod,
+                'over_prod': over_prod,
+                'pattern_count': pattern_count,
+                'trim_loss': trim_loss
+            }
+        
+        m1 = calc_metrics(solution1, "단일 MIP")
+        m2 = calc_metrics(solution2, "2-Stage")
+        
+        # 비교 결과 로깅
+        logging.info(f"\n{'='*60}")
+        logging.info("[솔루션 비교 결과]")
+        logging.info(f"{'='*60}")
+        logging.info(f"{'항목':<15} {'단일 MIP':>15} {'2-Stage':>15}")
+        logging.info(f"{'-'*45}")
+        logging.info(f"{'미달 생산':<15} {m1['under_prod']:>15.1f} {m2['under_prod']:>15.1f}")
+        logging.info(f"{'초과 생산':<15} {m1['over_prod']:>15.1f} {m2['over_prod']:>15.1f}")
+        logging.info(f"{'패턴 개수':<15} {m1['pattern_count']:>15} {m2['pattern_count']:>15}")
+        logging.info(f"{'Trim Loss':<15} {m1['trim_loss']:>15.0f} {m2['trim_loss']:>15.0f}")
+        logging.info(f"{'='*60}")
+        
+        # 비교 로직 (우선순위: 미달생산 → 패턴개수 → Trim Loss)
+        # 1. 미달 생산 비교 (낮을수록 좋음)
+        if abs(m1['under_prod'] - m2['under_prod']) > 0.01:
+            if m1['under_prod'] < m2['under_prod']:
+                logging.info(f"[선택] 단일 MIP (미달 생산 더 적음: {m1['under_prod']:.1f} < {m2['under_prod']:.1f})")
+                return solution1
+            else:
+                logging.info(f"[선택] 2-Stage (미달 생산 더 적음: {m2['under_prod']:.1f} < {m1['under_prod']:.1f})")
+                return solution2
+        
+        # 2. 패턴 개수 비교 (적을수록 좋음)
+        if m1['pattern_count'] != m2['pattern_count']:
+            if m1['pattern_count'] < m2['pattern_count']:
+                logging.info(f"[선택] 단일 MIP (패턴 개수 더 적음: {m1['pattern_count']} < {m2['pattern_count']})")
+                return solution1
+            else:
+                logging.info(f"[선택] 2-Stage (패턴 개수 더 적음: {m2['pattern_count']} < {m1['pattern_count']})")
+                return solution2
+        
+        # 3. Trim Loss 비교 (낮을수록 좋음)
+        if m1['trim_loss'] <= m2['trim_loss']:
+            logging.info(f"[선택] 단일 MIP (Trim Loss: {m1['trim_loss']:.0f} <= {m2['trim_loss']:.0f})")
+            return solution1
+        else:
+            logging.info(f"[선택] 2-Stage (Trim Loss: {m2['trim_loss']:.0f} < {m1['trim_loss']:.0f})")
+            return solution2
 
     def _solve_subproblem(self, duals):
         """
@@ -1305,8 +1567,22 @@ class RollOptimizeCa:
                     break
             self._rebuild_pattern_cache()
 
-        # --- 4단계: 최종 MIP 풀이 ---
-        final_solution = self._solve_master_problem(is_final_mip=True)
+        # --- 4단계: 두 방식 비교 후 최적해 선택 ---
+        # 방식 1: 기존 단일 MIP
+        # 방식 2: 2-Stage Optimization
+        # 두 방식의 결과를 비교하여 더 좋은 해를 선택
+        
+        logging.info("\n[솔루션 비교] 두 방식 실행 및 비교 시작")
+        
+        # 방식 1: 기존 단일 MIP
+        solution_single = self._solve_master_problem(is_final_mip=True)
+        
+        # 방식 2: 2-Stage Optimization
+        solution_two_stage = self.solve_two_stage()
+        
+        # 결과 비교 및 선택
+        final_solution = self._select_best_solution(solution_single, solution_two_stage)
+        
         if not final_solution:
             return {"error": f"최종 해를 찾지 못했습니다. {self.min_width}mm 이상을 충족하는 주문이 부족합니다."}
 

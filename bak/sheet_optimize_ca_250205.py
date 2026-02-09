@@ -1,42 +1,42 @@
 """
 ===============================================================================
-SheetOptimizeCa Module - ì‰¬íŠ¸ì§€ ë³µí•©í­(Composite Width) ìµœì í™” ëª¨ë“ˆ
+SheetOptimizeCa Module - ½¬Æ®Áö º¹ÇÕÆø(Composite Width) ÃÖÀûÈ­ ¸ğµâ
 ===============================================================================
 
-[ëª¨ë“ˆ ê°œìš”]
-ì´ ëª¨ë“ˆì€ ì‰¬íŠ¸ì§€(Sheet) ì˜¤ë”ì— ëŒ€í•´ "ë³µí•©í­(Composite Width)" ê°œë…ì„ ì ìš©í•˜ì—¬
-ìµœì ì˜ ì ˆë‹¨ íŒ¨í„´ì„ ì°¾ìŠµë‹ˆë‹¤. ì¼ë°˜ì ì¸ ì‰¬íŠ¸ ìµœì í™”(sheet_optimize.py)ì™€ ë‹¬ë¦¬,
-ì—¬ëŸ¬ ê°œì˜ ê¸°ë³¸ ì§€í­ì„ ë¬¶ì–´ì„œ í•˜ë‚˜ì˜ "ë³µí•© ì•„ì´í…œ"ìœ¼ë¡œ ì²˜ë¦¬í•©ë‹ˆë‹¤.
+[¸ğµâ °³¿ä]
+ÀÌ ¸ğµâÀº ½¬Æ®Áö(Sheet) ¿À´õ¿¡ ´ëÇØ "º¹ÇÕÆø(Composite Width)" °³³äÀ» Àû¿ëÇÏ¿©
+ÃÖÀûÀÇ Àı´Ü ÆĞÅÏÀ» Ã£½À´Ï´Ù. ÀÏ¹İÀûÀÎ ½¬Æ® ÃÖÀûÈ­(sheet_optimize.py)¿Í ´Ş¸®,
+¿©·¯ °³ÀÇ ±âº» ÁöÆøÀ» ¹­¾î¼­ ÇÏ³ªÀÇ "º¹ÇÕ ¾ÆÀÌÅÛ"À¸·Î Ã³¸®ÇÕ´Ï´Ù.
 
-[ì£¼ìš” íŠ¹ì§•]
-1. **ë³µí•©í­(Composite Width) ê°œë…**:
-   - ë™ì¼í•˜ê±°ë‚˜ ì„œë¡œ ë‹¤ë¥¸ ì§€í­ë“¤ì„ ì¡°í•©í•˜ì—¬ í•˜ë‚˜ì˜ ìŠ¬ë¦¬í„° ì¹¼(Slitter Knife)ë¡œ
-     í•œ ë²ˆì— ì ˆë‹¨í•  ìˆ˜ ìˆëŠ” "ë³µí•© ì•„ì´í…œ"ì„ ìƒì„±í•©ë‹ˆë‹¤.
-   - ì˜ˆ: 710mm x 2 = 1420mm ë³µí•©í­, ë˜ëŠ” 710mm + 850mm = 1560mm ë³µí•©í­
+[ÁÖ¿ä Æ¯Â¡]
+1. **º¹ÇÕÆø(Composite Width) °³³ä**:
+   - µ¿ÀÏÇÏ°Å³ª ¼­·Î ´Ù¸¥ ÁöÆøµéÀ» Á¶ÇÕÇÏ¿© ÇÏ³ªÀÇ ½½¸®ÅÍ Ä®(Slitter Knife)·Î
+     ÇÑ ¹ø¿¡ Àı´ÜÇÒ ¼ö ÀÖ´Â "º¹ÇÕ ¾ÆÀÌÅÛ"À» »ı¼ºÇÕ´Ï´Ù.
+   - ¿¹: 710mm x 2 = 1420mm º¹ÇÕÆø, ¶Ç´Â 710mm + 850mm = 1560mm º¹ÇÕÆø
 
-2. **ë¯¸í„°(m) ê¸°ë°˜ ìˆ˜ìš” ê³„ì‚°**:
-   - ì‰¬íŠ¸ì§€ ì£¼ë¬¸ì€ í†¤(ton) ë‹¨ìœ„ë¡œ ë“¤ì–´ì˜¤ì§€ë§Œ, ë‚´ë¶€ì ìœ¼ë¡œëŠ” í•„ìš”í•œ ì´ ê¸¸ì´(m)ë¡œ
-     ë³€í™˜í•˜ì—¬ ê³„ì‚°í•©ë‹ˆë‹¤.
-   - í‰ëŸ‰(b_wgt), ê°€ë¡œ(ì§€í­), ì„¸ë¡œ(ì¥ë‹¹ ê¸¸ì´)ë¥¼ ê¸°ë°˜ìœ¼ë¡œ ë³€í™˜í•©ë‹ˆë‹¤.
+2. **¹ÌÅÍ(m) ±â¹İ ¼ö¿ä °è»ê**:
+   - ½¬Æ®Áö ÁÖ¹®Àº Åæ(ton) ´ÜÀ§·Î µé¾î¿ÀÁö¸¸, ³»ºÎÀûÀ¸·Î´Â ÇÊ¿äÇÑ ÃÑ ±æÀÌ(m)·Î
+     º¯È¯ÇÏ¿© °è»êÇÕ´Ï´Ù.
+   - Æò·®(b_wgt), °¡·Î(ÁöÆø), ¼¼·Î(Àå´ç ±æÀÌ)¸¦ ±â¹İÀ¸·Î º¯È¯ÇÕ´Ï´Ù.
 
-3. **íŒ¨í„´ êµ¬ì¡°**:
-   - ê° íŒ¨í„´ì€ ì—¬ëŸ¬ ë³µí•© ì•„ì´í…œë“¤ì˜ ì¡°í•© + í•´ë‹¹ íŒ¨í„´ì˜ ë¡¤ ê¸¸ì´ë¡œ êµ¬ì„±ë©ë‹ˆë‹¤.
-   - íŒ¨í„´ = {composition: {ì•„ì´í…œëª…: ê°œìˆ˜}, length: ë¡¤ ê¸¸ì´, loss_per_roll: ì†ì‹¤}
+3. **ÆĞÅÏ ±¸Á¶**:
+   - °¢ ÆĞÅÏÀº ¿©·¯ º¹ÇÕ ¾ÆÀÌÅÛµéÀÇ Á¶ÇÕ + ÇØ´ç ÆĞÅÏÀÇ ·Ñ ±æÀÌ·Î ±¸¼ºµË´Ï´Ù.
+   - ÆĞÅÏ = {composition: {¾ÆÀÌÅÛ¸í: °³¼ö}, length: ·Ñ ±æÀÌ, loss_per_roll: ¼Õ½Ç}
 
-[ìµœì í™” ì•Œê³ ë¦¬ì¦˜]
-- ì´ ëª¨ë“ˆ ìì²´ëŠ” íŒ¨í„´ ìƒì„± ë¡œì§ì„ í¬í•¨í•˜ì§€ ì•Šìœ¼ë©°, ì™¸ë¶€ì—ì„œ `self.patterns`ì—
-  ë¯¸ë¦¬ íŒ¨í„´ì„ ì£¼ì…í•œ í›„ `run_optimize()`ë¥¼ í˜¸ì¶œí•´ì•¼ í•©ë‹ˆë‹¤.
-- ìµœì¢… í•´ëŠ” `_solve_master_problem_ilp()`ë¥¼ í†µí•´ ì •ìˆ˜ê³„íšë²•(MIP)ìœ¼ë¡œ êµ¬í•©ë‹ˆë‹¤.
+[ÃÖÀûÈ­ ¾Ë°í¸®Áò]
+- ÀÌ ¸ğµâ ÀÚÃ¼´Â ÆĞÅÏ »ı¼º ·ÎÁ÷À» Æ÷ÇÔÇÏÁö ¾ÊÀ¸¸ç, ¿ÜºÎ¿¡¼­ `self.patterns`¿¡
+  ¹Ì¸® ÆĞÅÏÀ» ÁÖÀÔÇÑ ÈÄ `run_optimize()`¸¦ È£ÃâÇØ¾ß ÇÕ´Ï´Ù.
+- ÃÖÁ¾ ÇØ´Â `_solve_master_problem_ilp()`¸¦ ÅëÇØ Á¤¼ö°èÈ¹¹ı(MIP)À¸·Î ±¸ÇÕ´Ï´Ù.
 
-[í´ë˜ìŠ¤ êµ¬ì¡°]
-- SheetOptimizeCa: ë©”ì¸ ìµœì í™” í´ë˜ìŠ¤
-  - __init__: ì£¼ë¬¸ ë°ì´í„° ë¡œë“œ ë° ì´ˆê¸°í™”
-  - _prepare_items: ë³µí•©í­ ì•„ì´í…œ ìƒì„±
-  - _calculate_demand_meters: ì£¼ë¬¸ëŸ‰ì„ ë¯¸í„° ë‹¨ìœ„ë¡œ ë³€í™˜
-  - run_optimize: ìµœì í™” ì‹¤í–‰ (íŒ¨í„´ì´ ë¯¸ë¦¬ ì„¤ì •ë˜ì–´ ìˆì–´ì•¼ í•¨)
-  - _format_results: ê²°ê³¼ í¬ë§·íŒ…
-  - _build_pattern_details: DB ì €ì¥ìš© ìƒì„¸ ì •ë³´ ìƒì„±
-  - _build_fulfillment_summary: ì£¼ë¬¸ ì´í–‰ ìš”ì•½ ìƒì„±
+[Å¬·¡½º ±¸Á¶]
+- SheetOptimizeCa: ¸ŞÀÎ ÃÖÀûÈ­ Å¬·¡½º
+  - __init__: ÁÖ¹® µ¥ÀÌÅÍ ·Îµå ¹× ÃÊ±âÈ­
+  - _prepare_items: º¹ÇÕÆø ¾ÆÀÌÅÛ »ı¼º
+  - _calculate_demand_meters: ÁÖ¹®·®À» ¹ÌÅÍ ´ÜÀ§·Î º¯È¯
+  - run_optimize: ÃÖÀûÈ­ ½ÇÇà (ÆĞÅÏÀÌ ¹Ì¸® ¼³Á¤µÇ¾î ÀÖ¾î¾ß ÇÔ)
+  - _format_results: °á°ú Æ÷¸ËÆÃ
+  - _build_pattern_details: DB ÀúÀå¿ë »ó¼¼ Á¤º¸ »ı¼º
+  - _build_fulfillment_summary: ÁÖ¹® ÀÌÇà ¿ä¾à »ı¼º
 
 ===============================================================================
 """
@@ -54,37 +54,37 @@ import configparser
 import os
 
 
-# í˜ë„í‹° ê°’ (ë¡¤ ìˆ˜ ê¸°ë°˜)
-OVER_PROD_PENALTY  = 100000.0     # ê³¼ì‰ ìƒì‚°ì— ëŒ€í•œ í˜ë„í‹° (1ë¡¤ë‹¹)
-UNDER_PROD_PENALTY = 50000.0   # ë¶€ì¡± ìƒì‚°ì— ëŒ€í•œ í˜ë„í‹° (1ë¡¤ë‹¹, ë¶€ì¡±ì€ ê³¼ì‰ë³´ë‹¤ ë” í° í˜ë„í‹°)
-PATTERN_COUNT_PENALTY = 100000.0  # íŒ¨í„´ ì¢…ë¥˜ ìˆ˜ì— ëŒ€í•œ í˜ë„í‹° (ìƒì‚° íš¨ìœ¨ì„ ìœ„í•´ íŒ¨í„´ ìˆ˜ ì¤„ì„)
-DISALLOWED_SINGLE_BASE_WIDTHS = {}  # ë‹¨ì¼ ì‚¬ìš©ì„ ê¸ˆì§€í•  ì£¼ë¬¸ í­ ì§‘í•©
-SINGLE_STRIP_PENALTY = 50000.0  # íŒ¨í„´ ë‚´ ë‹¨í­ ì•„ì´í…œ(x1) ê°œìˆ˜ì— ëŒ€í•œ í˜ë„í‹° (ë³µí•©í­ x2 ì´ìƒ ì‚¬ìš© ìœ ë„)
-PATTERN_COMPLEXITY_PENALTY = 1.0  # ë³µì¡ë„ í˜ë„í‹° (í•œ íŒ¨í„´ì— ì—¬ëŸ¬ ê·œê²© ì„ì§€ ì•Šë„ë¡)
-MIXED_SHEET_LENGTH_PENALTY = 100.0  # íŒ¨í„´ ë‚´ ë‹¤ë¥¸ ì„¸ë¡œ ê¸¸ì´ ì¡°í•©ì— ëŒ€í•œ í˜ë„í‹° (ê°™ì€ ì„¸ë¡œë¼ë¦¬ ì¡°í•© ìœ ë„)
+# Æä³ÎÆ¼ °ª
+OVER_PROD_PENALTY = 10.0    # °ú»ı»ê¿¡ ´ëÇÑ Æä³ÎÆ¼(1¹ÌÅÍ´ç Æä³ÎÆ¼ ºÎ¿© °ª)
+UNDER_PROD_PENALTY = 50.0  # ºÎÁ·»ı»ê¿¡ ´ëÇÑ Æä³ÎÆ¼(1¹ÌÅÍ´ç Æä³ÎÆ¼ ºÎ¿© °ª)
+PATTERN_COUNT_PENALTY = 100000.0       # "Ä® ¼¼ÆÃ(ÆĞÅÏ º¯°æ) È½¼ö¸¦ ÁÙ¿©¶ó!" (»ı»ê È¿À²À» À§ÇØ ÀüÃ¼ ÆĞÅÏ Á¾·ù¸¦ ÁÙÀÓ)
+DISALLOWED_SINGLE_BASE_WIDTHS = {}  # ´ÜÀÏ »ç¿ëÀ» ±İÁöÇÒ ÁÖ¹® Æø ÁıÇÕ
+SINGLE_STRIP_PENALTY = 500000.0  # ÆĞÅÏ ³» ´ÜÆø ¾ÆÀÌÅÛ °³¼ö¿¡ ºñ·ÊÇÏ¿© Æä³ÎÆ¼ ºÎ¿© (º¹ÇÕÆø x2 ÀÌ»ó »ç¿ë À¯µµ)
+PATTERN_COMPLEXITY_PENALTY = 1.0  #  (º¹Àâµµ Æä³ÎÆ¼) "ÇÑ ÆĞÅÏ¿¡ ¿©·¯ ±Ô°İÀ» ¼¯Áö ¸¶¶ó!" (ÀÛ¾÷ÀÚ°¡ Çò°¥¸®Áö ¾Ê°Ô ´Ü¼øÇÑ ±¸¼ºÀ» ¼±È£ÇÏ°Ô ¸¸µê)
+MIXED_SHEET_LENGTH_PENALTY = 10.0  # [New] ÆĞÅÏ ³» ´Ù¸¥ ¼¼·Î ±æÀÌ Á¶ÇÕ¿¡ ´ëÇÑ Æä³ÎÆ¼ (°°Àº ¼¼·Î³¢¸® Á¶ÇÕ À¯µµ)
 
-# ì•Œê³ ë¦¬ì¦˜ íŒŒë¼ë¯¸í„°
-MIN_PIECES_PER_PATTERN = 1      # íŒ¨í„´ì— í¬í•¨ë  ìˆ˜ ìˆëŠ” ìµœì†Œ í­(piece)ì˜ ìˆ˜
-SMALL_PROBLEM_THRESHOLD = 8     # ì „ì²´ íƒìƒ‰ì„ ìˆ˜í–‰í•  ìµœëŒ€ ì£¼ë¬¸ ì§€í­ ì¢…ë¥˜ ìˆ˜
-SOLVER_TIME_LIMIT_MS = 180000    # ìµœì¢… MIP ì†”ë²„ì˜ ìµœëŒ€ ì‹¤í–‰ ì‹œê°„ (ë°€ë¦¬ì´ˆ)
-CG_MAX_ITERATIONS = 1000         # ì—´ ìƒì„±(Column Generation) ìµœëŒ€ ë°˜ë³µ íšŸìˆ˜
-CG_NO_IMPROVEMENT_LIMIT = 50    # ê°œì„  ì—†ëŠ” ê²½ìš°, ì—´ ìƒì„± ì¡°ê¸° ì¢…ë£Œ ì¡°ê±´
-CG_SUBPROBLEM_TOP_N = 10         # ì—´ ìƒì„± ì‹œ, ê° ë°˜ë³µì—ì„œ ì¶”ê°€í•  ìƒìœ„ Nê°œ ì‹ ê·œ íŒ¨í„´
-# ë‚˜ì´í”„ ë¡œë“œ ì œì•½: íŒ¨í„´ ìƒì‚° íšŸìˆ˜ëŠ” k1*a + k2*b í˜•íƒœì—¬ì•¼ í•¨ (a,b>=0 ì •ìˆ˜)
+# ¾Ë°í¸®Áò ÆÄ¶ó¹ÌÅÍ
+MIN_PIECES_PER_PATTERN = 1      # ÆĞÅÏ¿¡ Æ÷ÇÔµÉ ¼ö ÀÖ´Â ÃÖ¼Ò Æø(piece)ÀÇ ¼ö
+SMALL_PROBLEM_THRESHOLD = 8     # ÀüÃ¼ Å½»öÀ» ¼öÇàÇÒ ÃÖ´ë ÁÖ¹® ÁöÆø Á¾·ù ¼ö
+SOLVER_TIME_LIMIT_MS = 180000    # ÃÖÁ¾ MIP ¼Ö¹öÀÇ ÃÖ´ë ½ÇÇà ½Ã°£ (¹Ğ¸®ÃÊ)
+CG_MAX_ITERATIONS = 1000         # ¿­ »ı¼º(Column Generation) ÃÖ´ë ¹İº¹ È½¼ö
+CG_NO_IMPROVEMENT_LIMIT = 50    # °³¼± ¾ø´Â °æ¿ì, ¿­ »ı¼º Á¶±â Á¾·á Á¶°Ç
+CG_SUBPROBLEM_TOP_N = 10         # ¿­ »ı¼º ½Ã, °¢ ¹İº¹¿¡¼­ Ãß°¡ÇÒ »óÀ§ N°³ ½Å±Ô ÆĞÅÏ
+# ³ªÀÌÇÁ ·Îµå Á¦¾à: ÆĞÅÏ »ı»ê È½¼ö´Â k1*a + k2*b ÇüÅÂ¿©¾ß ÇÔ (a,b>=0 Á¤¼ö)
 # KNIFE_LOAD_K1 = 1
 # KNIFE_LOAD_K2 = 1
 
 
 
-# TRIM_PENALTY = 0          # íŠ¸ë¦¼(loss) ë©´ì (mm^2)ë‹¹ í˜ë„í‹°. íê¸°ë¬¼ ë¹„ìš©.
+# TRIM_PENALTY = 0          # Æ®¸²(loss) ¸éÀû(mm^2)´ç Æä³ÎÆ¼. Æó±â¹° ºñ¿ë.
 # ITEM_SINGLE_STRIP_PENALTIES = {}
 
 class SheetOptimizeCa:
     """
-    ì‰¬íŠ¸ì§€ ë³µí•©í­(Composite Width) ìµœì í™” í´ë˜ìŠ¤.
+    ½¬Æ®Áö º¹ÇÕÆø(Composite Width) ÃÖÀûÈ­ Å¬·¡½º.
     
-    ì´ í´ë˜ìŠ¤ëŠ” ì—¬ëŸ¬ ì§€í­ì„ ì¡°í•©í•œ 'ë³µí•© ì•„ì´í…œ'ì„ ê¸°ë°˜ìœ¼ë¡œ ìµœì  ì ˆë‹¨ íŒ¨í„´ì„ ì°¾ìŠµë‹ˆë‹¤.
-    ì¼ë°˜ ì‰¬íŠ¸ ìµœì í™”ì™€ ë‹¬ë¦¬, ë³µí•©í­ ê°œë…ì„ í†µí•´ ìŠ¬ë¦¬í„° ì¹¼ ë°°ì¹˜ë¥¼ ë” ìœ ì—°í•˜ê²Œ ì²˜ë¦¬í•©ë‹ˆë‹¤.
+    ÀÌ Å¬·¡½º´Â ¿©·¯ ÁöÆøÀ» Á¶ÇÕÇÑ 'º¹ÇÕ ¾ÆÀÌÅÛ'À» ±â¹İÀ¸·Î ÃÖÀû Àı´Ü ÆĞÅÏÀ» Ã£½À´Ï´Ù.
+    ÀÏ¹İ ½¬Æ® ÃÖÀûÈ­¿Í ´Ş¸®, º¹ÇÕÆø °³³äÀ» ÅëÇØ ½½¸®ÅÍ Ä® ¹èÄ¡¸¦ ´õ À¯¿¬ÇÏ°Ô Ã³¸®ÇÕ´Ï´Ù.
     """
     
     def __init__(
@@ -119,12 +119,12 @@ class SheetOptimizeCa:
             ww_trim_size=None,
             ww_trim_size_sheet=None,
             num_threads=4,
-            double_cutter='N' # [New] ë³µí•©í­ ìƒì„± ì˜µì…˜ (Y: ì´ì¢…ê·œê²© í—ˆìš©, N: ë™ì¼ê·œê²©ë§Œ í—ˆìš©)
+            double_cutter='N' # [New] º¹ÇÕÆø »ı¼º ¿É¼Ç (Y: ÀÌÁ¾±Ô°İ Çã¿ë, N: µ¿ÀÏ±Ô°İ¸¸ Çã¿ë)
     ):
         """
-        SheetOptimizeCa ìƒì„±ì.
+        SheetOptimizeCa »ı¼ºÀÚ.
         """
-        # ì €ì¥
+        # ÀúÀå
         self.df_orders = df_spec_pre.copy()
         
         self.double_cutter = double_cutter # [New]
@@ -157,39 +157,39 @@ class SheetOptimizeCa:
         self.version = version
         self.num_threads = num_threads
 
-        # ì£¼ë¬¸ ë°ì´í„°ì˜ 'ê°€ë¡œ' ì»¬ëŸ¼ì„ 'ì§€í­'ìœ¼ë¡œ ë³µì‚¬ (ë‚´ë¶€ ì²˜ë¦¬ìš©)
-        self.df_orders['ì§€í­'] = self.df_orders['ê°€ë¡œ']
+        # ÁÖ¹® µ¥ÀÌÅÍÀÇ '°¡·Î' ÄÃ·³À» 'ÁöÆø'À¸·Î º¹»ç (³»ºÎ Ã³¸®¿ë)
+        self.df_orders['ÁöÆø'] = self.df_orders['°¡·Î']
         
         self.original_max_width = max_width
         self.min_pieces = MIN_PIECES_PER_PATTERN
 
         # [Constraint] User Request: Disallowed Combinations (List of tuples)
-        # ì˜ˆ: [(635, 636), (648, 636)] -> 635ì™€ 636 í˜¼í•© ê¸ˆì§€
+        # ¿¹: [(635, 636), (648, 636)] -> 635¿Í 636 È¥ÇÕ ±İÁö
         self.disallowed_combinations = [(635, 636)]
 
-        # ì£¼ë¬¸ëŸ‰ì„ ë¯¸í„° ë° ë¡¤ ìˆ˜ ë‹¨ìœ„ë¡œ ë³€í™˜í•˜ì—¬ ìˆ˜ìš” ê³„ì‚°
-        self.df_orders, self.demands_in_meters, self.order_sheet_lengths, self.demands_in_rolls = self._calculate_demand_meters(df_spec_pre)
-        self.order_widths = list(self.demands_in_meters.keys())  # ê³ ìœ  ì£¼ë¬¸ ì§€í­ ëª©ë¡
+        # ÁÖ¹®·®À» ¹ÌÅÍ ´ÜÀ§·Î º¯È¯ÇÏ¿© ¼ö¿ä °è»ê
+        self.df_orders, self.demands_in_meters, self.order_sheet_lengths = self._calculate_demand_meters(df_spec_pre)
+        self.order_widths = list(self.demands_in_meters.keys())  # °íÀ¯ ÁÖ¹® ÁöÆø ¸ñ·Ï
 
-        # ì§€í­ë³„ ì£¼ë¬¸ í†¤ìˆ˜ ìš”ì•½ ì •ë³´ ìƒì„± (ë¦¬í¬íŒ…ìš©)
+        # ÁöÆøº° ÁÖ¹® Åæ¼ö ¿ä¾à Á¤º¸ »ı¼º (¸®Æ÷ÆÃ¿ë)
         width_summary = {}
-        tons_per_width = self.df_orders.groupby('ì§€í­')['ì£¼ë¬¸í†¤'].sum()
+        tons_per_width = self.df_orders.groupby('ÁöÆø')['ÁÖ¹®Åæ'].sum()
         for width, required_meters in self.demands_in_meters.items():
             order_tons = tons_per_width.get(width, 0)
             width_summary[width] = {'order_tons': order_tons}
         self.width_summary = width_summary
 
-        # ë³µí•© ì•„ì´í…œ ìƒì„±: ì—¬ëŸ¬ ì§€í­ì„ ì¡°í•©í•˜ì—¬ ìŠ¬ë¦¬í„° ì¹¼ë¡œ í•œ ë²ˆì— ìë¥¼ ìˆ˜ ìˆëŠ” ë‹¨ìœ„
+        # º¹ÇÕ ¾ÆÀÌÅÛ »ı¼º: ¿©·¯ ÁöÆøÀ» Á¶ÇÕÇÏ¿© ½½¸®ÅÍ Ä®·Î ÇÑ ¹ø¿¡ ÀÚ¸¦ ¼ö ÀÖ´Â ´ÜÀ§
         self.items, self.item_info, self.item_composition = self._prepare_items(min_sc_width, max_sc_width)
 
-        logging.info(f"--- íŒ¨í„´ ì œì•½ì¡°ê±´: ìµœì†Œ {self.min_pieces}í­, ìµœëŒ€ {self.max_pieces}í­ ---")
+        logging.info(f"--- ÆĞÅÏ Á¦¾àÁ¶°Ç: ÃÖ¼Ò {self.min_pieces}Æø, ÃÖ´ë {self.max_pieces}Æø ---")
 
-        # íŒ¨í„´ ì €ì¥ì†Œ ì´ˆê¸°í™” (ì™¸ë¶€ì—ì„œ íŒ¨í„´ì„ ì£¼ì…í•´ì•¼ í•¨)
+        # ÆĞÅÏ ÀúÀå¼Ò ÃÊ±âÈ­ (¿ÜºÎ¿¡¼­ ÆĞÅÏÀ» ÁÖÀÔÇØ¾ß ÇÔ)
         self.patterns = []
 
     def _is_pattern_valid(self, current_pattern):
         """
-        íŒ¨í„´ì˜ ìœ íš¨ì„±ì„ ê²€ì‚¬í•©ë‹ˆë‹¤. íŠ¹íˆ ê¸ˆì§€ëœ ì¡°í•©ì´ í¬í•¨ë˜ì–´ ìˆëŠ”ì§€ í™•ì¸í•©ë‹ˆë‹¤.
+        ÆĞÅÏÀÇ À¯È¿¼ºÀ» °Ë»çÇÕ´Ï´Ù. Æ¯È÷ ±İÁöµÈ Á¶ÇÕÀÌ Æ÷ÇÔµÇ¾î ÀÖ´ÂÁö È®ÀÎÇÕ´Ï´Ù.
         
         Args:
             current_pattern (dict): {item_name: count, ...}
@@ -200,13 +200,13 @@ class SheetOptimizeCa:
         if not self.disallowed_combinations:
             return True
             
-        # 1. í˜„ì¬ íŒ¨í„´ì— í¬í•¨ëœ ëª¨ë“  'ê¸°ë³¸ ì§€í­' ìˆ˜ì§‘ (Composite Item ë‚´ë¶€ í¬í•¨)
+        # 1. ÇöÀç ÆĞÅÏ¿¡ Æ÷ÇÔµÈ ¸ğµç '±âº» ÁöÆø' ¼öÁı (Composite Item ³»ºÎ Æ÷ÇÔ)
         all_base_widths = set()
         for it_name in current_pattern:
             if it_name in self.item_composition:
                  all_base_widths.update(self.item_composition[it_name].keys())
         
-        # 2. ê¸ˆì§€ëœ ì¡°í•© í™•ì¸
+        # 2. ±İÁöµÈ Á¶ÇÕ È®ÀÎ
         for width1, width2 in self.disallowed_combinations:
             if width1 in all_base_widths and width2 in all_base_widths:
                 return False
@@ -215,54 +215,54 @@ class SheetOptimizeCa:
 
     def _prepare_items(self, min_sc_width, max_sc_width):
         """
-        ë³µí•© ì•„ì´í…œ(Composite Items)ì„ ìƒì„±í•©ë‹ˆë‹¤.
+        º¹ÇÕ ¾ÆÀÌÅÛ(Composite Items)À» »ı¼ºÇÕ´Ï´Ù.
         
-        ë³µí•© ì•„ì´í…œì´ë€ í•˜ë‚˜ ì´ìƒì˜ ê¸°ë³¸ ì§€í­ì„ ì¡°í•©í•˜ì—¬ ìŠ¬ë¦¬í„° ì¹¼ë¡œ
-        í•œ ë²ˆì— ì ˆë‹¨í•  ìˆ˜ ìˆëŠ” ë‹¨ìœ„ë¥¼ ë§í•©ë‹ˆë‹¤.
+        º¹ÇÕ ¾ÆÀÌÅÛÀÌ¶õ ÇÏ³ª ÀÌ»óÀÇ ±âº» ÁöÆøÀ» Á¶ÇÕÇÏ¿© ½½¸®ÅÍ Ä®·Î
+        ÇÑ ¹ø¿¡ Àı´ÜÇÒ ¼ö ÀÖ´Â ´ÜÀ§¸¦ ¸»ÇÕ´Ï´Ù.
         
-        ìƒì„±ë˜ëŠ” ì•„ì´í…œ ìœ í˜•:
-        1. ë‹¨ì¼ ì§€í­ ë³µí•©: "710x2" â†’ 710mm 2ê°œ = 1420mm + trim
-        2. í˜¼í•© ì§€í­ ë³µí•©: "710x1+850x1" â†’ 710mm 1ê°œ + 850mm 1ê°œ = 1560mm + trim (double_cutter='Y'ì¼ ë•Œë§Œ)
+        »ı¼ºµÇ´Â ¾ÆÀÌÅÛ À¯Çü:
+        1. ´ÜÀÏ ÁöÆø º¹ÇÕ: "710x2" ¡æ 710mm 2°³ = 1420mm + trim
+        2. È¥ÇÕ ÁöÆø º¹ÇÕ: "710x1+850x1" ¡æ 710mm 1°³ + 850mm 1°³ = 1560mm + trim (double_cutter='Y'ÀÏ ¶§¸¸)
         
-        [Mod] double_cutter='N'ì¼ ë•ŒëŠ” (ì§€í­, ì„¸ë¡œ) íŠœí”Œì„ í‚¤ë¡œ ì‚¬ìš©í•˜ì—¬
-        ì„¸ë¡œê°€ ë‹¤ë¥¸ ì£¼ë¬¸ì„ ë³„ë„ ì•„ì´í…œìœ¼ë¡œ ë¶„ë¦¬í•©ë‹ˆë‹¤.
+        [Mod] double_cutter='N'ÀÏ ¶§´Â (ÁöÆø, ¼¼·Î) Æ©ÇÃÀ» Å°·Î »ç¿ëÇÏ¿©
+        ¼¼·Î°¡ ´Ù¸¥ ÁÖ¹®À» º°µµ ¾ÆÀÌÅÛÀ¸·Î ºĞ¸®ÇÕ´Ï´Ù.
         
         Args:
-            min_sc_width (int): ìŠ¬ë¦¬í„° ì¹¼ ìµœì†Œ í­ ì œì•½ (ì´ ê°’ ì´ìƒì´ì–´ì•¼ ìœ íš¨)
-            max_sc_width (int): ìŠ¬ë¦¬í„° ì¹¼ ìµœëŒ€ í­ ì œì•½ (ì´ ê°’ ì´í•˜ì—¬ì•¼ ìœ íš¨)
+            min_sc_width (int): ½½¸®ÅÍ Ä® ÃÖ¼Ò Æø Á¦¾à (ÀÌ °ª ÀÌ»óÀÌ¾î¾ß À¯È¿)
+            max_sc_width (int): ½½¸®ÅÍ Ä® ÃÖ´ë Æø Á¦¾à (ÀÌ °ª ÀÌÇÏ¿©¾ß À¯È¿)
         
         Returns:
             tuple: (items, item_info, item_composition)
-                - items: ë³µí•© ì•„ì´í…œ ì´ë¦„ ëª©ë¡ (ì˜ˆ: ["710x1", "710x2", "710x1+850x1"])
-                - item_info: {ì•„ì´í…œëª…: ì´ í­(mm)} ë§¤í•‘
-                - item_composition: {ì•„ì´í…œëª…: {ê¸°ë³¸í‚¤: ê°œìˆ˜}} êµ¬ì„± ì •ë³´
-                  - double_cutter='N': ê¸°ë³¸í‚¤ = (ì§€í­, ì„¸ë¡œ) íŠœí”Œ
-                  - double_cutter='Y': ê¸°ë³¸í‚¤ = ì§€í­
+                - items: º¹ÇÕ ¾ÆÀÌÅÛ ÀÌ¸§ ¸ñ·Ï (¿¹: ["710x1", "710x2", "710x1+850x1"])
+                - item_info: {¾ÆÀÌÅÛ¸í: ÃÑ Æø(mm)} ¸ÅÇÎ
+                - item_composition: {¾ÆÀÌÅÛ¸í: {±âº»Å°: °³¼ö}} ±¸¼º Á¤º¸
+                  - double_cutter='N': ±âº»Å° = (ÁöÆø, ¼¼·Î) Æ©ÇÃ
+                  - double_cutter='Y': ±âº»Å° = ÁöÆø
         """
         from itertools import combinations_with_replacement
         
         items = []
-        item_info = {}  # item_name -> ì´ í­ (mm)
+        item_info = {}  # item_name -> ÃÑ Æø (mm)
         item_composition = {}  # composite_item_name -> {original_key: count}
         
-        # í•˜ë‚˜ì˜ ë³µí•© ì•„ì´í…œì— í¬í•¨ë  ìˆ˜ ìˆëŠ” ìµœëŒ€ ê¸°ë³¸ ì§€í­ ê°œìˆ˜
-        # [Mod] max_sl_countê°€ ìˆìœ¼ë©´ ì‚¬ìš©, ì—†ìœ¼ë©´ ê¸°ë³¸ê°’ 4
+        # ÇÏ³ªÀÇ º¹ÇÕ ¾ÆÀÌÅÛ¿¡ Æ÷ÇÔµÉ ¼ö ÀÖ´Â ÃÖ´ë ±âº» ÁöÆø °³¼ö
+        # [Mod] max_sl_count°¡ ÀÖÀ¸¸é »ç¿ë, ¾øÀ¸¸é ±âº»°ª 4
         max_pieces_in_composite = self.max_sl_count if self.max_sl_count and self.max_sl_count > 0 else 4 
 
         # ============================================================
-        # Step 1: ë‹¨ì¼ ì§€í­ ë³µí•© ì•„ì´í…œ ìƒì„± (ê°™ì€ ì§€í­ Nê°œ ì¡°í•©)
-        # ì˜ˆ: 710mm x 1 = 710mm, 710mm x 2 = 1420mm, ...
+        # Step 1: ´ÜÀÏ ÁöÆø º¹ÇÕ ¾ÆÀÌÅÛ »ı¼º (°°Àº ÁöÆø N°³ Á¶ÇÕ)
+        # ¿¹: 710mm x 1 = 710mm, 710mm x 2 = 1420mm, ...
         # ============================================================
         
-        # [Mod] Trim ê³„ì‚° ë¡œì§: Coating Yì´ë©´ (sheet_trim + ww_trim_size_sheet), ì•„ë‹ˆë©´ sheet_trim
+        # [Mod] Trim °è»ê ·ÎÁ÷: Coating YÀÌ¸é (sheet_trim + ww_trim_size_sheet), ¾Æ´Ï¸é sheet_trim
         if self.coating_yn == 'Y':
              effective_trim = (self.sheet_trim or 0) + (self.ww_trim_size_sheet or 0)
         else:
              effective_trim = self.sheet_trim
 
-        # [Mod] double_cutter='N'ì¼ ë•ŒëŠ” order_widthsê°€ (ì§€í­, ì„¸ë¡œ) íŠœí”Œì„
+        # [Mod] double_cutter='N'ÀÏ ¶§´Â order_widths°¡ (ÁöÆø, ¼¼·Î) Æ©ÇÃÀÓ
         for key in self.order_widths:
-            # í‚¤ì—ì„œ ì§€í­ ì¶”ì¶œ
+            # Å°¿¡¼­ ÁöÆø ÃßÃâ
             if isinstance(key, tuple):
                 width, sheet_length = key
             else:
@@ -270,7 +270,7 @@ class SheetOptimizeCa:
                 sheet_length = self.order_sheet_lengths.get(key, 0)
             
             for i in range(1, max_pieces_in_composite + 1):
-                # ë³µí•©í­ ê³„ì‚°: (ê¸°ë³¸ ì§€í­ Ã— ê°œìˆ˜) + íŠ¸ë¦¼ ì†ì‹¤
+                # º¹ÇÕÆø °è»ê: (±âº» ÁöÆø ¡¿ °³¼ö) + Æ®¸² ¼Õ½Ç
                 base_width = width * i + effective_trim
                 
                 # [Mod] Same Spec Items (Step 1) check:
@@ -285,11 +285,11 @@ class SheetOptimizeCa:
                 #    if not (self.min_cm_width <= base_width <= self.max_cm_width):
                 #        continue
 
-                # ìŠ¬ë¦¬í„° ì¹¼ ì œì•½ì¡°ê±´ ì²´í¬
+                # ½½¸®ÅÍ Ä® Á¦¾àÁ¶°Ç Ã¼Å©
                 if not (min_sc_width <= base_width <= max_sc_width):
                     continue
 
-                # [Mod] ì•„ì´í…œ ëª…ëª…: double_cutter='N'ì¼ ë•ŒëŠ” ì„¸ë¡œ í¬í•¨
+                # [Mod] ¾ÆÀÌÅÛ ¸í¸í: double_cutter='N'ÀÏ ¶§´Â ¼¼·Î Æ÷ÇÔ
                 if isinstance(key, tuple):
                     item_name = f"{width}_{sheet_length}x{i}"
                 else:
@@ -302,12 +302,12 @@ class SheetOptimizeCa:
                         item_composition[item_name] = {key: i}
 
         # ============================================================
-        # Step 2: í˜¼í•© ì§€í­ ë³µí•© ì•„ì´í…œ ìƒì„± (ë‹¤ë¥¸ ì§€í­ ì¡°í•©)
-        # ì˜ˆ: 710mm + 850mm = 1560mm
-        # [Mod] double_cutter='Y'ì¼ ë•Œë§Œ í—ˆìš©, ë‹¨ ê°™ì€ ì„¸ë¡œ ê¸¸ì´ì¸ ê²½ìš°ë§Œ ì¡°í•© ê°€ëŠ¥
+        # Step 2: È¥ÇÕ ÁöÆø º¹ÇÕ ¾ÆÀÌÅÛ »ı¼º (´Ù¸¥ ÁöÆø Á¶ÇÕ)
+        # ¿¹: 710mm + 850mm = 1560mm
+        # [Mod] double_cutter='Y'ÀÏ ¶§¸¸ Çã¿ë, ´Ü °°Àº ¼¼·Î ±æÀÌÀÎ °æ¿ì¸¸ Á¶ÇÕ °¡´É
         # ============================================================
         if self.double_cutter == 'Y':
-            # ì„¸ë¡œ ê¸¸ì´ë³„ë¡œ ê·¸ë£¹í•‘
+            # ¼¼·Î ±æÀÌº°·Î ±×·ìÇÎ
             from collections import defaultdict
             length_groups = defaultdict(list)
             for key in self.order_widths:
@@ -317,35 +317,35 @@ class SheetOptimizeCa:
                 else:
                     length_groups[0].append(key)
             
-            # ê°™ì€ ì„¸ë¡œ ê¸¸ì´ ë‚´ì—ì„œë§Œ í˜¼í•© ì§€í­ ì¡°í•© ìƒì„±
+            # °°Àº ¼¼·Î ±æÀÌ ³»¿¡¼­¸¸ È¥ÇÕ ÁöÆø Á¶ÇÕ »ı¼º
             for sheet_length, keys_in_group in length_groups.items():
                 for i in range(2, max_pieces_in_composite + 1):
-                    # ì¤‘ë³µ ì¡°í•©(combinations_with_replacement) ìƒì„±
+                    # Áßº¹ Á¶ÇÕ(combinations_with_replacement) »ı¼º
                     for combo in combinations_with_replacement(keys_in_group, i):
-                        # ë‹¨ì¼ ì§€í­ë§Œìœ¼ë¡œ êµ¬ì„±ëœ ì¡°í•©ì€ Step 1ì—ì„œ ì´ë¯¸ ì²˜ë¦¬ë¨
+                        # ´ÜÀÏ ÁöÆø¸¸À¸·Î ±¸¼ºµÈ Á¶ÇÕÀº Step 1¿¡¼­ ÀÌ¹Ì Ã³¸®µÊ
                         if len(set(combo)) == 1:
                             continue
 
-                        # ë³µí•©í­ ê³„ì‚°: ëª¨ë“  ì§€í­ í•©ê³„ + íŠ¸ë¦¼ ì†ì‹¤
-                        # [Mod] í‚¤ê°€ íŠœí”Œì´ë©´ ì²« ë²ˆì§¸ ìš”ì†Œ(ì§€í­)ë§Œ í•©ì‚°
+                        # º¹ÇÕÆø °è»ê: ¸ğµç ÁöÆø ÇÕ°è + Æ®¸² ¼Õ½Ç
+                        # [Mod] Å°°¡ Æ©ÇÃÀÌ¸é Ã¹ ¹øÂ° ¿ä¼Ò(ÁöÆø)¸¸ ÇÕ»ê
                         combo_widths = [k[0] if isinstance(k, tuple) else k for k in combo]
                         base_width = sum(combo_widths) + effective_trim
                         
-                        # [New] CM (Composite) í­ ì œì•½ í™•ì¸
+                        # [New] CM (Composite) Æø Á¦¾à È®ÀÎ
                         if self.min_cm_width is not None and self.max_cm_width is not None:
                             if not (self.min_cm_width <= base_width <= self.max_cm_width):
                                 continue
 
-                        # ìŠ¬ë¦¬í„° ì¹¼ ì œì•½ì¡°ê±´ ì²´í¬
+                        # ½½¸®ÅÍ Ä® Á¦¾àÁ¶°Ç Ã¼Å©
                         if not (min_sc_width <= base_width <= max_sc_width):
                             continue
 
                         if base_width <= self.original_max_width:
-                            # ì¡°í•© êµ¬ì„± ì¹´ìš´íŒ… (ì˜ˆ: ((710,545), (710,545), (850,545)) â†’ {(710,545): 2, (850,545): 1})
+                            # Á¶ÇÕ ±¸¼º Ä«¿îÆÃ (¿¹: ((710,545), (710,545), (850,545)) ¡æ {(710,545): 2, (850,545): 1})
                             comp_counts = Counter(combo)
-                            # ì•„ì´í…œ ëª…ëª…: ì§€í­ ë‚´ë¦¼ì°¨ìˆœ ì •ë ¬ëœ "ì§€í­_ì„¸ë¡œxê°œìˆ˜" ì¡°í•©
+                            # ¾ÆÀÌÅÛ ¸í¸í: ÁöÆø ³»¸²Â÷¼ø Á¤·ÄµÈ "ÁöÆø_¼¼·Îx°³¼ö" Á¶ÇÕ
                             if isinstance(combo[0], tuple):
-                                # íŠœí”Œ í‚¤: ì§€í­_ì„¸ë¡œxê°œìˆ˜+ì§€í­_ì„¸ë¡œxê°œìˆ˜ í˜•ì‹
+                                # Æ©ÇÃ Å°: ÁöÆø_¼¼·Îx°³¼ö+ÁöÆø_¼¼·Îx°³¼ö Çü½Ä
                                 item_name = "+".join([f"{k[0]}_{k[1]}x{c}" for k, c in sorted(comp_counts.items(), key=lambda x: x[0][0] if isinstance(x[0], tuple) else x[0], reverse=True)])
                             else:
                                 item_name = "+".join([f"{w}x{c}" for w, c in sorted(comp_counts.items(), key=lambda x: x[0], reverse=True)])
@@ -359,107 +359,102 @@ class SheetOptimizeCa:
 
     def _calculate_demand_meters(self, df_orders):
         """
-        ì‰¬íŠ¸ì§€ ì£¼ë¬¸ëŸ‰(í†¤)ì„ í•„ìš” ìƒì‚° ê¸¸ì´(ë¯¸í„°)ë¡œ ë³€í™˜í•©ë‹ˆë‹¤.
+        ½¬Æ®Áö ÁÖ¹®·®(Åæ)À» ÇÊ¿ä »ı»ê ±æÀÌ(¹ÌÅÍ)·Î º¯È¯ÇÕ´Ï´Ù.
         
-        ë³€í™˜ ê³µì‹:
-        1. ì¥ë‹¹ ë¬´ê²Œ(g) = í‰ëŸ‰(g/mÂ²) Ã— ê°€ë¡œ(m) Ã— ì„¸ë¡œ(m)
-        2. í•„ìš” ì¥ìˆ˜ = ì£¼ë¬¸í†¤(ton) Ã— 1,000,000(g/ton) Ã· ì¥ë‹¹ë¬´ê²Œ(g)
-        3. í•„ìš” ê¸¸ì´(m) = í•„ìš” ì¥ìˆ˜ Ã— ì„¸ë¡œ(m)
+        º¯È¯ °ø½Ä:
+        1. Àå´ç ¹«°Ô(g) = Æò·®(g/m©÷) ¡¿ °¡·Î(m) ¡¿ ¼¼·Î(m)
+        2. ÇÊ¿ä Àå¼ö = ÁÖ¹®Åæ(ton) ¡¿ 1,000,000(g/ton) ¡À Àå´ç¹«°Ô(g)
+        3. ÇÊ¿ä ±æÀÌ(m) = ÇÊ¿ä Àå¼ö ¡¿ ¼¼·Î(m)
         
-        [Mod] double_cutter='N'ì¼ ë•ŒëŠ” ì§€í­+ì„¸ë¡œ ì¡°í•©ì„ í‚¤ë¡œ ì‚¬ìš©í•˜ì—¬
-        ì„¸ë¡œê°€ ë‹¤ë¥¸ ì£¼ë¬¸ì„ ë³„ë„ë¡œ ë¶„ë¦¬í•©ë‹ˆë‹¤.
+        [Mod] double_cutter='N'ÀÏ ¶§´Â ÁöÆø+¼¼·Î Á¶ÇÕÀ» Å°·Î »ç¿ëÇÏ¿©
+        ¼¼·Î°¡ ´Ù¸¥ ÁÖ¹®À» º°µµ·Î ºĞ¸®ÇÕ´Ï´Ù.
         
         Args:
-            df_orders (pd.DataFrame): ì£¼ë¬¸ ë°ì´í„° (ê°€ë¡œ, ì„¸ë¡œ, ì£¼ë¬¸í†¤ ì»¬ëŸ¼ í•„ìˆ˜)
+            df_orders (pd.DataFrame): ÁÖ¹® µ¥ÀÌÅÍ (°¡·Î, ¼¼·Î, ÁÖ¹®Åæ ÄÃ·³ ÇÊ¼ö)
         
         Returns:
             tuple: (df_copy, demand_meters, order_sheet_lengths)
-                - df_copy: meters ì»¬ëŸ¼ì´ ì¶”ê°€ëœ ì£¼ë¬¸ DataFrame
-                - demand_meters: {í‚¤: í•„ìš”ë¯¸í„°} ë”•ì…”ë„ˆë¦¬
-                  - double_cutter='N': í‚¤ = (ì§€í­, ì„¸ë¡œ) íŠœí”Œ
-                  - double_cutter='Y': í‚¤ = ì§€í­
-                - order_sheet_lengths: {í‚¤: ì„¸ë¡œê¸¸ì´} ë”•ì…”ë„ˆë¦¬
+                - df_copy: meters ÄÃ·³ÀÌ Ãß°¡µÈ ÁÖ¹® DataFrame
+                - demand_meters: {Å°: ÇÊ¿ä¹ÌÅÍ} µñ¼Å³Ê¸®
+                  - double_cutter='N': Å° = (ÁöÆø, ¼¼·Î) Æ©ÇÃ
+                  - double_cutter='Y': Å° = ÁöÆø
+                - order_sheet_lengths: {Å°: ¼¼·Î±æÀÌ} µñ¼Å³Ê¸®
         """
         df_copy = df_orders.copy()
 
         def calculate_meters(row):
-            """ê°œë³„ ì£¼ë¬¸ í–‰ì— ëŒ€í•œ í•„ìš” ìƒì‚° ê¸¸ì´(m)ë¥¼ ê³„ì‚°í•©ë‹ˆë‹¤."""
-            width_mm = row.get('ì§€í­', row.get('width', 0))    # ì§€í­ (mm)
-            length_mm = row.get('ì„¸ë¡œ', row.get('length', 0))   # ì¥ë‹¹ ì„¸ë¡œ ê¸¸ì´ (mm)
-            order_ton = row.get('ì£¼ë¬¸í†¤', row.get('order_ton_cnt', 0))  # ì£¼ë¬¸ëŸ‰ (í†¤)
+            """°³º° ÁÖ¹® Çà¿¡ ´ëÇÑ ÇÊ¿ä »ı»ê ±æÀÌ(m)¸¦ °è»êÇÕ´Ï´Ù."""
+            width_mm = row.get('ÁöÆø', row.get('width', 0))    # ÁöÆø (mm)
+            length_mm = row.get('¼¼·Î', row.get('length', 0))   # Àå´ç ¼¼·Î ±æÀÌ (mm)
+            order_ton = row.get('ÁÖ¹®Åæ', row.get('order_ton_cnt', 0))  # ÁÖ¹®·® (Åæ)
 
-            # ìœ íš¨ì„± ê²€ì‚¬: 0 ì´í•˜ ê°’ì´ ìˆìœ¼ë©´ ê³„ì‚° ë¶ˆê°€
+            # À¯È¿¼º °Ë»ç: 0 ÀÌÇÏ °ªÀÌ ÀÖÀ¸¸é °è»ê ºÒ°¡
             if self.b_wgt <= 0 or width_mm <= 0 or length_mm <= 0 or order_ton <= 0:
                 return 0
 
-            # ì¥ë‹¹ ë¬´ê²Œ ê³„ì‚° (ê·¸ë¨)
-            # í‰ëŸ‰(g/mÂ²) Ã— ê°€ë¡œ(mmâ†’m) Ã— ì„¸ë¡œ(mmâ†’m)
+            # Àå´ç ¹«°Ô °è»ê (±×·¥)
+            # Æò·®(g/m©÷) ¡¿ °¡·Î(mm¡æm) ¡¿ ¼¼·Î(mm¡æm)
             sheet_weight_g = (self.b_wgt * width_mm * length_mm) / 1000000
             if sheet_weight_g <= 0:
                 return 0
 
-            # í•„ìš” ì¥ìˆ˜ = ì£¼ë¬¸í†¤(gìœ¼ë¡œ ë³€í™˜) Ã· ì¥ë‹¹ë¬´ê²Œ(g)
+            # ÇÊ¿ä Àå¼ö = ÁÖ¹®Åæ(gÀ¸·Î º¯È¯) ¡À Àå´ç¹«°Ô(g)
             total_sheets_needed = (order_ton * 1000000) / sheet_weight_g
-            # í•„ìš” ë¯¸í„° = ì¥ìˆ˜ Ã— ì„¸ë¡œ(mmâ†’m)
+            # ÇÊ¿ä ¹ÌÅÍ = Àå¼ö ¡¿ ¼¼·Î(mm¡æm)
             total_meters_needed = total_sheets_needed * (length_mm / 1000)
             return total_meters_needed
 
-        # ì»¬ëŸ¼ëª… ì†Œë¬¸ì ë³€í™˜ (DBì—ì„œ ëŒ€ë¬¸ìë¡œ ë„˜ì–´ì˜¤ëŠ” ê²½ìš° ëŒ€ì‘)
+        # ÄÃ·³¸í ¼Ò¹®ÀÚ º¯È¯ (DB¿¡¼­ ´ë¹®ÀÚ·Î ³Ñ¾î¿À´Â °æ¿ì ´ëÀÀ)
         df_copy.columns = [c.lower() for c in df_copy.columns]
 
-        # ì˜ë¬¸ ì»¬ëŸ¼ëª…ì„ í•œê¸€ë¡œ ë§¤í•‘
+        # ¿µ¹® ÄÃ·³¸íÀ» ÇÑ±Û·Î ¸ÅÇÎ
         rename_map = {
-            'width': 'ì§€í­', 
-            'length': 'ì„¸ë¡œ', 
-            'order_ton_cnt': 'ì£¼ë¬¸í†¤',
-            'ê°€ë¡œ': 'ì§€í­' # ê°€ë¡œê°€ ë“¤ì–´ì˜¬ ê²½ìš°ë„ ëŒ€ë¹„
+            'width': 'ÁöÆø', 
+            'length': '¼¼·Î', 
+            'order_ton_cnt': 'ÁÖ¹®Åæ',
+            '°¡·Î': 'ÁöÆø' # °¡·Î°¡ µé¾î¿Ã °æ¿ìµµ ´ëºñ
         }
         df_copy = df_copy.rename(columns=rename_map)
             
-        # ê° ì£¼ë¬¸ í–‰ì— ëŒ€í•´ í•„ìš” ë¯¸í„° ê³„ì‚°
+        # °¢ ÁÖ¹® Çà¿¡ ´ëÇØ ÇÊ¿ä ¹ÌÅÍ °è»ê
         df_copy['meters'] = df_copy.apply(calculate_meters, axis=1)
         
-        # [Debug] double_cutter ê°’ í™•ì¸
+        # [Debug] double_cutter °ª È®ÀÎ
         logging.info(f"[DEBUG] double_cutter value: '{self.double_cutter}' (type: {type(self.double_cutter).__name__})")
         
-        # [Mod] ì„¸ë¡œê°€ ë‹¤ë¥¸ ì£¼ë¬¸ì€ ë°˜ë“œì‹œ ë³„ë„ íŒ¨í„´ìœ¼ë¡œ ë¶„ë¦¬í•´ì•¼ í•¨
-        # (ë¡¤ ê¸¸ì´ê°€ ì„¸ë¡œ ê¸¸ì´ì— ë”°ë¼ ë‹¬ë¼ì§€ê¸° ë•Œë¬¸)
-        # ë”°ë¼ì„œ í•­ìƒ (ì§€í­, ì„¸ë¡œ) íŠœí”Œì„ í‚¤ë¡œ ì‚¬ìš©
-        df_copy['demand_key'] = list(zip(df_copy['ì§€í­'].astype(int), df_copy['ì„¸ë¡œ'].astype(int)))
+        # [Mod] ¼¼·Î°¡ ´Ù¸¥ ÁÖ¹®Àº ¹İµå½Ã º°µµ ÆĞÅÏÀ¸·Î ºĞ¸®ÇØ¾ß ÇÔ
+        # (·Ñ ±æÀÌ°¡ ¼¼·Î ±æÀÌ¿¡ µû¶ó ´Ş¶óÁö±â ¶§¹®)
+        # µû¶ó¼­ Ç×»ó (ÁöÆø, ¼¼·Î) Æ©ÇÃÀ» Å°·Î »ç¿ë
+        df_copy['demand_key'] = list(zip(df_copy['ÁöÆø'].astype(int), df_copy['¼¼·Î'].astype(int)))
         demand_meters = df_copy.groupby('demand_key')['meters'].sum().to_dict()
-        order_sheet_lengths = df_copy.groupby('demand_key')['ì„¸ë¡œ'].first().to_dict()
-        
-        # [New] ë¡¤ ìˆ˜ ê¸°ë°˜ ìˆ˜ìš” ê³„ì‚° (í‘œì¤€ ë¡¤ ê¸¸ì´ë¡œ ë‚˜ëˆ”)
-        std_roll_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
-        demand_rolls = {key: meters / std_roll_length for key, meters in demand_meters.items()}
+        order_sheet_lengths = df_copy.groupby('demand_key')['¼¼·Î'].first().to_dict()
         
         logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]")
-        logging.info(f"--- (ì§€í­, ì„¸ë¡œ)ë³„ í•„ìš” ì´ ê¸¸ì´ (í‘œì¤€ë¡¤ê¸¸ì´: {std_roll_length}m) ---")
+        logging.info("--- (ÁöÆø, ¼¼·Î)º° ÇÊ¿ä ÃÑ ±æÀÌ ---")
         logging.info("-" * 50)
         for key, meters in demand_meters.items():
-            rolls = demand_rolls[key]
-            logging.info(f"  {key}: {meters:.2f}m ({rolls:.2f}ë¡¤)")
+            logging.info(f"  {key}: {meters:.2f}m")
 
-        return df_copy, demand_meters, order_sheet_lengths, demand_rolls
+        return df_copy, demand_meters, order_sheet_lengths
 
     def _generate_all_patterns(self):
         """
-        ì‘ì€ ë¬¸ì œì— ëŒ€í•´ ëª¨ë“  ê°€ëŠ¥í•œ íŒ¨í„´ì„ ìƒì„±í•©ë‹ˆë‹¤ (Brute-force).
+        ÀÛÀº ¹®Á¦¿¡ ´ëÇØ ¸ğµç °¡´ÉÇÑ ÆĞÅÏÀ» »ı¼ºÇÕ´Ï´Ù (Brute-force).
         
-        ì£¼ë¬¸ ì§€í­ ì¢…ë¥˜ê°€ SMALL_PROBLEM_THRESHOLD ì´í•˜ì¸ ê²½ìš°ì— ì‚¬ìš©ë©ë‹ˆë‹¤.
-        ì¬ê·€ì ìœ¼ë¡œ ëª¨ë“  ìœ íš¨í•œ ë³µí•©í­ ì•„ì´í…œ ì¡°í•©ì„ ìƒì„±í•©ë‹ˆë‹¤.
+        ÁÖ¹® ÁöÆø Á¾·ù°¡ SMALL_PROBLEM_THRESHOLD ÀÌÇÏÀÎ °æ¿ì¿¡ »ç¿ëµË´Ï´Ù.
+        Àç±ÍÀûÀ¸·Î ¸ğµç À¯È¿ÇÑ º¹ÇÕÆø ¾ÆÀÌÅÛ Á¶ÇÕÀ» »ı¼ºÇÕ´Ï´Ù.
         
-        CA ë²„ì „ íŠ¹ì§•:
-        - íŒ¨í„´ì€ {composition: {...}, length: N, loss_per_roll: M} í˜•íƒœë¡œ ì €ì¥
-        - lengthëŠ” min/max_sheet_roll_length ë²”ìœ„ ë‚´ì—ì„œ ê²°ì •
+        CA ¹öÀü Æ¯Â¡:
+        - ÆĞÅÏÀº {composition: {...}, length: N, loss_per_roll: M} ÇüÅÂ·Î ÀúÀå
+        - length´Â min/max_sheet_roll_length ¹üÀ§ ³»¿¡¼­ °áÁ¤
         """
         all_patterns = []
         seen_patterns = set()
         item_list = list(self.items)
 
         def find_combinations_recursive(start_index, current_pattern, current_width, current_pieces):
-            """ì¬ê·€ì ìœ¼ë¡œ ìœ íš¨í•œ íŒ¨í„´ ì¡°í•©ì„ íƒìƒ‰í•©ë‹ˆë‹¤."""
-            # ìœ íš¨í•œ íŒ¨í„´ì¸ì§€ í™•ì¸
+            """Àç±ÍÀûÀ¸·Î À¯È¿ÇÑ ÆĞÅÏ Á¶ÇÕÀ» Å½»öÇÕ´Ï´Ù."""
+            # À¯È¿ÇÑ ÆĞÅÏÀÎÁö È®ÀÎ
             if self.min_width <= current_width <= self.max_width and self.min_pieces <= current_pieces <= self.max_pieces:
                 pattern_key = frozenset(current_pattern.items())
                 if pattern_key not in seen_patterns:
@@ -467,7 +462,7 @@ class SheetOptimizeCa:
                     if not self._is_pattern_valid(current_pattern):
                          seen_patterns.add(pattern_key) 
                     else:
-                        # CA ë²„ì „: íŒ¨í„´ ê¸¸ì´ëŠ” min/max ë²”ìœ„ì˜ ì¤‘ê°„ê°’ ì‚¬ìš©
+                        # CA ¹öÀü: ÆĞÅÏ ±æÀÌ´Â min/max ¹üÀ§ÀÇ Áß°£°ª »ç¿ë
                         pattern_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
                         loss_per_roll = self.max_width - current_width
                         
@@ -478,14 +473,14 @@ class SheetOptimizeCa:
                         })
                         seen_patterns.add(pattern_key)
 
-            # ì¢…ë£Œ ì¡°ê±´
+            # Á¾·á Á¶°Ç
             if current_pieces >= self.max_pieces or start_index >= len(item_list):
                 return
 
-            # í˜„ì¬ ì•„ì´í…œì„ í¬í•¨í•˜ì§€ ì•Šê³  ë‹¤ìŒìœ¼ë¡œ ë„˜ì–´ê°
+            # ÇöÀç ¾ÆÀÌÅÛÀ» Æ÷ÇÔÇÏÁö ¾Ê°í ´ÙÀ½À¸·Î ³Ñ¾î°¨
             find_combinations_recursive(start_index + 1, current_pattern, current_width, current_pieces)
 
-            # í˜„ì¬ ì•„ì´í…œì„ í¬í•¨í•˜ì—¬ ì¬ê·€ í˜¸ì¶œ
+            # ÇöÀç ¾ÆÀÌÅÛÀ» Æ÷ÇÔÇÏ¿© Àç±Í È£Ãâ
             item = item_list[start_index]
             item_width = self.item_info[item]
             if current_width + item_width <= self.max_width:
@@ -497,23 +492,23 @@ class SheetOptimizeCa:
 
         find_combinations_recursive(0, {}, 0, 0)
         self.patterns = all_patterns
-        logging.info(f"--- ì „ì²´ íƒìƒ‰ìœ¼ë¡œ {len(self.patterns)}ê°œì˜ íŒ¨í„´ ìƒì„±ë¨ ---")
+        logging.info(f"--- ÀüÃ¼ Å½»öÀ¸·Î {len(self.patterns)}°³ÀÇ ÆĞÅÏ »ı¼ºµÊ ---")
 
     def _generate_initial_patterns_db(self):
-        """th_pattern_tot_sheet í…Œì´ë¸”ì˜ ì‚¬ìš©ì í¸ì§‘ íŒ¨í„´ ë°ì´í„°ë¥¼ í™œìš©í•˜ì—¬ ì´ˆê¸° íŒ¨í„´ì„ ìƒì„±í•©ë‹ˆë‹¤ (CA ë²„ì „)."""
+        """th_pattern_tot_sheet Å×ÀÌºíÀÇ »ç¿ëÀÚ ÆíÁı ÆĞÅÏ µ¥ÀÌÅÍ¸¦ È°¿ëÇÏ¿© ÃÊ±â ÆĞÅÏÀ» »ı¼ºÇÕ´Ï´Ù (CA ¹öÀü)."""
         if not self.db or not self.lot_no:
-            logging.info("--- DB ì •ë³´ê°€ ì—†ì–´ ê¸°ì¡´ íŒ¨í„´ì„ ë¶ˆëŸ¬ì˜¬ ìˆ˜ ì—†ìŠµë‹ˆë‹¤. ---")
+            logging.info("--- DB Á¤º¸°¡ ¾ø¾î ±âÁ¸ ÆĞÅÏÀ» ºÒ·¯¿Ã ¼ö ¾ø½À´Ï´Ù. ---")
             return
 
-        logging.info("\n--- DB(th_pattern_tot_sheet)ì—ì„œ ì‚¬ìš©ì í¸ì§‘ íŒ¨í„´ì„ ë¶ˆëŸ¬ì™€ ì´ˆê¸° íŒ¨í„´ì„ ìƒì„±í•©ë‹ˆë‹¤. ---")
-        # CAìš© íŒ¨í„´ ê°€ì ¸ì˜¤ê¸° ë©”ì„œë“œ í˜¸ì¶œ
+        logging.info("\n--- DB(th_pattern_tot_sheet)¿¡¼­ »ç¿ëÀÚ ÆíÁı ÆĞÅÏÀ» ºÒ·¯¿Í ÃÊ±â ÆĞÅÏÀ» »ı¼ºÇÕ´Ï´Ù. ---")
+        # CA¿ë ÆĞÅÏ °¡Á®¿À±â ¸Ş¼­µå È£Ãâ
         db_patterns_list = self.db.get_sheet_ca_patterns_from_db(self.lot_no)
 
         if not db_patterns_list:
-            logging.info("--- DBì— ì €ì¥ëœ ì‚¬ìš©ì í¸ì§‘ íŒ¨í„´ì´ ì—†ê±°ë‚˜, í˜„ì¬ ì˜¤ë”ì™€ ì¼ì¹˜í•˜ëŠ” íŒ¨í„´ì´ ì—†ìŠµë‹ˆë‹¤. ---")
+            logging.info("--- DB¿¡ ÀúÀåµÈ »ç¿ëÀÚ ÆíÁı ÆĞÅÏÀÌ ¾ø°Å³ª, ÇöÀç ¿À´õ¿Í ÀÏÄ¡ÇÏ´Â ÆĞÅÏÀÌ ¾ø½À´Ï´Ù. ---")
             return
 
-        logging.info(f"--- í˜„ì¬ ìƒì„±ëœ ìœ íš¨ ì•„ì´í…œ ëª©ë¡ (ì´ {len(self.items)}ê°œ): {self.items[:20]} ... ---")
+        logging.info(f"--- ÇöÀç »ı¼ºµÈ À¯È¿ ¾ÆÀÌÅÛ ¸ñ·Ï (ÃÑ {len(self.items)}°³): {self.items[:20]} ... ---")
         
         initial_patterns_from_db = []
         pattern_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
@@ -521,24 +516,24 @@ class SheetOptimizeCa:
         for pattern_item_list in db_patterns_list:
             pattern_dict = dict(Counter(pattern_item_list))
             
-            # DB íŒ¨í„´ ì•„ì´í…œ ë³µêµ¬ ë° ê²€ì¦
+            # DB ÆĞÅÏ ¾ÆÀÌÅÛ º¹±¸ ¹× °ËÁõ
             all_items_valid = True
             
             for item_name in pattern_dict.keys():
                 if item_name in self.items:
                     continue
                 
-                # ì•„ì´í…œ ë³µêµ¬ ì‹œë„
+                # ¾ÆÀÌÅÛ º¹±¸ ½Ãµµ
                 is_recovered = False
                 try:
-                    # ë³µí•©í­ íŒŒì‹± (ì˜ˆ: "710x1+850x1" ë˜ëŠ” "710x2")
+                    # º¹ÇÕÆø ÆÄ½Ì (¿¹: "710x1+850x1" ¶Ç´Â "710x2")
                     sub_items = item_name.split('+')
                     total_width = 0
                     composition = {}
                     
                     valid_sub_items = True
                     for sub in sub_items:
-                        # "710x2" í˜•ì‹ íŒŒì‹±
+                        # "710x2" Çü½Ä ÆÄ½Ì
                         if 'x' not in sub:
                             valid_sub_items = False
                             break
@@ -546,7 +541,7 @@ class SheetOptimizeCa:
                         w = int(w_str)
                         c = int(c_str)
                         
-                        # ì§€í­ì´ í˜„ì¬ ì£¼ë¬¸ì— ì¡´ì¬í•˜ëŠ”ì§€ í™•ì¸
+                        # ÁöÆøÀÌ ÇöÀç ÁÖ¹®¿¡ Á¸ÀçÇÏ´ÂÁö È®ÀÎ
                         if w not in self.order_widths:
                             valid_sub_items = False
                             break
@@ -555,8 +550,8 @@ class SheetOptimizeCa:
                         composition[w] = composition.get(w, 0) + c
                     
                     if valid_sub_items:
-                        # íŠ¸ë¦¼ í¬í•¨í•˜ì—¬ ì´ í­ ê³„ì‚° (ë‹¨, 710x1+850x1ì€ íŠ¸ë¦¼ì´ í•œ ë²ˆë§Œ í¬í•¨ë¨)
-                        # [Mod] Trim ê³„ì‚° ë¡œì§ ì ìš©
+                        # Æ®¸² Æ÷ÇÔÇÏ¿© ÃÑ Æø °è»ê (´Ü, 710x1+850x1Àº Æ®¸²ÀÌ ÇÑ ¹ø¸¸ Æ÷ÇÔµÊ)
+                        # [Mod] Trim °è»ê ·ÎÁ÷ Àû¿ë
                         if self.coating_yn == 'Y':
                              effective_trim = (self.ww_trim_size or 0) + (self.ww_trim_size_sheet or 0)
                         else:
@@ -564,34 +559,34 @@ class SheetOptimizeCa:
                         
                         composite_width = total_width + effective_trim
                         
-                        # ìŠ¬ë¦¬í„° ì¹¼ ì œì•½ ë° ìµœëŒ€ í­ ì œì•½ í™•ì¸
-                        # [Mod] CM (Composite) í­ ì œì•½ ì¶”ê°€ í™•ì¸
+                        # ½½¸®ÅÍ Ä® Á¦¾à ¹× ÃÖ´ë Æø Á¦¾à È®ÀÎ
+                        # [Mod] CM (Composite) Æø Á¦¾à Ãß°¡ È®ÀÎ
                         is_cm_valid = True
                         if self.min_cm_width is not None and self.max_cm_width is not None:
                             if not (self.min_cm_width <= composite_width <= self.max_cm_width):
                                 is_cm_valid = False
                         
                         if is_cm_valid and self.min_sc_width <= composite_width <= self.max_sc_width and composite_width <= self.original_max_width:
-                             # ì•„ì´í…œ ë“±ë¡
+                             # ¾ÆÀÌÅÛ µî·Ï
                              self.items.append(item_name)
                              self.item_info[item_name] = composite_width
                              self.item_composition[item_name] = composition
                              is_recovered = True
-                             logging.info(f"    -> [Recover] DB íŒ¨í„´ ì•„ì´í…œ ë³µêµ¬: {item_name} (í­: {composite_width}mm)")
+                             logging.info(f"    -> [Recover] DB ÆĞÅÏ ¾ÆÀÌÅÛ º¹±¸: {item_name} (Æø: {composite_width}mm)")
                 except Exception as e:
-                    logging.warning(f"    - [Error] DB ì•„ì´í…œ {item_name} íŒŒì‹±/ë³µêµ¬ ì‹¤íŒ¨: {e}")
+                    logging.warning(f"    - [Error] DB ¾ÆÀÌÅÛ {item_name} ÆÄ½Ì/º¹±¸ ½ÇÆĞ: {e}")
                 
                 if not is_recovered:
                     all_items_valid = False
                     break
             
             if all_items_valid:
-                # íŒ¨í„´ ì „ì²´ ìœ íš¨ì„± (ì´ ë„ˆë¹„ ë“±) í™•ì¸
+                # ÆĞÅÏ ÀüÃ¼ À¯È¿¼º (ÃÑ ³Êºñ µî) È®ÀÎ
                 current_total_width = sum(self.item_info[name] * count for name, count in pattern_dict.items())
                 current_total_pieces = sum(pattern_dict.values()) 
                  
                 if self.min_width <= current_total_width <= self.max_width and self.min_pieces <= current_total_pieces <= self.max_pieces:
-                    # íŒ¨í„´ êµ¬ì¡°ì²´ ìƒì„±
+                    # ÆĞÅÏ ±¸Á¶Ã¼ »ı¼º
                     loss_per_roll = self.max_width - current_total_width
                     new_pat = {
                         'composition': pattern_dict,
@@ -609,18 +604,18 @@ class SheetOptimizeCa:
                     self.patterns.append(pat)
                     seen_patterns.add(key)
                     added_count += 1
-            logging.info(f"--- DBì—ì„œ {added_count}ê°œì˜ ì‚¬ìš©ì í¸ì§‘ íŒ¨í„´ì„ ì¶”ê°€í–ˆìŠµë‹ˆë‹¤. ---")
+            logging.info(f"--- DB¿¡¼­ {added_count}°³ÀÇ »ç¿ëÀÚ ÆíÁı ÆĞÅÏÀ» Ãß°¡Çß½À´Ï´Ù. ---")
 
     def _generate_initial_patterns(self):
         """
-        íœ´ë¦¬ìŠ¤í‹±ì„ ì‚¬ìš©í•˜ì—¬ ì´ˆê¸° íŒ¨í„´ì„ ìƒì„±í•©ë‹ˆë‹¤.
+        ÈŞ¸®½ºÆ½À» »ç¿ëÇÏ¿© ÃÊ±â ÆĞÅÏÀ» »ı¼ºÇÕ´Ï´Ù.
         
-        ë‹¤ì–‘í•œ ì •ë ¬ ì „ëµ(ìˆ˜ìš”ìˆœ, ë„ˆë¹„ìˆœ, ëœë¤)ì„ ì‚¬ìš©í•˜ì—¬ First-Fit ë°©ì‹ìœ¼ë¡œ
-        ì´ˆê¸° íŒ¨í„´ ì§‘í•©ì„ ìƒì„±í•©ë‹ˆë‹¤. Column Generationì˜ ì‹œì‘ì ìœ¼ë¡œ ì‚¬ìš©ë©ë‹ˆë‹¤.
+        ´Ù¾çÇÑ Á¤·Ä Àü·«(¼ö¿ä¼ø, ³Êºñ¼ø, ·£´ı)À» »ç¿ëÇÏ¿© First-Fit ¹æ½ÄÀ¸·Î
+        ÃÊ±â ÆĞÅÏ ÁıÇÕÀ» »ı¼ºÇÕ´Ï´Ù. Column GenerationÀÇ ½ÃÀÛÁ¡À¸·Î »ç¿ëµË´Ï´Ù.
         """
         seen_patterns = set()
         
-        # 1. ë‹¤ì–‘í•œ íœ´ë¦¬ìŠ¤í‹±ì„ ìœ„í•œ ì •ë ¬ëœ ì•„ì´í…œ ë¦¬ìŠ¤íŠ¸ ìƒì„±
+        # 1. ´Ù¾çÇÑ ÈŞ¸®½ºÆ½À» À§ÇÑ Á¤·ÄµÈ ¾ÆÀÌÅÛ ¸®½ºÆ® »ı¼º
         sorted_by_demand = sorted(
             self.items,
             key=lambda i: self.demands_in_meters.get(list(self.item_composition[i].keys())[0], 0),
@@ -649,10 +644,10 @@ class SheetOptimizeCa:
             sorted_by_demand_asc
         ] + random_shuffles
 
-        # CA ë²„ì „: íŒ¨í„´ ê¸¸ì´ ê¸°ë³¸ê°’
+        # CA ¹öÀü: ÆĞÅÏ ±æÀÌ ±âº»°ª
         pattern_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
 
-        # 3. ê° íœ´ë¦¬ìŠ¤í‹±ì— ëŒ€í•´ First-Fitê³¼ ìœ ì‚¬í•œ íŒ¨í„´ ìƒì„±
+        # 3. °¢ ÈŞ¸®½ºÆ½¿¡ ´ëÇØ First-Fit°ú À¯»çÇÑ ÆĞÅÏ »ı¼º
         for sorted_items in heuristics:
             for item in sorted_items:
                 item_width = self.item_info[item]
@@ -661,18 +656,18 @@ class SheetOptimizeCa:
                 current_width = item_width
                 current_pieces = 1
 
-                # max_piecesì— ë„ë‹¬í•  ë•Œê¹Œì§€ ì•„ì´í…œ ì¶”ê°€
+                # max_pieces¿¡ µµ´ŞÇÒ ¶§±îÁö ¾ÆÀÌÅÛ Ãß°¡
                 while current_pieces < self.max_pieces:
                     remaining_width = self.max_width - current_width
                     
                     # [Constraint] User Request: Check disallowed combinations via helper
                     def is_valid_combination(candidate_item, current_pat):
-                        # ì„ì‹œ íŒ¨í„´ êµ¬ì„±
+                        # ÀÓ½Ã ÆĞÅÏ ±¸¼º
                         temp_pat = current_pat.copy()
                         temp_pat[candidate_item] = temp_pat.get(candidate_item, 0) + 1
                         return self._is_pattern_valid(temp_pat)
 
-                    # ë‚¨ì€ ê³µê°„ì— ë§ëŠ” ê°€ì¥ í° ì•„ì´í…œì„ ì°¾ìŒ (First-Fit) + ê¸ˆì§€ ì¡°í•© í™•ì¸
+                    # ³²Àº °ø°£¿¡ ¸Â´Â °¡Àå Å« ¾ÆÀÌÅÛÀ» Ã£À½ (First-Fit) + ±İÁö Á¶ÇÕ È®ÀÎ
                     best_fit_item = next((i for i in sorted_items if self.item_info[i] <= remaining_width and is_valid_combination(i, current_pattern)), None)
                     
                     if not best_fit_item:
@@ -682,7 +677,7 @@ class SheetOptimizeCa:
                     current_width += self.item_info[best_fit_item]
                     current_pieces += 1
 
-                # ìµœì¢… ìœ íš¨ì„± ê²€ì‚¬ í›„ íŒ¨í„´ ì¶”ê°€
+                # ÃÖÁ¾ À¯È¿¼º °Ë»ç ÈÄ ÆĞÅÏ Ãß°¡
                 if self.min_width <= current_width and self.min_pieces <= current_pieces:
                     pattern_key = frozenset(current_pattern.items())
                     if pattern_key not in seen_patterns:
@@ -694,7 +689,7 @@ class SheetOptimizeCa:
                         })
                         seen_patterns.add(pattern_key)
 
-        # 4. ëª¨ë“  ë³µí•©í­ì— ëŒ€í•´ 'ìˆœìˆ˜ í’ˆëª© íŒ¨í„´' ìƒì„±
+        # 4. ¸ğµç º¹ÇÕÆø¿¡ ´ëÇØ '¼ø¼ö Ç°¸ñ ÆĞÅÏ' »ı¼º
         for item in sorted_by_width_asc:
             item_width = self.item_info.get(item, 0)
             if item_width <= 0:
@@ -720,21 +715,21 @@ class SheetOptimizeCa:
                 
                 num_items -= 1
 
-        logging.info(f"--- ì´ {len(self.patterns)}ê°œì˜ ì´ˆê¸° íŒ¨í„´ ìƒì„±ë¨ ---")
+        logging.info(f"--- ÃÑ {len(self.patterns)}°³ÀÇ ÃÊ±â ÆĞÅÏ »ı¼ºµÊ ---")
 
     def _solve_master_problem_ilp(self, is_final_mip=False):
         """
-        ë§ˆìŠ¤í„° ë¬¸ì œ(Master Problem)ë¥¼ ì„ í˜•ê³„íšë²•(LP) ë˜ëŠ” ì •ìˆ˜ê³„íšë²•(MIP)ìœ¼ë¡œ í•´ê²°í•©ë‹ˆë‹¤.
+        ¸¶½ºÅÍ ¹®Á¦(Master Problem)¸¦ ¼±Çü°èÈ¹¹ı(LP) ¶Ç´Â Á¤¼ö°èÈ¹¹ı(MIP)À¸·Î ÇØ°áÇÕ´Ï´Ù.
         
-        CA ë²„ì „ íŠ¹ì§•:
-        - ìˆ˜ìš” ë‹¨ìœ„: ë¯¸í„°(m) ê¸°ë°˜ (demands_in_meters ì‚¬ìš©)
-        - ìƒì‚°ëŸ‰ ê³„ì‚°: ë³µí•©í­ ë‚´ ê¸°ë³¸ ì§€í­ ë¶„í•´ í›„ íŒ¨í„´ ê¸¸ì´ ê³±í•¨
+        CA ¹öÀü Æ¯Â¡:
+        - ¼ö¿ä ´ÜÀ§: ¹ÌÅÍ(m) ±â¹İ (demands_in_meters »ç¿ë)
+        - »ı»ê·® °è»ê: º¹ÇÕÆø ³» ±âº» ÁöÆø ºĞÇØ ÈÄ ÆĞÅÏ ±æÀÌ °öÇÔ
         
         Args:
-            is_final_mip (bool): Trueì´ë©´ ì •ìˆ˜í•´, Falseì´ë©´ LP ì™„í™”í•´ + Dual Value
+            is_final_mip (bool): TrueÀÌ¸é Á¤¼öÇØ, FalseÀÌ¸é LP ¿ÏÈ­ÇØ + Dual Value
         
         Returns:
-            dict: ìµœì í™” ê²°ê³¼ (pattern_counts, over_production, under_production, duals)
+            dict: ÃÖÀûÈ­ °á°ú (pattern_counts, over_production, under_production, duals)
         """
         # 1. [Final MIP] Try Gurobi Direct Solver
         if is_final_mip:
@@ -755,14 +750,13 @@ class SheetOptimizeCa:
                     x[j] = model.addVar(vtype=GRB.INTEGER, name=f'P_{j}')
                 
                 # Variables: Over/Under Production
-                # [Mod] ë¡¤ ìˆ˜ ê¸°ë°˜ ê³¼/ë¶€ì¡± ë³€ìˆ˜ (ë¯¸í„° ëŒ€ì‹  ë¡¤ ìˆ˜ ë‹¨ìœ„)
                 over_prod_vars = {}
-                for w in self.demands_in_rolls:
+                for w in self.demands_in_meters:
                     over_prod_vars[w] = model.addVar(vtype=GRB.CONTINUOUS, name=f'Over_{w}')
                 
                 under_prod_vars = {}
-                for width, required_rolls in self.demands_in_rolls.items():
-                    allowed_under = max(0.1, required_rolls * 0.1)  # 10% tolerance in rolls
+                for width, required_meters in self.demands_in_meters.items():
+                    allowed_under = max(1, math.ceil(required_meters * 0.1)) # 10% tolerance
                     under_prod_vars[width] = model.addVar(lb=0, ub=allowed_under, vtype=GRB.CONTINUOUS, name=f'Under_{width}')
 
                 # Variables: Pattern Usage (Binary) for Count Penalty
@@ -775,22 +769,21 @@ class SheetOptimizeCa:
                 for j in range(len(self.patterns)):
                     model.addConstr(x[j] <= M * y[j], name=f'Link_{j}')
 
-                # [Mod] Constraints: Demand (ë¡¤ ìˆ˜ ê¸°ë°˜)
-                # ìƒì‚° ë¡¤ ìˆ˜ + ë¶€ì¡± ë¡¤ ìˆ˜ = í•„ìš” ë¡¤ ìˆ˜ + ê³¼ì‰ ë¡¤ ìˆ˜
-                for width, required_rolls in self.demands_in_rolls.items():
-                    # ê° íŒ¨í„´ì—ì„œ í•´ë‹¹ ì§€í­ì˜ ìƒì‚° ë¡¤ ìˆ˜ ê³„ì‚°
-                    # íŒ¨í„´ jì˜ x[j] = íŒ¨í„´ j ì„ íƒ ë¡¤ ìˆ˜
-                    # íŒ¨í„´ jê°€ í•´ë‹¹ ì§€í­ì„ ìƒì‚°í•˜ë©´ í•´ë‹¹ ì§€í­ì˜ ë¡¤ ìˆ˜ì— ê¸°ì—¬
+                # Constraints: Demand
+                # Production (m) + Under = Demand + Over
+                for width, required_meters in self.demands_in_meters.items():
+
+                    
                     total_width_prod_expr = gp.quicksum(
-                        x[j] * sum(
+                        x[j] * self.patterns[j]['length'] * sum(
                             count * self.item_composition[item_name].get(width, 0)
                             for item_name, count in self.patterns[j]['composition'].items()
                         )
                         for j in range(len(self.patterns))
                     )
-                    model.addConstr(total_width_prod_expr + under_prod_vars[width] == required_rolls + over_prod_vars[width], name=f'demand_{width}')
+                    model.addConstr(total_width_prod_expr + under_prod_vars[width] == required_meters + over_prod_vars[width], name=f'demand_{width}')
 
-                # [Mod] Objective: ë¡¤ ìˆ˜ ê¸°ë°˜ í˜ë„í‹°
+                # Objective
                 total_rolls = gp.quicksum(x[j] for j in range(len(self.patterns)))
                 total_over_prod_penalty = gp.quicksum(OVER_PROD_PENALTY * var for var in over_prod_vars.values())
                 total_under_prod_penalty = gp.quicksum(UNDER_PROD_PENALTY * var for var in under_prod_vars.values())
@@ -804,16 +797,16 @@ class SheetOptimizeCa:
                     PATTERN_COUNT_PENALTY * y[j] for j in range(len(self.patterns))
                 )
                 
-                # [New] ë‹¨í­(x1) ì•„ì´í…œ ì‚¬ìš© í˜ë„í‹°
-                # íŒ¨í„´ ë‚´ ë‹¨í­(x1) ì•„ì´í…œ ê°œìˆ˜ë¥¼ ì„¸ì–´ í˜ë„í‹° ë¶€ì—¬
-                # ì˜ˆ: "656(636*1) + 656(636*1) + 656(636*1)" -> ë‹¨í­ 3ê°œ -> í˜ë„í‹° 3 * SINGLE_STRIP_PENALTY
-                # ì˜ˆ: "1292(636*2) + 1292(636*2)" -> ë‹¨í­ 0ê°œ -> í˜ë„í‹° ì—†ìŒ
+                # [New] ´ÜÆø(x1) ¾ÆÀÌÅÛ »ç¿ë Æä³ÎÆ¼
+                # ÆĞÅÏ ³» ´ÜÆø(x1) ¾ÆÀÌÅÛ °³¼ö¸¦ ¼¼¾î Æä³ÎÆ¼ ºÎ¿©
+                # ¿¹: "656(636*1) + 656(636*1) + 656(636*1)" -> ´ÜÆø 3°³ -> Æä³ÎÆ¼ 3 * SINGLE_STRIP_PENALTY
+                # ¿¹: "1292(636*2) + 1292(636*2)" -> ´ÜÆø 0°³ -> Æä³ÎÆ¼ ¾øÀ½
                 def count_single_strips(pattern_composition):
-                    """íŒ¨í„´ ë‚´ ë‹¨í­(x1) ì•„ì´í…œì˜ ì´ ê°œìˆ˜ë¥¼ ë°˜í™˜"""
+                    """ÆĞÅÏ ³» ´ÜÆø(x1) ¾ÆÀÌÅÛÀÇ ÃÑ °³¼ö¸¦ ¹İÈ¯"""
                     single_count = 0
                     for item_name, item_count in pattern_composition.items():
-                        # item_name ì˜ˆ: "636x1", "636x2", "636x1+710x1"
-                        # '+' ë¡œ ë¶„ë¦¬í•˜ì—¬ ê° ì„œë¸Œ ì•„ì´í…œì´ x1ì¸ì§€ í™•ì¸
+                        # item_name ¿¹: "636x1", "636x2", "636x1+710x1"
+                        # '+' ·Î ºĞ¸®ÇÏ¿© °¢ ¼­ºê ¾ÆÀÌÅÛÀÌ x1ÀÎÁö È®ÀÎ
                         sub_items = item_name.split('+')
                         for sub in sub_items:
                             if sub.endswith('x1'):
@@ -825,26 +818,26 @@ class SheetOptimizeCa:
                     for j in range(len(self.patterns))
                 )
                 
-                # [New] ë‹¤ë¥¸ ì„¸ë¡œ ê¸¸ì´ ì¡°í•© í˜ë„í‹°
-                # íŒ¨í„´ ë‚´ ì•„ì´í…œë“¤ì˜ ì„¸ë¡œ ê¸¸ì´ê°€ ë‹¤ë¥´ë©´ í˜ë„í‹° ë¶€ì—¬
+                # [New] ´Ù¸¥ ¼¼·Î ±æÀÌ Á¶ÇÕ Æä³ÎÆ¼
+                # ÆĞÅÏ ³» ¾ÆÀÌÅÛµéÀÇ ¼¼·Î ±æÀÌ°¡ ´Ù¸£¸é Æä³ÎÆ¼ ºÎ¿©
                 def count_mixed_sheet_lengths(pattern_composition):
-                    """íŒ¨í„´ ë‚´ ì„œë¡œ ë‹¤ë¥¸ ì„¸ë¡œ ê¸¸ì´ ì¢…ë¥˜ ìˆ˜ë¥¼ ë°˜í™˜ (1ì´ë©´ ë™ì¼, 2ì´ìƒì´ë©´ í˜¼í•©)"""
+                    """ÆĞÅÏ ³» ¼­·Î ´Ù¸¥ ¼¼·Î ±æÀÌ Á¾·ù ¼ö¸¦ ¹İÈ¯ (1ÀÌ¸é µ¿ÀÏ, 2ÀÌ»óÀÌ¸é È¥ÇÕ)"""
                     sheet_lengths = set()
                     for item_name, item_count in pattern_composition.items():
                         if item_count > 0:
-                            # ì•„ì´í…œëª…ì—ì„œ ì„¸ë¡œ ê¸¸ì´ ì¶”ì¶œ
-                            # í˜•ì‹: "788_545x2" ë˜ëŠ” "788x2"
+                            # ¾ÆÀÌÅÛ¸í¿¡¼­ ¼¼·Î ±æÀÌ ÃßÃâ
+                            # Çü½Ä: "788_545x2" ¶Ç´Â "788x2"
                             sub_items = item_name.split('+')
                             for sub in sub_items:
                                 if '_' in sub:
-                                    # "788_545x2" í˜•ì‹
+                                    # "788_545x2" Çü½Ä
                                     parts = sub.split('_')
                                     sheet_length = int(parts[1].split('x')[0])
                                     sheet_lengths.add(sheet_length)
                                 else:
-                                    # "788x2" í˜•ì‹ (ì„¸ë¡œ ì •ë³´ ì—†ìŒ)
+                                    # "788x2" Çü½Ä (¼¼·Î Á¤º¸ ¾øÀ½)
                                     sheet_lengths.add(0)
-                    # ë‹¤ë¥¸ ì„¸ë¡œ ê¸¸ì´ ì¢…ë¥˜ ìˆ˜ (1ì´ë©´ ë™ì¼, 2ì´ìƒì´ë©´ í˜¼í•©)
+                    # ´Ù¸¥ ¼¼·Î ±æÀÌ Á¾·ù ¼ö (1ÀÌ¸é µ¿ÀÏ, 2ÀÌ»óÀÌ¸é È¥ÇÕ)
                     return max(0, len(sheet_lengths) - 1)
                 
                 total_mixed_sheet_length_penalty = gp.quicksum(
@@ -866,62 +859,6 @@ class SheetOptimizeCa:
                 if model.Status in (GRB.OPTIMAL, GRB.SUBOPTIMAL) or (model.Status == GRB.TIME_LIMIT and model.SolCount > 0):
                     status_msg = "Optimal" if model.Status == GRB.OPTIMAL else "Feasible (TimeLimit)"
                     logging.info(f"Using solver: GUROBI for Final MIP (Success: {status_msg}, Obj={model.ObjVal})")
-                    
-                    # [Debug] Objective êµ¬ì„± ìš”ì†Œ ì¶œë ¥
-                    logging.info("--- [DEBUG] Objective êµ¬ì„± ìš”ì†Œ ë¶„ì„ ---")
-                    
-                    # 1. ì´ ë¡¤ ìˆ˜
-                    total_rolls_val = sum(x[j].X for j in range(len(self.patterns)))
-                    logging.info(f"  1. ì´ ë¡¤ ìˆ˜: {total_rolls_val:.2f}")
-                    
-                    # 2. íŒ¨í„´ë³„ ì„ íƒ ë¡¤ ìˆ˜
-                    logging.info("  2. íŒ¨í„´ë³„ ì„ íƒ ë¡¤ ìˆ˜:")
-                    for j in range(len(self.patterns)):
-                        if x[j].X > 0.01:
-                            logging.info(f"     P{j}: {x[j].X:.2f}ë¡¤ | {self.patterns[j]['composition']}")
-                    
-                    # 3. ê³¼ì‰/ë¶€ì¡± ìƒì‚°
-                    over_val = sum(over_prod_vars[w].X for w in over_prod_vars)
-                    under_val = sum(under_prod_vars[w].X for w in under_prod_vars)
-                    logging.info(f"  3. ê³¼ì‰ ìƒì‚° (ë¡¤ ìˆ˜): {over_val:.4f} Ã— {OVER_PROD_PENALTY} = {over_val * OVER_PROD_PENALTY:.2f}")
-                    logging.info(f"  4. ë¶€ì¡± ìƒì‚° (ë¡¤ ìˆ˜): {under_val:.4f} Ã— {UNDER_PROD_PENALTY} = {under_val * UNDER_PROD_PENALTY:.2f}")
-                    for w in over_prod_vars:
-                        if over_prod_vars[w].X > 0.001 or under_prod_vars[w].X > 0.001:
-                            logging.info(f"     {w}: ê³¼ì‰ {over_prod_vars[w].X:.4f}ë¡¤, ë¶€ì¡± {under_prod_vars[w].X:.4f}ë¡¤")
-                    
-                    # 4. íŒ¨í„´ ì¢…ë¥˜ ìˆ˜ í˜ë„í‹°
-                    pattern_count_val = sum(1 for j in range(len(self.patterns)) if x[j].X > 0.01)
-                    logging.info(f"  5. íŒ¨í„´ ì¢…ë¥˜ ìˆ˜: {pattern_count_val}ê°œ Ã— {PATTERN_COUNT_PENALTY} = {pattern_count_val * PATTERN_COUNT_PENALTY:.2f}")
-                    
-                    # 5. ë³µì¡ë„ í˜ë„í‹°
-                    complexity_val = sum(
-                        PATTERN_COMPLEXITY_PENALTY * max(0, len(self.patterns[j]['composition']) - 1) * x[j].X
-                        for j in range(len(self.patterns))
-                    )
-                    logging.info(f"  6. ë³µì¡ë„ í˜ë„í‹°: {complexity_val:.2f}")
-                    
-                    # 6. ë‹¨í­ í˜ë„í‹°
-                    single_strip_val = sum(
-                        SINGLE_STRIP_PENALTY * count_single_strips(self.patterns[j]['composition']) * x[j].X
-                        for j in range(len(self.patterns))
-                    )
-                    logging.info(f"  7. ë‹¨í­(x1) í˜ë„í‹°: {single_strip_val:.2f}")
-                    
-                    # 7. ë‹¤ë¥¸ ì„¸ë¡œ í˜¼í•© í˜ë„í‹°
-                    mixed_length_val = sum(
-                        MIXED_SHEET_LENGTH_PENALTY * count_mixed_sheet_lengths(self.patterns[j]['composition']) * x[j].X
-                        for j in range(len(self.patterns))
-                    )
-                    logging.info(f"  8. ë‹¤ë¥¸ ì„¸ë¡œ í˜¼í•© í˜ë„í‹°: {mixed_length_val:.2f}")
-                    
-                    # í•©ê³„
-                    calculated_obj = (total_rolls_val + 
-                                     over_val * OVER_PROD_PENALTY + 
-                                     under_val * UNDER_PROD_PENALTY + 
-                                     pattern_count_val * PATTERN_COUNT_PENALTY +
-                                     complexity_val + single_strip_val + mixed_length_val)
-                    logging.info(f"  ===== ê³„ì‚°ëœ Objective: {calculated_obj:.2f} (Gurobi: {model.ObjVal:.2f}) =====")
-                    
                     solution = {
                         'objective': model.ObjVal,
                         'pattern_counts': {j: x[j].X for j in range(len(self.patterns))},
@@ -944,7 +881,7 @@ class SheetOptimizeCa:
         if is_final_mip:
             solver.SetTimeLimit(SOLVER_TIME_LIMIT_MS)
 
-        # ë³€ìˆ˜ ì •ì˜: ê° íŒ¨í„´ì˜ ì‚¬ìš© íšŸìˆ˜
+        # º¯¼ö Á¤ÀÇ: °¢ ÆĞÅÏÀÇ »ç¿ë È½¼ö
         x = {}
         for j in range(len(self.patterns)):
             if is_final_mip:
@@ -952,17 +889,17 @@ class SheetOptimizeCa:
             else:
                 x[j] = solver.NumVar(0, solver.infinity(), f'P_{j}')
 
-        # ê³¼ìƒì‚°/ë¶€ì¡±ìƒì‚° ë³€ìˆ˜
+        # °ú»ı»ê/ºÎÁ·»ı»ê º¯¼ö
         over_prod_vars = {w: solver.NumVar(0, solver.infinity(), f'Over_{w}') for w in self.demands_in_meters}
         under_prod_vars = {}
         for width, required_meters in self.demands_in_meters.items():
-            allowed_under = max(1, math.ceil(required_meters * 0.1))  # ìµœëŒ€ 10% ë¶€ì¡± í—ˆìš©
+            allowed_under = max(1, math.ceil(required_meters * 0.1))  # ÃÖ´ë 10% ºÎÁ· Çã¿ë
             under_prod_vars[width] = solver.NumVar(0, allowed_under, f'Under_{width}')
 
-        # ì œì•½ì¡°ê±´: ìƒì‚°ëŸ‰ + ë¶€ì¡±ëŸ‰ = ìˆ˜ìš”ëŸ‰ + ê³¼ìƒì‚°ëŸ‰
+        # Á¦¾àÁ¶°Ç: »ı»ê·® + ºÎÁ··® = ¼ö¿ä·® + °ú»ı»ê·®
         constraints = {}
         for width, required_meters in self.demands_in_meters.items():
-            # ê° íŒ¨í„´ì´ í•´ë‹¹ ì§€í­ì— ëŒ€í•´ ìƒì‚°í•˜ëŠ” ë¯¸í„° ê³„ì‚°
+            # °¢ ÆĞÅÏÀÌ ÇØ´ç ÁöÆø¿¡ ´ëÇØ »ı»êÇÏ´Â ¹ÌÅÍ °è»ê
             production_for_width = solver.Sum(
                 x[j] * sum(
                     self.item_composition[item_name].get(width, 0) * count
@@ -975,7 +912,7 @@ class SheetOptimizeCa:
                 f'demand_{width}'
             )
 
-        # ëª©ì í•¨ìˆ˜: ì´ ë¡¤ ìˆ˜ + í˜ë„í‹° ìµœì†Œí™”
+        # ¸ñÀûÇÔ¼ö: ÃÑ ·Ñ ¼ö + Æä³ÎÆ¼ ÃÖ¼ÒÈ­
         total_rolls = solver.Sum(x.values())
         total_over_prod_penalty = solver.Sum(OVER_PROD_PENALTY * var for var in over_prod_vars.values())
         total_under_prod_penalty = solver.Sum(UNDER_PROD_PENALTY * var for var in under_prod_vars.values())
@@ -1004,11 +941,11 @@ class SheetOptimizeCa:
         total_pattern_count_penalty = 0
         if is_final_mip:
             # [Constraint] User Request: Minimize total number of patterns used
-            # íŒ¨í„´ ì‚¬ìš© ì—¬ë¶€ ë³€ìˆ˜ (Binary)
+            # ÆĞÅÏ »ç¿ë ¿©ºÎ º¯¼ö (Binary)
             y = {j: solver.IntVar(0, 1, f'Use_{j}') for j in range(len(self.patterns))}
             
-            # Big-M ì œì•½ì¡°ê±´: x[j] <= M * y[j]
-            # Mì€ ì¶©ë¶„íˆ í° ìˆ˜ (ì˜ˆ: 1000, ë¡¤ ìˆ˜ê°€ 1000ê°œë¥¼ ë„˜ì§€ ì•ŠëŠ”ë‹¤ê³  ê°€ì •)
+            # Big-M Á¦¾àÁ¶°Ç: x[j] <= M * y[j]
+            # MÀº ÃæºĞÈ÷ Å« ¼ö (¿¹: 1000, ·Ñ ¼ö°¡ 1000°³¸¦ ³ÑÁö ¾Ê´Â´Ù°í °¡Á¤)
             M = 1000
             for j in range(len(self.patterns)):
                 solver.Add(x[j] <= M * y[j])
@@ -1017,9 +954,9 @@ class SheetOptimizeCa:
                 PATTERN_COUNT_PENALTY * y[j] for j in range(len(self.patterns))
             )
 
-        # [New] ë‹¨í­(x1) ì•„ì´í…œ ì‚¬ìš© í˜ë„í‹° (OR-Toolsìš©)
+        # [New] ´ÜÆø(x1) ¾ÆÀÌÅÛ »ç¿ë Æä³ÎÆ¼ (OR-Tools¿ë)
         def count_single_strips_ortools(pattern_composition):
-            """íŒ¨í„´ ë‚´ ë‹¨í­(x1) ì•„ì´í…œì˜ ì´ ê°œìˆ˜ë¥¼ ë°˜í™˜"""
+            """ÆĞÅÏ ³» ´ÜÆø(x1) ¾ÆÀÌÅÛÀÇ ÃÑ °³¼ö¸¦ ¹İÈ¯"""
             single_count = 0
             for item_name, item_count in pattern_composition.items():
                 sub_items = item_name.split('+')
@@ -1048,10 +985,10 @@ class SheetOptimizeCa:
                 'over_production': {w: var.solution_value() for w, var in over_prod_vars.items()},
                 'under_production': {w: var.solution_value() for w, var in under_prod_vars.items()}
             }
-            # [Debug] Log Penalty Values (OR-Tools ë²„ì „ í˜¸í™˜ì„±ì„ ìœ„í•´ ë³€ìˆ˜ ê°’ ì§ì ‘ ê³„ì‚°)
+            # [Debug] Log Penalty Values (OR-Tools ¹öÀü È£È¯¼ºÀ» À§ÇØ º¯¼ö °ª Á÷Á¢ °è»ê)
             logging.info(f"[DEBUG] Solver Objective: {solver.Objective().Value()}")
             
-            # ë³€ìˆ˜ ê°’ ì§ì ‘ í•©ì‚° (êµ¬ë²„ì „ OR-Tools í˜¸í™˜)
+            # º¯¼ö °ª Á÷Á¢ ÇÕ»ê (±¸¹öÀü OR-Tools È£È¯)
             debug_total_rolls = sum(var.solution_value() for var in x.values())
             debug_over_prod = sum(OVER_PROD_PENALTY * var.solution_value() for var in over_prod_vars.values())
             debug_under_prod = sum(UNDER_PROD_PENALTY * var.solution_value() for var in under_prod_vars.values())
@@ -1072,16 +1009,16 @@ class SheetOptimizeCa:
 
     def _solve_subproblem_dp(self, duals):
         """
-        ì„œë¸Œ ë¬¸ì œ(Sub-problem)ë¥¼ ë™ì  ê³„íšë²•(DP)ìœ¼ë¡œ í•´ê²°í•©ë‹ˆë‹¤.
+        ¼­ºê ¹®Á¦(Sub-problem)¸¦ µ¿Àû °èÈ¹¹ı(DP)À¸·Î ÇØ°áÇÕ´Ï´Ù.
         
-        Master Problemì—ì„œ ì–»ì€ Dual Valueë¥¼ í™œìš©í•˜ì—¬ Reduced Costê°€ ìŒìˆ˜ì¸
-        ìƒˆë¡œìš´ ìœ ë§ íŒ¨í„´ í›„ë³´ë¥¼ íƒìƒ‰í•©ë‹ˆë‹¤.
+        Master Problem¿¡¼­ ¾òÀº Dual Value¸¦ È°¿ëÇÏ¿© Reduced Cost°¡ À½¼öÀÎ
+        »õ·Î¿î À¯¸Á ÆĞÅÏ ÈÄº¸¸¦ Å½»öÇÕ´Ï´Ù.
         
         Args:
-            duals (dict): {ì§€í­: dual_value} ë”•ì…”ë„ˆë¦¬
+            duals (dict): {ÁöÆø: dual_value} µñ¼Å³Ê¸®
         
         Returns:
-            list: ìƒˆë¡œìš´ íŒ¨í„´ í›„ë³´ ë¦¬ìŠ¤íŠ¸
+            list: »õ·Î¿î ÆĞÅÏ ÈÄº¸ ¸®½ºÆ®
         """
         width_limit = self.max_width
         piece_limit = self.max_pieces
@@ -1091,7 +1028,7 @@ class SheetOptimizeCa:
         item_details = []
         for item_name in self.items:
             item_width = self.item_info[item_name]
-            # CA ë²„ì „: ë¯¸í„° ê¸°ë°˜ ê°€ì¹˜ ê³„ì‚° (dual * íŒ¨í„´ ê¸¸ì´)
+            # CA ¹öÀü: ¹ÌÅÍ ±â¹İ °¡Ä¡ °è»ê (dual * ÆĞÅÏ ±æÀÌ)
             item_value = sum(
                 count * duals.get(width, 0) * pattern_length
                 for width, count in self.item_composition[item_name].items()
@@ -1104,12 +1041,12 @@ class SheetOptimizeCa:
         if not item_details:
             return []
 
-        # DP í…Œì´ë¸” ì´ˆê¸°í™”
+        # DP Å×ÀÌºí ÃÊ±âÈ­
         dp_value = [[float('-inf')] * (width_limit + 1) for _ in range(piece_limit + 1)]
         dp_parent = [[None] * (width_limit + 1) for _ in range(piece_limit + 1)]
         dp_value[0][0] = 0.0
 
-        # DP í…Œì´ë¸” ì±„ìš°ê¸°
+        # DP Å×ÀÌºí Ã¤¿ì±â
         for pieces in range(piece_limit + 1):
             for width in range(width_limit + 1):
                 current_value = dp_value[pieces][width]
@@ -1128,7 +1065,7 @@ class SheetOptimizeCa:
                         dp_value[next_pieces][next_width] = new_value
                         dp_parent[next_pieces][next_width] = (pieces, width, item_name)
 
-        # í›„ë³´ íŒ¨í„´ ì¶”ì¶œ
+        # ÈÄº¸ ÆĞÅÏ ÃßÃâ
         candidate_patterns = []
         seen_patterns = set()
 
@@ -1142,7 +1079,7 @@ class SheetOptimizeCa:
                 if not parent:
                     continue
 
-                # íŒ¨í„´ ì¬êµ¬ì„±
+                # ÆĞÅÏ Àç±¸¼º
                 pattern = {}
                 cur_pieces, cur_width = pieces, width
                 while cur_pieces > 0:
@@ -1169,7 +1106,7 @@ class SheetOptimizeCa:
                 if not self._is_pattern_valid(pattern):
                      continue
 
-                # Reduced Cost ê³„ì‚°
+                # Reduced Cost °è»ê
                 reduced_cost = value - (1.0 + PIECE_COUNT_PENALTY * (pieces ** 2))
 
                 seen_patterns.add(pattern_key)
@@ -1188,36 +1125,36 @@ class SheetOptimizeCa:
 
     def run_optimize(self, start_prod_seq=0):
         """
-        ìµœì í™”ë¥¼ ì‹¤í–‰í•˜ê³  ê²°ê³¼ë¥¼ ë°˜í™˜í•©ë‹ˆë‹¤.
+        ÃÖÀûÈ­¸¦ ½ÇÇàÇÏ°í °á°ú¸¦ ¹İÈ¯ÇÕ´Ï´Ù.
         
-        ìì²´ì ìœ¼ë¡œ íŒ¨í„´ì„ ìƒì„±í•˜ê³  Column Generationì„ ìˆ˜í–‰í•©ë‹ˆë‹¤.
-        - Small Problem: ì „ì²´ íŒ¨í„´ íƒìƒ‰ (_generate_all_patterns)
-        - Large Problem: ì—´ ìƒì„± ê¸°ë²• (_generate_initial_patterns + Column Generation)
+        ÀÚÃ¼ÀûÀ¸·Î ÆĞÅÏÀ» »ı¼ºÇÏ°í Column GenerationÀ» ¼öÇàÇÕ´Ï´Ù.
+        - Small Problem: ÀüÃ¼ ÆĞÅÏ Å½»ö (_generate_all_patterns)
+        - Large Problem: ¿­ »ı¼º ±â¹ı (_generate_initial_patterns + Column Generation)
         
         Args:
-            start_prod_seq (int): ìƒì‚° ì‹œí€€ìŠ¤ ì‹œì‘ ë²ˆí˜¸ (ê¸°ë³¸ê°’: 0)
+            start_prod_seq (int): »ı»ê ½ÃÄö½º ½ÃÀÛ ¹øÈ£ (±âº»°ª: 0)
         
         Returns:
-            dict: ìµœì í™” ê²°ê³¼
+            dict: ÃÖÀûÈ­ °á°ú
         """
         pattern_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
         
-        # íŒ¨í„´ì´ ì™¸ë¶€ì—ì„œ ì£¼ì…ë˜ì§€ ì•Šì€ ê²½ìš° ìì²´ ìƒì„±
+        # ÆĞÅÏÀÌ ¿ÜºÎ¿¡¼­ ÁÖÀÔµÇÁö ¾ÊÀº °æ¿ì ÀÚÃ¼ »ı¼º
         if not self.patterns:
-            # DBì—ì„œ ì‚¬ìš©ì í¸ì§‘ íŒ¨í„´ì„ ë¨¼ì € ë¶ˆëŸ¬ì™€ ì¶”ê°€í•©ë‹ˆë‹¤.
+            # DB¿¡¼­ »ç¿ëÀÚ ÆíÁı ÆĞÅÏÀ» ¸ÕÀú ºÒ·¯¿Í Ãß°¡ÇÕ´Ï´Ù.
             self._generate_initial_patterns_db()
             
             if len(self.order_widths) <= SMALL_PROBLEM_THRESHOLD:
-                logging.info(f"\n--- ì£¼ë¬¸ ì¢…ë¥˜ê°€ {len(self.order_widths)}ê°œ ì´ë¯€ë¡œ, ëª¨ë“  íŒ¨í„´ì„ íƒìƒ‰í•©ë‹ˆë‹¤ (Small-scale) ---")
+                logging.info(f"\n--- ÁÖ¹® Á¾·ù°¡ {len(self.order_widths)}°³ ÀÌ¹Ç·Î, ¸ğµç ÆĞÅÏÀ» Å½»öÇÕ´Ï´Ù (Small-scale) ---")
                 self._generate_all_patterns()
             else:
-                logging.info(f"\n--- ì£¼ë¬¸ ì¢…ë¥˜ê°€ {len(self.order_widths)}ê°œ ì´ë¯€ë¡œ, ì—´ ìƒì„± ê¸°ë²•ì„ ì‹œì‘í•©ë‹ˆë‹¤ (Large-scale) ---")
+                logging.info(f"\n--- ÁÖ¹® Á¾·ù°¡ {len(self.order_widths)}°³ ÀÌ¹Ç·Î, ¿­ »ı¼º ±â¹ıÀ» ½ÃÀÛÇÕ´Ï´Ù (Large-scale) ---")
                 self._generate_initial_patterns()
                 
                 if not self.patterns:
-                    return {"error": "ì´ˆê¸° ìœ íš¨ íŒ¨í„´ì„ ìƒì„±í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤. ì œì•½ì¡°ê±´ì´ ë„ˆë¬´ ì—„ê²©í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤."}
+                    return {"error": "ÃÊ±â À¯È¿ ÆĞÅÏÀ» »ı¼ºÇÒ ¼ö ¾ø½À´Ï´Ù. Á¦¾àÁ¶°ÇÀÌ ³Ê¹« ¾ö°İÇÒ ¼ö ÀÖ½À´Ï´Ù."}
 
-                # ì—´ ìƒì„± ë£¨í”„
+                # ¿­ »ı¼º ·çÇÁ
                 no_improvement_count = 0
                 for iteration in range(CG_MAX_ITERATIONS):
                     master_solution = self._solve_master_problem_ilp()
@@ -1247,14 +1184,14 @@ class SheetOptimizeCa:
                         no_improvement_count += 1
                     
                     if no_improvement_count >= CG_NO_IMPROVEMENT_LIMIT:
-                        logging.info(f"--- {CG_NO_IMPROVEMENT_LIMIT}ë²ˆì˜ ë°˜ë³µ ë™ì•ˆ ê°œì„ ì´ ì—†ì–´ ìˆ˜ë ´ìœ¼ë¡œ ê°„ì£¼í•˜ê³  ì¢…ë£Œí•©ë‹ˆë‹¤ (ë°˜ë³µ {iteration}). ---")
+                        logging.info(f"--- {CG_NO_IMPROVEMENT_LIMIT}¹øÀÇ ¹İº¹ µ¿¾È °³¼±ÀÌ ¾ø¾î ¼ö·ÅÀ¸·Î °£ÁÖÇÏ°í Á¾·áÇÕ´Ï´Ù (¹İº¹ {iteration}). ---")
                         break
 
         if not self.patterns:
-            return {"error": "ìœ íš¨í•œ íŒ¨í„´ì„ ìƒì„±í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤."}
+            return {"error": "À¯È¿ÇÑ ÆĞÅÏÀ» »ı¼ºÇÒ ¼ö ¾ø½À´Ï´Ù."}
 
-        logging.info(f"--- ì´ {len(self.patterns)}ê°œì˜ íŒ¨í„´ìœ¼ë¡œ ìµœì¢… ìµœì í™”ë¥¼ ìˆ˜í–‰í•©ë‹ˆë‹¤. ---")
-        logging.info("--- ìƒì„±ëœ íŒ¨í„´ ëª©ë¡ ---")
+        logging.info(f"--- ÃÑ {len(self.patterns)}°³ÀÇ ÆĞÅÏÀ¸·Î ÃÖÁ¾ ÃÖÀûÈ­¸¦ ¼öÇàÇÕ´Ï´Ù. ---")
+        logging.info("--- »ı¼ºµÈ ÆĞÅÏ ¸ñ·Ï ---")
         for idx, pattern in enumerate(self.patterns):
             logging.info(f"  P{idx}: {pattern['composition']} | length={pattern['length']} | loss={pattern['loss_per_roll']}")
         
@@ -1262,20 +1199,20 @@ class SheetOptimizeCa:
         logging.info(f"[DEBUG] Generated Items (Top 20): {list(self.item_info.items())[:20]}")
         logging.info(f"[DEBUG] Constraints: min_sc_width={self.min_sc_width}, max_sc_width={self.max_sc_width}")
         
-        # 1. Column Generation (íŒ¨í„´ ìƒì„±)
-        # ì´ˆê¸° íŒ¨í„´ë§Œìœ¼ë¡œë„ ì¶©ë¶„í•œì§€ í™•ì¸ (Small Problem)
+        # 1. Column Generation (ÆĞÅÏ »ı¼º)
+        # ÃÊ±â ÆĞÅÏ¸¸À¸·Îµµ ÃæºĞÇÑÁö È®ÀÎ (Small Problem)
         final_solution = self._solve_master_problem_ilp(is_final_mip=True)
         if not final_solution:
-            return {"error": "ìµœì¢… í•´ë¥¼ ì°¾ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤."}
+            return {"error": "ÃÖÁ¾ ÇØ¸¦ Ã£À» ¼ö ¾ø½À´Ï´Ù."}
         
-        # [Constraint] std_roll_cnt (ë³µí•©í­ ê°œìˆ˜) ë°°ìˆ˜ ì ìš©
-        # ë¡¤ ê°œìˆ˜ê°€ std_roll_cnt ì˜ ë°°ìˆ˜ê°€ ë˜ë„ë¡ ê¸¸ì´ ì¡°ì ˆ
+        # [Constraint] std_roll_cnt (º¹ÇÕÆø °³¼ö) ¹è¼ö Àû¿ë
+        # ·Ñ °³¼ö°¡ std_roll_cnt ÀÇ ¹è¼ö°¡ µÇµµ·Ï ±æÀÌ Á¶Àı
         if self.std_roll_cnt and self.std_roll_cnt >= 1:
-            # 1. ê³„ì‚°ëœ ì†”ë£¨ì…˜ì˜ ì‹¤ì œ ìƒì‚°ëŸ‰ê³¼ ì£¼ë¬¸ëŸ‰ì„ ë¹„êµí•˜ì—¬ ê³¼ìƒì‚° ë¹„ìœ¨(Scale Factor) ê³„ì‚°
-            #    (Solverê°€ ê³ ì • ê¸¸ì´ ì œì•½ìœ¼ë¡œ ì¸í•´ ê³¼ìƒì‚°í•œ ê²½ìš° ì´ë¥¼ ë³´ì •í•˜ê¸° ìœ„í•¨)
+            # 1. °è»êµÈ ¼Ö·ç¼ÇÀÇ ½ÇÁ¦ »ı»ê·®°ú ÁÖ¹®·®À» ºñ±³ÇÏ¿© °ú»ı»ê ºñÀ²(Scale Factor) °è»ê
+            #    (Solver°¡ °íÁ¤ ±æÀÌ Á¦¾àÀ¸·Î ÀÎÇØ °ú»ı»êÇÑ °æ¿ì ÀÌ¸¦ º¸Á¤ÇÏ±â À§ÇÔ)
             scale_factor = 1.0
             
-            # íŒ¨í„´ë³„ ìƒì‚°ëŸ‰ ì§‘ê³„
+            # ÆĞÅÏº° »ı»ê·® Áı°è
             solver_prod_by_width = {} # {width: total_meters}
             for j, count in final_solution['pattern_counts'].items():
                 if count < 0.01: continue
@@ -1285,9 +1222,9 @@ class SheetOptimizeCa:
                     for base_w, base_num in self.item_composition[item_name].items():
                         solver_prod_by_width[base_w] = solver_prod_by_width.get(base_w, 0) + (count * pat_len * item_count * base_num)
 
-            # ì£¼ë¬¸ëŸ‰ ëŒ€ë¹„ ìƒì‚°ëŸ‰ ë¹„ìœ¨ í™•ì¸ (ê°€ì¥ íƒ€ì´íŠ¸í•œ ë¹„ìœ¨ ì°¾ê¸°)
-            # ìƒì‚°ëŸ‰ì´ ì£¼ë¬¸ëŸ‰ë³´ë‹¤ í¬ë‹¤ë©´(ë¹„ìœ¨ < 1) ì¤„ì—¬ì•¼ í•¨.
-            # ëª¨ë“  ì£¼ë¬¸ì„ ë§Œì¡±í•´ì•¼ í•˜ë¯€ë¡œ Max(Required / Produced) ë¥¼ ì‚¬ìš©.
+            # ÁÖ¹®·® ´ëºñ »ı»ê·® ºñÀ² È®ÀÎ (°¡Àå Å¸ÀÌÆ®ÇÑ ºñÀ² Ã£±â)
+            # »ı»ê·®ÀÌ ÁÖ¹®·®º¸´Ù Å©´Ù¸é(ºñÀ² < 1) ÁÙ¿©¾ß ÇÔ.
+            # ¸ğµç ÁÖ¹®À» ¸¸Á·ÇØ¾ß ÇÏ¹Ç·Î Max(Required / Produced) ¸¦ »ç¿ë.
             max_ratio = 0.0
             has_check = False
             for w, demand_m in self.demands_in_meters.items():
@@ -1303,7 +1240,7 @@ class SheetOptimizeCa:
                 logging.info(f"[Constraint Adjustment] Solver Over/Under-production Scale Factor: {scale_factor:.4f} (based on demand)")
 
             # [New] Aggregated Roll Count Calculation
-            # "roll_std_cntë¥¼ ì „ì²´ íŒ¨í„´ì—ì„œì—ì„œ ë³µí•©í­ê¸°ì¤€ìœ¼ë¡œ í•´ì„œ ìµœì†Œë¡œë§Œ ì ìš©í•˜ë©´ ë˜ë„ë¡ í•´ì¤˜"
+            # "roll_std_cnt¸¦ ÀüÃ¼ ÆĞÅÏ¿¡¼­¿¡¼­ º¹ÇÕÆø±âÁØÀ¸·Î ÇØ¼­ ÃÖ¼Ò·Î¸¸ Àû¿ëÇÏ¸é µÇµµ·Ï ÇØÁà"
             item_aggregated_counts = {}
             for j, count in final_solution['pattern_counts'].items():
                 if count < 0.99: continue
@@ -1311,17 +1248,17 @@ class SheetOptimizeCa:
                 for item_name in self.patterns[j]['composition']:
                     item_aggregated_counts[item_name] = item_aggregated_counts.get(item_name, 0) + count_int
 
-            # [New] ì§€í­ë³„ scale factor ê°œë³„ ê³„ì‚°
-            # ê° ì§€í­ì˜ ratioë¥¼ ë¯¸ë¦¬ ê³„ì‚°í•´ë‘ 
+            # [New] ÁöÆøº° scale factor °³º° °è»ê
+            # °¢ ÁöÆøÀÇ ratio¸¦ ¹Ì¸® °è»êÇØµÒ
             width_ratios = {}
             for w, demand_m in self.demands_in_meters.items():
                 prod_m = solver_prod_by_width.get(w, 0)
                 if prod_m > 0:
                     width_ratios[w] = demand_m / prod_m
                 else:
-                    width_ratios[w] = 1.0  # ìƒì‚°ëŸ‰ ì—†ìœ¼ë©´ ê¸°ë³¸ê°’
+                    width_ratios[w] = 1.0  # »ı»ê·® ¾øÀ¸¸é ±âº»°ª
 
-            # 2. íŒ¨í„´ë³„ ì¡°ì • ì ìš© (íŒ¨í„´ë³„ ê°œë³„ scale factor ì ìš©)
+            # 2. ÆĞÅÏº° Á¶Á¤ Àû¿ë (ÆĞÅÏº° °³º° scale factor Àû¿ë)
             for j, count in list(final_solution['pattern_counts'].items()):
                 if count < 0.99: 
                     continue
@@ -1329,8 +1266,8 @@ class SheetOptimizeCa:
                 count_int = int(round(count))
                 current_length = self.patterns[j]['length']
 
-                # [Fix] íŒ¨í„´ë³„ ê°œë³„ scale factor ê³„ì‚°
-                # í•´ë‹¹ íŒ¨í„´ì— í¬í•¨ëœ ì§€í­ë“¤ì˜ min ratio ì‚¬ìš© (ê³¼ìƒì‚° ìµœì†Œí™”)
+                # [Fix] ÆĞÅÏº° °³º° scale factor °è»ê
+                # ÇØ´ç ÆĞÅÏ¿¡ Æ÷ÇÔµÈ ÁöÆøµéÀÇ min ratio »ç¿ë (°ú»ı»ê ÃÖ¼ÒÈ­)
                 pattern_scale_factor = float('inf')
                 for item_name in self.patterns[j]['composition']:
                     for base_w in self.item_composition[item_name]:
@@ -1338,14 +1275,14 @@ class SheetOptimizeCa:
                             if width_ratios[base_w] < pattern_scale_factor:
                                 pattern_scale_factor = width_ratios[base_w]
                 
-                # ìƒì‚°ëŸ‰ ì—†ëŠ” ê²½ìš° ê¸°ë³¸ê°’
+                # »ı»ê·® ¾ø´Â °æ¿ì ±âº»°ª
                 if pattern_scale_factor == float('inf'):
                     pattern_scale_factor = 1.0
                 
-                # [Safety Margin] 2% ì—¬ìœ  ì ìš©
+                # [Safety Margin] 2% ¿©À¯ Àû¿ë
                 pattern_scale_factor = pattern_scale_factor * 1.02
 
-                # ë³´ì •ëœ í•„ìš” ì´ ê¸¸ì´ (ê³¼ìƒì‚° ì œê±°)
+                # º¸Á¤µÈ ÇÊ¿ä ÃÑ ±æÀÌ (°ú»ı»ê Á¦°Å)
                 optimized_total_len = (count_int * current_length) * pattern_scale_factor
                 
                 # [Modified] Ensure count is at least std_roll_cnt IF aggregated count is insufficient
@@ -1365,21 +1302,21 @@ class SheetOptimizeCa:
                 else:
                     new_count = count_int 
                 
-                # ì´ë¯¸ ë°°ìˆ˜ì§€ë§Œ scale_factorë¡œ ì¸í•´ ê¸¸ì´ê°€ ì¤„ì–´ë“¤ì–´ì•¼ í•˜ëŠ” ê²½ìš°ë„ ì²˜ë¦¬í•˜ê¸° ìœ„í•´
+                # ÀÌ¹Ì ¹è¼öÁö¸¸ scale_factor·Î ÀÎÇØ ±æÀÌ°¡ ÁÙ¾îµé¾î¾ß ÇÏ´Â °æ¿ìµµ Ã³¸®ÇÏ±â À§ÇØ
                 if new_count == 0: new_count = max(1, self.std_roll_cnt)
 
                 new_length = optimized_total_len / new_count
                 
-                # [User Request] ë¡¤ ê¸¸ì´ë¥¼ 100 ë‹¨ìœ„ë¡œ ë°˜ì˜¬ë¦¼ (ì´ˆê³¼ìƒì‚° ê°ìˆ˜)
+                # [User Request] ·Ñ ±æÀÌ¸¦ 100 ´ÜÀ§·Î ¹İ¿Ã¸² (ÃÊ°ú»ı»ê °¨¼ö)
                 new_length = round(new_length / 100.0) * 100.0
                 
-                # ì œì•½ì¡°ê±´ í™•ì¸ (ìµœì†Œ ë¡¤ ê¸¸ì´) - ê²½ê³ ë§Œ ë‚¨ê¸°ê³  ì ìš©
+                # Á¦¾àÁ¶°Ç È®ÀÎ (ÃÖ¼Ò ·Ñ ±æÀÌ) - °æ°í¸¸ ³²±â°í Àû¿ë
                 if new_length < self.min_sheet_roll_length:
-                    logging.warning(f"[Constraint Warning] íŒ¨í„´ {j} ê¸¸ì´ ì¡°ì •: {current_length:.1f} -> {new_length:.1f} (ìµœì†Œ {self.min_sheet_roll_length} ë¯¸ë§Œ). Over-production ë³´ì • ë° ë°°ìˆ˜ ì ìš© ê²°ê³¼.")
+                    logging.warning(f"[Constraint Warning] ÆĞÅÏ {j} ±æÀÌ Á¶Á¤: {current_length:.1f} -> {new_length:.1f} (ÃÖ¼Ò {self.min_sheet_roll_length} ¹Ì¸¸). Over-production º¸Á¤ ¹× ¹è¼ö Àû¿ë °á°ú.")
 
                 logging.info(f"[Constraint Adjustment] Pattern {j} Count {count_int} -> {new_count} (Min {self.std_roll_cnt}). Length {current_length:.1f} -> {new_length:.1f} (Scale: {pattern_scale_factor:.4f})")
                 
-                # ê²°ê³¼ ì—…ë°ì´íŠ¸
+                # °á°ú ¾÷µ¥ÀÌÆ®
                 final_solution['pattern_counts'][j] = float(new_count)
                 self.patterns[j]['length'] = new_length
 
@@ -1387,37 +1324,37 @@ class SheetOptimizeCa:
 
     def _format_results(self, final_solution, start_prod_seq=0):
         """
-        ìµœì í™” ê²°ê³¼ë¥¼ í¬ë§·íŒ…í•˜ì—¬ ë°˜í™˜í•©ë‹ˆë‹¤.
+        ÃÖÀûÈ­ °á°ú¸¦ Æ÷¸ËÆÃÇÏ¿© ¹İÈ¯ÇÕ´Ï´Ù.
         
-        ìµœì í™” ì†”ë£¨ì…˜ì„ ë°›ì•„ DB ì €ì¥ìš© ìƒì„¸ ì •ë³´ë¥¼ ìƒì„±í•˜ê³ ,
-        ì£¼ë¬¸ ì´í–‰ ìš”ì•½ì„ ì‘ì„±í•©ë‹ˆë‹¤.
+        ÃÖÀûÈ­ ¼Ö·ç¼ÇÀ» ¹Ş¾Æ DB ÀúÀå¿ë »ó¼¼ Á¤º¸¸¦ »ı¼ºÇÏ°í,
+        ÁÖ¹® ÀÌÇà ¿ä¾àÀ» ÀÛ¼ºÇÕ´Ï´Ù.
         
         Args:
-            final_solution (dict): ì†”ë²„ë¡œë¶€í„° ì–»ì€ ìµœì  í•´ (íŒ¨í„´ë³„ ìƒì‚° íšŸìˆ˜ í¬í•¨)
-            start_prod_seq (int): ìƒì‚° ì‹œí€€ìŠ¤ ì‹œì‘ ë²ˆí˜¸
+            final_solution (dict): ¼Ö¹ö·ÎºÎÅÍ ¾òÀº ÃÖÀû ÇØ (ÆĞÅÏº° »ı»ê È½¼ö Æ÷ÇÔ)
+            start_prod_seq (int): »ı»ê ½ÃÄö½º ½ÃÀÛ ¹øÈ£
         
         Returns:
-            dict: í¬ë§·íŒ…ëœ ê²°ê³¼
-                - pattern_result: íŒ¨í„´ ìš”ì•½ DataFrame
-                - pattern_details_for_db: TH_ROLL_SEQUENCE í…Œì´ë¸”ìš© ë°ì´í„°
-                - pattern_roll_details_for_db: TH_ROLL_DETAIL í…Œì´ë¸”ìš© ë°ì´í„°
-                - pattern_roll_cut_details_for_db: TH_CUT_DETAIL í…Œì´ë¸”ìš© ë°ì´í„°
-                - fulfillment_summary: ì£¼ë¬¸ ì´í–‰ ìš”ì•½
-                - last_prod_seq: ë§ˆì§€ë§‰ ìƒì‚° ì‹œí€€ìŠ¤ ë²ˆí˜¸
+            dict: Æ÷¸ËÆÃµÈ °á°ú
+                - pattern_result: ÆĞÅÏ ¿ä¾à DataFrame
+                - pattern_details_for_db: TH_ROLL_SEQUENCE Å×ÀÌºí¿ë µ¥ÀÌÅÍ
+                - pattern_roll_details_for_db: TH_ROLL_DETAIL Å×ÀÌºí¿ë µ¥ÀÌÅÍ
+                - pattern_roll_cut_details_for_db: TH_CUT_DETAIL Å×ÀÌºí¿ë µ¥ÀÌÅÍ
+                - fulfillment_summary: ÁÖ¹® ÀÌÇà ¿ä¾à
+                - last_prod_seq: ¸¶Áö¸· »ı»ê ½ÃÄö½º ¹øÈ£
         """
-        # íŒ¨í„´ ìƒì„¸ ì •ë³´ ìƒì„± (DB ì €ì¥ìš© ë° ì£¼ë¬¸ ì´í–‰ ì¶”ì )
+        # ÆĞÅÏ »ó¼¼ Á¤º¸ »ı¼º (DB ÀúÀå¿ë ¹× ÁÖ¹® ÀÌÇà ÃßÀû)
         result_patterns, pattern_details_for_db, pattern_roll_details_for_db, pattern_roll_cut_details_for_db, demand_tracker, last_prod_seq = self._build_pattern_details(final_solution, start_prod_seq)
         
-        # ê²°ê³¼ DataFrame ìƒì„±
+        # °á°ú DataFrame »ı¼º
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
             df_patterns = df_patterns[['pattern', 'wd_width', 'roll_length', 'count', 'loss_per_roll']]
 
-        # ì£¼ë¬¸ ì´í–‰ ìš”ì•½ ìƒì„±
+        # ÁÖ¹® ÀÌÇà ¿ä¾à »ı¼º
         fulfillment_summary = self._build_fulfillment_summary(demand_tracker)
 
         logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]") 
-        logging.info("[ì£¼ë¬¸ ì´í–‰ ìš”ì•½ (ê·¸ë£¹ì˜¤ë”ë³„)]")
+        logging.info("[ÁÖ¹® ÀÌÇà ¿ä¾à (±×·ì¿À´õº°)]")
         
         return {
             "pattern_result": df_patterns.sort_values('count', ascending=False) if not df_patterns.empty else df_patterns,
@@ -1430,166 +1367,166 @@ class SheetOptimizeCa:
 
     def _build_pattern_details(self, final_solution, start_prod_seq=0):
         """
-        ìµœì í™” ê²°ê³¼ë¡œë¶€í„° DB ì €ì¥ìš© ìƒì„¸ ì •ë³´ë¥¼ ìƒì„±í•©ë‹ˆë‹¤.
+        ÃÖÀûÈ­ °á°ú·ÎºÎÅÍ DB ÀúÀå¿ë »ó¼¼ Á¤º¸¸¦ »ı¼ºÇÕ´Ï´Ù.
         
-        ì´ ë©”ì„œë“œëŠ” 3ê°€ì§€ ìˆ˜ì¤€ì˜ ìƒì„¸ ë°ì´í„°ë¥¼ ìƒì„±í•©ë‹ˆë‹¤:
-        1. pattern_details_for_db: íŒ¨í„´ ìˆ˜ì¤€ (TH_PATTERN_SEQUENCE)
-        2. pattern_roll_details_for_db: ë³µí•©í­/ë¡¤ ìˆ˜ì¤€ (TH_ROLL_SEQUENCE)
-        3. pattern_roll_cut_details_for_db: ê°œë³„ ì§€í­ ì»¤íŒ… ìˆ˜ì¤€ (TH_CUT_SEQUENCE)
+        ÀÌ ¸Ş¼­µå´Â 3°¡Áö ¼öÁØÀÇ »ó¼¼ µ¥ÀÌÅÍ¸¦ »ı¼ºÇÕ´Ï´Ù:
+        1. pattern_details_for_db: ÆĞÅÏ ¼öÁØ (TH_PATTERN_SEQUENCE)
+        2. pattern_roll_details_for_db: º¹ÇÕÆø/·Ñ ¼öÁØ (TH_ROLL_SEQUENCE)
+        3. pattern_roll_cut_details_for_db: °³º° ÁöÆø Ä¿ÆÃ ¼öÁØ (TH_CUT_SEQUENCE)
         
-        ë˜í•œ ì£¼ë¬¸ ì´í–‰ ìƒí™©ì„ ì¶”ì í•˜ì—¬ demand_trackerë¥¼ ì—…ë°ì´íŠ¸í•©ë‹ˆë‹¤.
+        ¶ÇÇÑ ÁÖ¹® ÀÌÇà »óÈ²À» ÃßÀûÇÏ¿© demand_tracker¸¦ ¾÷µ¥ÀÌÆ®ÇÕ´Ï´Ù.
         
         Args:
-            final_solution (dict): ìµœì í™” ì†”ë£¨ì…˜ (íŒ¨í„´ë³„ ìƒì‚° íšŸìˆ˜)
-            start_prod_seq (int): ìƒì‚° ì‹œí€€ìŠ¤ ì‹œì‘ ë²ˆí˜¸
+            final_solution (dict): ÃÖÀûÈ­ ¼Ö·ç¼Ç (ÆĞÅÏº° »ı»ê È½¼ö)
+            start_prod_seq (int): »ı»ê ½ÃÄö½º ½ÃÀÛ ¹øÈ£
         
         Returns:
             tuple: (result_patterns, pattern_details_for_db, pattern_roll_details_for_db, 
                    pattern_roll_cut_details_for_db, demand_tracker, last_prod_seq)
         """
         # ========================================================================
-        # ì£¼ë¬¸ ì´í–‰ ì¶”ì ìš© DataFrame ì´ˆê¸°í™”
-        # - ê° ì£¼ë¬¸ë³„ë¡œ í•„ìš” ë¯¸í„° ëŒ€ë¹„ ìƒì‚°ëœ ë¯¸í„°ë¥¼ ì¶”ì 
+        # ÁÖ¹® ÀÌÇà ÃßÀû¿ë DataFrame ÃÊ±âÈ­
+        # - °¢ ÁÖ¹®º°·Î ÇÊ¿ä ¹ÌÅÍ ´ëºñ »ı»êµÈ ¹ÌÅÍ¸¦ ÃßÀû
         # ========================================================================
         demand_tracker = self.df_orders.copy()
-        demand_tracker['original_order_idx'] = demand_tracker.index  # ì›ë³¸ ì¸ë±ìŠ¤ ë³´ì¡´
-        demand_tracker = demand_tracker[['original_order_idx', 'group_order_no', 'ì§€í­', 'meters']].copy()
-        demand_tracker['fulfilled_meters'] = 0.0  # ìƒì‚°ëœ ë¯¸í„° ì´ˆê¸°í™”
-        demand_tracker = demand_tracker.sort_values(by=['ì§€í­', 'group_order_no']).reset_index(drop=True)
+        demand_tracker['original_order_idx'] = demand_tracker.index  # ¿øº» ÀÎµ¦½º º¸Á¸
+        demand_tracker = demand_tracker[['original_order_idx', 'group_order_no', 'ÁöÆø', 'meters']].copy()
+        demand_tracker['fulfilled_meters'] = 0.0  # »ı»êµÈ ¹ÌÅÍ ÃÊ±âÈ­
+        demand_tracker = demand_tracker.sort_values(by=['ÁöÆø', 'group_order_no']).reset_index(drop=True)
 
-        # ê²°ê³¼ ì €ì¥ ë¦¬ìŠ¤íŠ¸ ì´ˆê¸°í™”
-        result_patterns = []               # ìš”ì•½ ê²°ê³¼ìš©
-        pattern_details_for_db = []        # TH_PATTERN_SEQUENCE í…Œì´ë¸”ìš©
-        pattern_roll_details_for_db = []   # TH_ROLL_SEQUENCE í…Œì´ë¸”ìš©
-        pattern_roll_cut_details_for_db = []  # TH_CUT_SEQUENCE í…Œì´ë¸”ìš©
-        prod_seq_counter = start_prod_seq  # ìƒì‚° ì‹œí€€ìŠ¤ ì¹´ìš´í„°
-        total_cut_seq_counter = 0          # ì „ì²´ ì»¤íŒ… ì‹œí€€ìŠ¤ ì¹´ìš´í„°
+        # °á°ú ÀúÀå ¸®½ºÆ® ÃÊ±âÈ­
+        result_patterns = []               # ¿ä¾à °á°ú¿ë
+        pattern_details_for_db = []        # TH_PATTERN_SEQUENCE Å×ÀÌºí¿ë
+        pattern_roll_details_for_db = []   # TH_ROLL_SEQUENCE Å×ÀÌºí¿ë
+        pattern_roll_cut_details_for_db = []  # TH_CUT_SEQUENCE Å×ÀÌºí¿ë
+        prod_seq_counter = start_prod_seq  # »ı»ê ½ÃÄö½º Ä«¿îÅÍ
+        total_cut_seq_counter = 0          # ÀüÃ¼ Ä¿ÆÃ ½ÃÄö½º Ä«¿îÅÍ
 
-        # í—¬í¼ í•¨ìˆ˜: ì•ˆì „í•œ ì •ìˆ˜ ë³€í™˜
+        # ÇïÆÛ ÇÔ¼ö: ¾ÈÀüÇÑ Á¤¼ö º¯È¯
         def safe_int(val):
-            """Noneì´ë‚˜ ë¬¸ìì—´ì„ ì•ˆì „í•˜ê²Œ ì •ìˆ˜ë¡œ ë³€í™˜í•©ë‹ˆë‹¤."""
+            """NoneÀÌ³ª ¹®ÀÚ¿­À» ¾ÈÀüÇÏ°Ô Á¤¼ö·Î º¯È¯ÇÕ´Ï´Ù."""
             try:
                 return int(val)
             except (ValueError, TypeError):
                 return 0
 
         # ========================================================================
-        # ê³µí†µ ì†ì„± ì¶”ì¶œ (DB ì €ì¥ ì‹œ ëª¨ë“  ë ˆì½”ë“œì— ë™ì¼í•˜ê²Œ ì ìš©)
-        # - ì‰¬íŠ¸ì§€ëŠ” ì§€ë¦„(diameter), ì½”ì–´(core)ë¥¼ ì‚¬ìš©í•˜ì§€ ì•ŠìŒ
+        # °øÅë ¼Ó¼º ÃßÃâ (DB ÀúÀå ½Ã ¸ğµç ·¹ÄÚµå¿¡ µ¿ÀÏÇÏ°Ô Àû¿ë)
+        # - ½¬Æ®Áö´Â Áö¸§(diameter), ÄÚ¾î(core)¸¦ »ç¿ëÇÏÁö ¾ÊÀ½
         # ========================================================================
         first_row = self.df_orders.iloc[0]
         common_props = {
-            'diameter': 0, # ì‰¬íŠ¸ì§€ëŠ” ì§€ë¦„ ì—†ìŒ
+            'diameter': 0, # ½¬Æ®Áö´Â Áö¸§ ¾øÀ½
             'color': first_row.get('color', ''),
             'luster': safe_int(first_row.get('luster', 0)),
             'p_lot': self.lot_no,
-            'core': 0, # ì‰¬íŠ¸ì§€ëŠ” ì½”ì–´ ì—†ìŒ
+            'core': 0, # ½¬Æ®Áö´Â ÄÚ¾î ¾øÀ½
             'order_pattern': first_row.get('order_pattern', '')
         }
 
         # ========================================================================
-        # ê° íŒ¨í„´ë³„ë¡œ ìƒì„¸ ì •ë³´ ìƒì„±
+        # °¢ ÆĞÅÏº°·Î »ó¼¼ Á¤º¸ »ı¼º
         # ========================================================================
         for j, count in final_solution['pattern_counts'].items():
-            # ìƒì‚° íšŸìˆ˜ê°€ 1 ë¯¸ë§Œì¸ íŒ¨í„´ì€ ë¬´ì‹œ
+            # »ı»ê È½¼ö°¡ 1 ¹Ì¸¸ÀÎ ÆĞÅÏÀº ¹«½Ã
             if count < 0.99:
                 continue
             
-            roll_count = int(round(count))  # ë¡¤ ìƒì‚° íšŸìˆ˜ (ì •ìˆ˜ë¡œ ë°˜ì˜¬ë¦¼)
+            roll_count = int(round(count))  # ·Ñ »ı»ê È½¼ö (Á¤¼ö·Î ¹İ¿Ã¸²)
             pattern = self.patterns[j]
-            pattern_comp = pattern['composition']  # ë³µí•© ì•„ì´í…œ êµ¬ì„±
-            pattern_length = pattern['length']     # íŒ¨í„´ ë¡¤ ê¸¸ì´
+            pattern_comp = pattern['composition']  # º¹ÇÕ ¾ÆÀÌÅÛ ±¸¼º
+            pattern_length = pattern['length']     # ÆĞÅÏ ·Ñ ±æÀÌ
 
-            prod_seq_counter += 1  # ìƒì‚° ì‹œí€€ìŠ¤ ì¦ê°€
+            prod_seq_counter += 1  # »ı»ê ½ÃÄö½º Áõ°¡
 
-            # ë³µí•© ì•„ì´í…œì„ í­ ë‚´ë¦¼ì°¨ìˆœìœ¼ë¡œ ì •ë ¬ (í° í­ë¶€í„° ë°°ì¹˜)
+            # º¹ÇÕ ¾ÆÀÌÅÛÀ» Æø ³»¸²Â÷¼øÀ¸·Î Á¤·Ä (Å« ÆøºÎÅÍ ¹èÄ¡)
             sorted_pattern_items = sorted(pattern_comp.items(), key=lambda item: self.item_info[item[0]], reverse=True)
-            pattern_item_strs = []  # íŒ¨í„´ ë¬¸ìì—´ í‘œí˜„ìš©
-            total_width = 0         # íŒ¨í„´ ì´ í­
-            all_base_pieces_in_roll = []  # ì´ íŒ¨í„´ì— í¬í•¨ëœ ëª¨ë“  ê¸°ë³¸ ì§€í­ ëª©ë¡
+            pattern_item_strs = []  # ÆĞÅÏ ¹®ÀÚ¿­ Ç¥Çö¿ë
+            total_width = 0         # ÆĞÅÏ ÃÑ Æø
+            all_base_pieces_in_roll = []  # ÀÌ ÆĞÅÏ¿¡ Æ÷ÇÔµÈ ¸ğµç ±âº» ÁöÆø ¸ñ·Ï
 
             # ----------------------------------------------------------------
-            # Step 1: íŒ¨í„´ ìš”ì•½ ì •ë³´ ìƒì„±
+            # Step 1: ÆĞÅÏ ¿ä¾à Á¤º¸ »ı¼º
             # ----------------------------------------------------------------
             for item_name, num in sorted_pattern_items:
-                width = self.item_info[item_name]  # ë³µí•© ì•„ì´í…œì˜ ì´ í­
+                width = self.item_info[item_name]  # º¹ÇÕ ¾ÆÀÌÅÛÀÇ ÃÑ Æø
                 total_width += width * num
                 
-                # ë³µí•© ì•„ì´í…œì„ ê¸°ë³¸ ì§€í­ìœ¼ë¡œ ë¶„í•´
+                # º¹ÇÕ ¾ÆÀÌÅÛÀ» ±âº» ÁöÆøÀ¸·Î ºĞÇØ
                 base_width_dict = self.item_composition[item_name]
                 for base_key, num_base in base_width_dict.items():
-                    # [Mod] í‚¤ê°€ íŠœí”Œì´ë©´ ì²« ë²ˆì§¸ ìš”ì†Œ(ì§€í­)ë§Œ ì¶”ì¶œ
+                    # [Mod] Å°°¡ Æ©ÇÃÀÌ¸é Ã¹ ¹øÂ° ¿ä¼Ò(ÁöÆø)¸¸ ÃßÃâ
                     if isinstance(base_key, tuple):
                         base_width = base_key[0]
                     else:
                         base_width = base_key
-                    # ê¸°ë³¸ ì§€í­ ëª©ë¡ì— ì¶”ê°€ (ì‹¤ì œ ìƒì‚°ë˜ëŠ” ê°œìˆ˜ë§Œí¼)
+                    # ±âº» ÁöÆø ¸ñ·Ï¿¡ Ãß°¡ (½ÇÁ¦ »ı»êµÇ´Â °³¼ö¸¸Å­)
                     all_base_pieces_in_roll.extend([base_key] * (num_base * num))
 
-                # [Mod] íŒ¨í„´ ë¬¸ìì—´ í¬ë§·íŒ… - ì„¸ë¡œ í¬í•¨ í˜•ì‹(788_545x2) ì²˜ë¦¬
-                # í˜•ì‹: "788_545x2" â†’ "1596(788*2)"
+                # [Mod] ÆĞÅÏ ¹®ÀÚ¿­ Æ÷¸ËÆÃ - ¼¼·Î Æ÷ÇÔ Çü½Ä(788_545x2) Ã³¸®
+                # Çü½Ä: "788_545x2" ¡æ "1596(788*2)"
                 sub_items = item_name.split('+')
                 if len(sub_items) > 1 or 'x' not in item_name:
-                     formatted_name = f"{width}({item_name})"  # í˜¼í•© ë³µí•©í­
+                     formatted_name = f"{width}({item_name})"  # È¥ÇÕ º¹ÇÕÆø
                 else:
                     try:
-                        # ìƒˆë¡œìš´ í˜•ì‹: "788_545x2" ë˜ëŠ” ê¸°ì¡´ í˜•ì‹: "788x2"
+                        # »õ·Î¿î Çü½Ä: "788_545x2" ¶Ç´Â ±âÁ¸ Çü½Ä: "788x2"
                         parts = item_name.split('x')
                         multiplier = int(parts[1])
                         width_part = parts[0]
                         
-                        # "_"ê°€ ìˆìœ¼ë©´ ì„¸ë¡œ í¬í•¨ í˜•ì‹
+                        # "_"°¡ ÀÖÀ¸¸é ¼¼·Î Æ÷ÇÔ Çü½Ä
                         if '_' in width_part:
                             base_width_val = int(width_part.split('_')[0])
                         else:
                             base_width_val = int(width_part)
                         
-                        formatted_name = f"{width}({base_width_val}*{multiplier})"  # ë‹¨ì¼ ë³µí•©í­
+                        formatted_name = f"{width}({base_width_val}*{multiplier})"  # ´ÜÀÏ º¹ÇÕÆø
                     except ValueError:
                         formatted_name = f"{width}({item_name})"
                 pattern_item_strs.extend([formatted_name] * num)
             
-            # ìš”ì•½ ê²°ê³¼ ì¶”ê°€
+            # ¿ä¾à °á°ú Ãß°¡
             result_patterns.append({
-                'pattern': ' + '.join(pattern_item_strs),  # íŒ¨í„´ ë¬¸ìì—´ (ì˜ˆ: "1420(710*2) + 1560(710x1+850x1)")
-                'wd_width': total_width,                   # ì´ ì‚¬ìš© í­
-                'roll_length': round(pattern_length, 2),   # ë¡¤ ê¸¸ì´
-                'count': roll_count,                       # ìƒì‚° íšŸìˆ˜
-                'loss_per_roll': pattern['loss_per_roll']  # ë¡¤ë‹¹ ì†ì‹¤
+                'pattern': ' + '.join(pattern_item_strs),  # ÆĞÅÏ ¹®ÀÚ¿­ (¿¹: "1420(710*2) + 1560(710x1+850x1)")
+                'wd_width': total_width,                   # ÃÑ »ç¿ë Æø
+                'roll_length': round(pattern_length, 2),   # ·Ñ ±æÀÌ
+                'count': roll_count,                       # »ı»ê È½¼ö
+                'loss_per_roll': pattern['loss_per_roll']  # ·Ñ´ç ¼Õ½Ç
             })
 
             # ----------------------------------------------------------------
-            # Step 2: DB ì €ì¥ìš© ìƒì„¸ ì •ë³´ ìƒì„± (TH_ROLL_DETAIL)
-            # - ê° ë³µí•© ì•„ì´í…œë³„ë¡œ ìƒì„¸ ë ˆì½”ë“œ ìƒì„±
-            # - ê¸°ë³¸ ì§€í­ì„ ì£¼ë¬¸ì— ì—°ê²°(FIFO ë°©ì‹ìœ¼ë¡œ ì£¼ë¬¸ ì†Œì§„)
+            # Step 2: DB ÀúÀå¿ë »ó¼¼ Á¤º¸ »ı¼º (TH_ROLL_DETAIL)
+            # - °¢ º¹ÇÕ ¾ÆÀÌÅÛº°·Î »ó¼¼ ·¹ÄÚµå »ı¼º
+            # - ±âº» ÁöÆøÀ» ÁÖ¹®¿¡ ¿¬°á(FIFO ¹æ½ÄÀ¸·Î ÁÖ¹® ¼ÒÁø)
             # ----------------------------------------------------------------
-            composite_widths_for_db = []       # íŒ¨í„´ì— í¬í•¨ëœ ë³µí•©í­ ëª©ë¡
-            composite_group_nos_for_db = []    # íŒ¨í„´ì— í¬í•¨ëœ ê·¸ë£¹ì˜¤ë” ëª©ë¡
+            composite_widths_for_db = []       # ÆĞÅÏ¿¡ Æ÷ÇÔµÈ º¹ÇÕÆø ¸ñ·Ï
+            composite_group_nos_for_db = []    # ÆĞÅÏ¿¡ Æ÷ÇÔµÈ ±×·ì¿À´õ ¸ñ·Ï
             
-            roll_seq_counter = 0  # ë¡¤ ì‹œí€€ìŠ¤ ì¹´ìš´í„° (íŒ¨í„´ ë‚´)
+            roll_seq_counter = 0  # ·Ñ ½ÃÄö½º Ä«¿îÅÍ (ÆĞÅÏ ³»)
             for item_name, num_of_composite in sorted_pattern_items:
-                composite_width = self.item_info[item_name]  # ë³µí•©í­
-                base_width_dict = self.item_composition[item_name]  # ê¸°ë³¸ ì§€í­ êµ¬ì„±
+                composite_width = self.item_info[item_name]  # º¹ÇÕÆø
+                base_width_dict = self.item_composition[item_name]  # ±âº» ÁöÆø ±¸¼º
 
-                # ê° ë³µí•© ì•„ì´í…œ ê°œìˆ˜ë§Œí¼ ë°˜ë³µ
+                # °¢ º¹ÇÕ ¾ÆÀÌÅÛ °³¼ö¸¸Å­ ¹İº¹
                 for _ in range(num_of_composite):
                     roll_seq_counter += 1
                     
-                    base_widths_for_item = []      # ì´ ë³µí•© ì•„ì´í…œì— í¬í•¨ëœ ê¸°ë³¸ ì§€í­ë“¤
-                    base_group_nos_for_item = []   # ê° ê¸°ë³¸ ì§€í­ì— ë§¤í•‘ëœ ì£¼ë¬¸ ë²ˆí˜¸
-                    base_rs_gubuns_for_item = []   # ê° ê¸°ë³¸ ì§€í­ì— ë§¤í•‘ëœ ì£¼ë¬¸ ë²ˆí˜¸
+                    base_widths_for_item = []      # ÀÌ º¹ÇÕ ¾ÆÀÌÅÛ¿¡ Æ÷ÇÔµÈ ±âº» ÁöÆøµé
+                    base_group_nos_for_item = []   # °¢ ±âº» ÁöÆø¿¡ ¸ÅÇÎµÈ ÁÖ¹® ¹øÈ£
+                    base_rs_gubuns_for_item = []   # °¢ ±âº» ÁöÆø¿¡ ¸ÅÇÎµÈ ÁÖ¹® ¹øÈ£
                     assigned_group_no_for_composite = None
 
-                    # [Mod] ê¸°ë³¸ í‚¤ ì •ë ¬: íŠœí”Œì´ë©´ ì²« ë²ˆì§¸ ìš”ì†Œ(ì§€í­)ë¡œ ì •ë ¬
+                    # [Mod] ±âº» Å° Á¤·Ä: Æ©ÇÃÀÌ¸é Ã¹ ¹øÂ° ¿ä¼Ò(ÁöÆø)·Î Á¤·Ä
                     def get_sort_key(item):
                         key = item[0]
                         if isinstance(key, tuple):
                             return key[0]
                         return key
                     
-                    # ê° ê¸°ë³¸ ì§€í­ë³„ë¡œ ì£¼ë¬¸ ì—°ê²° (FIFO ë°©ì‹) - ì§€í­ ë‚´ë¦¼ì°¨ìˆœ ì •ë ¬
+                    # °¢ ±âº» ÁöÆøº°·Î ÁÖ¹® ¿¬°á (FIFO ¹æ½Ä) - ÁöÆø ³»¸²Â÷¼ø Á¤·Ä
                     for base_key, num_of_base in sorted(base_width_dict.items(), key=get_sort_key, reverse=True):
-                        # [Mod] í‚¤ê°€ íŠœí”Œì´ë©´ ì§€í­ê³¼ ì„¸ë¡œ ë¶„ë¦¬
+                        # [Mod] Å°°¡ Æ©ÇÃÀÌ¸é ÁöÆø°ú ¼¼·Î ºĞ¸®
                         if isinstance(base_key, tuple):
                             base_width_val, base_sheet_length = base_key
                         else:
@@ -1597,31 +1534,31 @@ class SheetOptimizeCa:
                             base_sheet_length = None
                         
                         for _ in range(num_of_base):
-                            # [Mod] double_cutter='N'ì¼ ë•ŒëŠ” ì§€í­+ì„¸ë¡œë¡œ ë§¤ì¹­
+                            # [Mod] double_cutter='N'ÀÏ ¶§´Â ÁöÆø+¼¼·Î·Î ¸ÅÄª
                             if self.double_cutter == 'N' and 'demand_key' in demand_tracker.columns:
                                 target_indices = demand_tracker[
                                     (demand_tracker['demand_key'] == base_key) &
                                     (demand_tracker['fulfilled_meters'] < demand_tracker['meters'])
                                 ].index
                             else:
-                                # ê¸°ì¡´ ë¡œì§: ì§€í­ìœ¼ë¡œë§Œ ë§¤ì¹­
+                                # ±âÁ¸ ·ÎÁ÷: ÁöÆøÀ¸·Î¸¸ ¸ÅÄª
                                 target_indices = demand_tracker[
-                                    (demand_tracker['ì§€í­'] == base_width_val) &
+                                    (demand_tracker['ÁöÆø'] == base_width_val) &
                                     (demand_tracker['fulfilled_meters'] < demand_tracker['meters'])
                                 ].index
                             
-                            # ê¸°ë³¸ê°’: ê³¼ìƒì‚° (ì£¼ë¬¸ ì—†ìŒ)
+                            # ±âº»°ª: °ú»ı»ê (ÁÖ¹® ¾øÀ½)
                             assigned_group_no = "OVERPROD"
                             if not target_indices.empty:
-                                # ë¯¸ì´í–‰ ì£¼ë¬¸ì´ ìˆìœ¼ë©´ ì²« ë²ˆì§¸ ì£¼ë¬¸ì— í• ë‹¹
+                                # ¹ÌÀÌÇà ÁÖ¹®ÀÌ ÀÖÀ¸¸é Ã¹ ¹øÂ° ÁÖ¹®¿¡ ÇÒ´ç
                                 target_idx = target_indices.min()
                                 assigned_group_no = demand_tracker.loc[target_idx, 'group_order_no']
                             else:
-                                # ëª¨ë“  ì£¼ë¬¸ì´ ì´í–‰ëœ ê²½ìš°, ë§ˆì§€ë§‰ ì£¼ë¬¸ì— í• ë‹¹ (fallback)
+                                # ¸ğµç ÁÖ¹®ÀÌ ÀÌÇàµÈ °æ¿ì, ¸¶Áö¸· ÁÖ¹®¿¡ ÇÒ´ç (fallback)
                                 if self.double_cutter == 'N' and 'demand_key' in demand_tracker.columns:
                                     fallback_indices = demand_tracker[demand_tracker['demand_key'] == base_key].index
                                 else:
-                                    fallback_indices = demand_tracker[demand_tracker['ì§€í­'] == base_width_val].index
+                                    fallback_indices = demand_tracker[demand_tracker['ÁöÆø'] == base_width_val].index
                                 if not fallback_indices.empty:
                                     assigned_group_no = demand_tracker.loc[fallback_indices.min(), 'group_order_no']
                             
@@ -1629,24 +1566,24 @@ class SheetOptimizeCa:
                             base_group_nos_for_item.append(assigned_group_no)
                             base_rs_gubuns_for_item.append('S')
 
-                            # ë³µí•© ì•„ì´í…œì˜ ëŒ€í‘œ ê·¸ë£¹ì˜¤ë”ëŠ” ì²« ë²ˆì§¸ ê¸°ë³¸ ì§€í­ì˜ ê·¸ë£¹
+                            # º¹ÇÕ ¾ÆÀÌÅÛÀÇ ´ëÇ¥ ±×·ì¿À´õ´Â Ã¹ ¹øÂ° ±âº» ÁöÆøÀÇ ±×·ì
                             if assigned_group_no_for_composite is None:
                                 assigned_group_no_for_composite = assigned_group_no
                     
                     composite_widths_for_db.append(composite_width)
                     composite_group_nos_for_db.append(assigned_group_no_for_composite if assigned_group_no_for_composite is not None else "")
 
-                    # TH_ROLL_SEQUENCE ë ˆì½”ë“œ ìƒì„±
+                    # TH_ROLL_SEQUENCE ·¹ÄÚµå »ı¼º
                     pattern_roll_details_for_db.append({
                         'rollwidth': composite_width,
                         'pattern_length': pattern_length,
-                        'widths': (base_widths_for_item + [0] * 7)[:7],  # ìµœëŒ€ 7ê°œ ì§€í­
+                        'widths': (base_widths_for_item + [0] * 7)[:7],  # ÃÖ´ë 7°³ ÁöÆø
                         'group_nos': (base_group_nos_for_item + [''] * 7)[:7],
                         'rs_gubuns': (base_rs_gubuns_for_item + [''] * 7)[:7],
                         'count': roll_count,
                         'prod_seq': prod_seq_counter,
                         'roll_seq': roll_seq_counter,
-                        'rs_gubun': 'T' if self.coating_yn == 'Y' else 'S',  # Sheet êµ¬ë¶„
+                        'rs_gubun': 'T' if self.coating_yn == 'Y' else 'S',  # Sheet ±¸ºĞ
                         'trim_loss': self.ww_trim_size,
                         'sc_trim': self.sheet_trim,
                         'sl_trim': self.ww_trim_size_sheet if self.coating_yn == 'Y' else 0, 
@@ -1654,8 +1591,8 @@ class SheetOptimizeCa:
                     })
 
                     # ----------------------------------------------------------------
-                    # Step 3: ì»¤íŒ… ìƒì„¸ ì •ë³´ ìƒì„± (TH_CUT_DETAIL)
-                    # - ê° ê¸°ë³¸ ì§€í­ë³„ë¡œ ì»¤íŒ… ë ˆì½”ë“œ ìƒì„±
+                    # Step 3: Ä¿ÆÃ »ó¼¼ Á¤º¸ »ı¼º (TH_CUT_DETAIL)
+                    # - °¢ ±âº» ÁöÆøº°·Î Ä¿ÆÃ ·¹ÄÚµå »ı¼º
                     # ----------------------------------------------------------------
                     cut_seq_counter = 0
                     for i in range(len(base_widths_for_item)):
@@ -1665,10 +1602,10 @@ class SheetOptimizeCa:
                             total_cut_seq_counter += 1
                             group_no = base_group_nos_for_item[i]
                             
-                            # ë¬´ê²Œ ê³„ì‚°: í‰ëŸ‰(g/mÂ²) Ã— í­(m) Ã— ê¸¸ì´(m)
+                            # ¹«°Ô °è»ê: Æò·®(g/m©÷) ¡¿ Æø(m) ¡¿ ±æÀÌ(m)
                             weight = (self.b_wgt * (width / 1000) * pattern_length)
 
-                            # TH_CUT_SEQUENCE ë ˆì½”ë“œ ìƒì„±
+                            # TH_CUT_SEQUENCE ·¹ÄÚµå »ı¼º
                             pattern_roll_cut_details_for_db.append({
                                 'prod_seq': prod_seq_counter,
                                 'unit_no': prod_seq_counter,
@@ -1681,55 +1618,55 @@ class SheetOptimizeCa:
                                 'pattern_length': pattern_length,
                                 'count': roll_count,
                                 'cut_cnt': roll_count,
-                                'rs_gubun': 'T' if self.coating_yn == 'Y' else 'S',  # Sheet êµ¬ë¶„
+                                'rs_gubun': 'T' if self.coating_yn == 'Y' else 'S',  # Sheet ±¸ºĞ
                                 **common_props
                             })
 
-            # TH_PATTERN_SEQUENCE ë ˆì½”ë“œ ìƒì„± (íŒ¨í„´ ìˆ˜ì¤€)
+            # TH_PATTERN_SEQUENCE ·¹ÄÚµå »ı¼º (ÆĞÅÏ ¼öÁØ)
             pattern_details_for_db.append({
                 'pattern_length': pattern_length,
                 'count': roll_count,
-                'widths': (composite_widths_for_db + [0] * 8)[:8],  # ìµœëŒ€ 8ê°œ ë³µí•©í­
+                'widths': (composite_widths_for_db + [0] * 8)[:8],  # ÃÖ´ë 8°³ º¹ÇÕÆø
                 'group_nos': (composite_group_nos_for_db + [''] * 8)[:8],
                 'prod_seq': prod_seq_counter,
-                'rs_gubun': 'T' if self.coating_yn == 'Y' else 'S',  # Sheet êµ¬ë¶„
+                'rs_gubun': 'T' if self.coating_yn == 'Y' else 'S',  # Sheet ±¸ºĞ
                 **common_props # [Mod] Add common props (color, p_lot, etc)
             })
 
             # ----------------------------------------------------------------
-            # Step 4: ì£¼ë¬¸ ì´í–‰ ìƒí™© ì—…ë°ì´íŠ¸
-            # - ì´ íŒ¨í„´ì—ì„œ ìƒì‚°ëœ ê¸°ë³¸ ì§€í­ë³„ë¡œ ì£¼ë¬¸ ì´í–‰ëŸ‰ ì¹´ìš´íŠ¸
-            # - FIFO ë°©ì‹ìœ¼ë¡œ ì£¼ë¬¸ ì†Œì§„
+            # Step 4: ÁÖ¹® ÀÌÇà »óÈ² ¾÷µ¥ÀÌÆ®
+            # - ÀÌ ÆĞÅÏ¿¡¼­ »ı»êµÈ ±âº» ÁöÆøº°·Î ÁÖ¹® ÀÌÇà·® Ä«¿îÆ®
+            # - FIFO ¹æ½ÄÀ¸·Î ÁÖ¹® ¼ÒÁø
             # ----------------------------------------------------------------
             base_counts_in_roll = Counter(all_base_pieces_in_roll)
             for base_key, num_in_roll in base_counts_in_roll.items():
-                # ì´ íŒ¨í„´ì—ì„œ ìƒì‚°ëœ í•´ë‹¹ ì§€í­ì˜ ì´ ë¯¸í„°
+                # ÀÌ ÆĞÅÏ¿¡¼­ »ı»êµÈ ÇØ´ç ÁöÆøÀÇ ÃÑ ¹ÌÅÍ
                 produced_meters = num_in_roll * pattern_length * roll_count
                 
-                # [Mod] double_cutter='N'ì¼ ë•ŒëŠ” demand_keyë¡œ ë§¤ì¹­
+                # [Mod] double_cutter='N'ÀÏ ¶§´Â demand_key·Î ¸ÅÄª
                 if self.double_cutter == 'N' and 'demand_key' in demand_tracker.columns:
                     relevant_orders = demand_tracker[demand_tracker['demand_key'] == base_key].index
                 else:
-                    # ê¸°ì¡´ ë¡œì§: ì§€í­ìœ¼ë¡œë§Œ ë§¤ì¹­
+                    # ±âÁ¸ ·ÎÁ÷: ÁöÆøÀ¸·Î¸¸ ¸ÅÄª
                     if isinstance(base_key, tuple):
                         base_width_val = base_key[0]
                     else:
                         base_width_val = base_key
-                    relevant_orders = demand_tracker[demand_tracker['ì§€í­'] == base_width_val].index
+                    relevant_orders = demand_tracker[demand_tracker['ÁöÆø'] == base_width_val].index
                 
                 for order_idx in relevant_orders:
                     if produced_meters <= 0:
                         break
                     
-                    # ì´ ì£¼ë¬¸ì—ì„œ ì•„ì§ í•„ìš”í•œ ë¯¸í„°
+                    # ÀÌ ÁÖ¹®¿¡¼­ ¾ÆÁ÷ ÇÊ¿äÇÑ ¹ÌÅÍ
                     needed = demand_tracker.loc[order_idx, 'meters'] - demand_tracker.loc[order_idx, 'fulfilled_meters']
                     if needed > 0:
-                        # í•„ìš”ëŸ‰ê³¼ ìƒì‚°ëŸ‰ ì¤‘ ì‘ì€ ê°’ë§Œí¼ ì´í–‰ (ì¼ë‹¨ ì±„ì›€)
+                        # ÇÊ¿ä·®°ú »ı»ê·® Áß ÀÛÀº °ª¸¸Å­ ÀÌÇà (ÀÏ´Ü Ã¤¿ò)
                         fulfill_amount = min(needed, produced_meters)
                         demand_tracker.loc[order_idx, 'fulfilled_meters'] += fulfill_amount
                         produced_meters -= fulfill_amount
                 
-                # [Fix] ê³¼ìƒì‚°ë¶„ ë°˜ì˜: ë§Œì•½ ëª¨ë“  ì˜¤ë”ë¥¼ ì±„ìš°ê³ ë„ ìƒì‚°ëŸ‰ì´ ë‚¨ì•˜ë‹¤ë©´, í•´ë‹¹ ì§€í­ì˜ ë§ˆì§€ë§‰ ì˜¤ë”ì— í•©ì‚°í•˜ì—¬ í‘œê¸°
+                # [Fix] °ú»ı»êºĞ ¹İ¿µ: ¸¸¾à ¸ğµç ¿À´õ¸¦ Ã¤¿ì°íµµ »ı»ê·®ÀÌ ³²¾Ò´Ù¸é, ÇØ´ç ÁöÆøÀÇ ¸¶Áö¸· ¿À´õ¿¡ ÇÕ»êÇÏ¿© Ç¥±â
                 if produced_meters > 0 and not relevant_orders.empty:
                     last_idx = relevant_orders[-1]
                     demand_tracker.loc[last_idx, 'fulfilled_meters'] += produced_meters
@@ -1738,52 +1675,52 @@ class SheetOptimizeCa:
 
     def _build_fulfillment_summary(self, demand_tracker):
         """
-        ì£¼ë¬¸ ì´í–‰ ìš”ì•½ ë³´ê³ ì„œë¥¼ ìƒì„±í•©ë‹ˆë‹¤.
+        ÁÖ¹® ÀÌÇà ¿ä¾à º¸°í¼­¸¦ »ı¼ºÇÕ´Ï´Ù.
         
-        ê° ì£¼ë¬¸ë³„ë¡œ ì£¼ë¬¸ëŸ‰, ìƒì‚°ëŸ‰, ê³¼ë¶€ì¡±ì„ í†¤ ë° ë¯¸í„° ë‹¨ìœ„ë¡œ ê³„ì‚°í•©ë‹ˆë‹¤.
+        °¢ ÁÖ¹®º°·Î ÁÖ¹®·®, »ı»ê·®, °úºÎÁ·À» Åæ ¹× ¹ÌÅÍ ´ÜÀ§·Î °è»êÇÕ´Ï´Ù.
         
         Args:
-            demand_tracker (pd.DataFrame): ì£¼ë¬¸ ì´í–‰ ì¶”ì  ë°ì´í„°
-                - fulfilled_meters: ê° ì£¼ë¬¸ë³„ ìƒì‚°ëœ ë¯¸í„°
+            demand_tracker (pd.DataFrame): ÁÖ¹® ÀÌÇà ÃßÀû µ¥ÀÌÅÍ
+                - fulfilled_meters: °¢ ÁÖ¹®º° »ı»êµÈ ¹ÌÅÍ
         
         Returns:
-            pd.DataFrame: ì£¼ë¬¸ ì´í–‰ ìš”ì•½
-                - group_order_no: ê·¸ë£¹ì˜¤ë” ë²ˆí˜¸
-                - ê°€ë¡œ, ì„¸ë¡œ, ìˆ˜ì¶œë‚´ìˆ˜, ë“±ê¸‰: ì£¼ë¬¸ ì •ë³´
-                - ì£¼ë¬¸ëŸ‰(í†¤), ìƒì‚°ëŸ‰(í†¤), ê³¼ë¶€ì¡±(í†¤): í†¤ ë‹¨ìœ„ ë¹„êµ
-                - í•„ìš”ê¸¸ì´(m), ìƒì‚°ê¸¸ì´(m), ê³¼ë¶€ì¡±(m): ë¯¸í„° ë‹¨ìœ„ ë¹„êµ
+            pd.DataFrame: ÁÖ¹® ÀÌÇà ¿ä¾à
+                - group_order_no: ±×·ì¿À´õ ¹øÈ£
+                - °¡·Î, ¼¼·Î, ¼öÃâ³»¼ö, µî±Ş: ÁÖ¹® Á¤º¸
+                - ÁÖ¹®·®(Åæ), »ı»ê·®(Åæ), °úºÎÁ·(Åæ): Åæ ´ÜÀ§ ºñ±³
+                - ÇÊ¿ä±æÀÌ(m), »ı»ê±æÀÌ(m), °úºÎÁ·(m): ¹ÌÅÍ ´ÜÀ§ ºñ±³
         """
-        # ê¸°ë³¸ ì£¼ë¬¸ ì •ë³´ ë³µì‚¬
-        # self.df_ordersì—ëŠ” 'ê°€ë¡œ' ëŒ€ì‹  'ì§€í­' ì»¬ëŸ¼ì´ ì¡´ì¬í•¨ (_calculate_demand_metersì—ì„œ rename ë¨)
-        summary_df = self.df_orders[['group_order_no', 'ì§€í­', 'ì„¸ë¡œ', 'ìˆ˜ì¶œë‚´ìˆ˜', 'ë“±ê¸‰', 'ì£¼ë¬¸í†¤', 'meters']].copy()
-        # ë¦¬í¬íŒ…ìš©ìœ¼ë¡œ ë‹¤ì‹œ 'ê°€ë¡œ'ë¡œ ì´ë¦„ ë³€ê²½
-        summary_df.rename(columns={'ì§€í­': 'ê°€ë¡œ', 'meters': 'í•„ìš”ê¸¸ì´(m)', 'ì£¼ë¬¸í†¤': 'ì£¼ë¬¸ëŸ‰(í†¤)'}, inplace=True)
+        # ±âº» ÁÖ¹® Á¤º¸ º¹»ç
+        # self.df_orders¿¡´Â '°¡·Î' ´ë½Å 'ÁöÆø' ÄÃ·³ÀÌ Á¸ÀçÇÔ (_calculate_demand_meters¿¡¼­ rename µÊ)
+        summary_df = self.df_orders[['group_order_no', 'ÁöÆø', '¼¼·Î', '¼öÃâ³»¼ö', 'µî±Ş', 'ÁÖ¹®Åæ', 'meters']].copy()
+        # ¸®Æ÷ÆÃ¿ëÀ¸·Î ´Ù½Ã '°¡·Î'·Î ÀÌ¸§ º¯°æ
+        summary_df.rename(columns={'ÁöÆø': '°¡·Î', 'meters': 'ÇÊ¿ä±æÀÌ(m)', 'ÁÖ¹®Åæ': 'ÁÖ¹®·®(Åæ)'}, inplace=True)
         
-        # ì´í–‰ ì •ë³´ ë³‘í•©
+        # ÀÌÇà Á¤º¸ º´ÇÕ
         summary_df = pd.merge(summary_df, demand_tracker[['original_order_idx', 'fulfilled_meters']], 
                               left_index=True, right_on='original_order_idx', how='left')
-        summary_df.rename(columns={'fulfilled_meters': 'ìƒì‚°ê¸¸ì´(m)'}, inplace=True)
+        summary_df.rename(columns={'fulfilled_meters': '»ı»ê±æÀÌ(m)'}, inplace=True)
         summary_df.drop(columns=['original_order_idx'], inplace=True)
 
-        summary_df['ìƒì‚°ê¸¸ì´(m)'] = summary_df['ìƒì‚°ê¸¸ì´(m)'].fillna(0)
+        summary_df['»ı»ê±æÀÌ(m)'] = summary_df['»ı»ê±æÀÌ(m)'].fillna(0)
         
-        # ê³¼ë¶€ì¡± ê³„ì‚° (ë¯¸í„° ë‹¨ìœ„)
-        summary_df['ê³¼ë¶€ì¡±(m)'] = summary_df['ìƒì‚°ê¸¸ì´(m)'] - summary_df['í•„ìš”ê¸¸ì´(m)']
+        # °úºÎÁ· °è»ê (¹ÌÅÍ ´ÜÀ§)
+        summary_df['°úºÎÁ·(m)'] = summary_df['»ı»ê±æÀÌ(m)'] - summary_df['ÇÊ¿ä±æÀÌ(m)']
         
-        # ë¯¸í„°ë‹¹ í†¤ìˆ˜ ê³„ì‚° (í†¤ ë‹¨ìœ„ ë³€í™˜ìš©)
-        tons_per_meter = (summary_df['ì£¼ë¬¸ëŸ‰(í†¤)'] / summary_df['í•„ìš”ê¸¸ì´(m)']).replace([float('inf'), -float('inf')], 0).fillna(0)
-        summary_df['ìƒì‚°ëŸ‰(í†¤)'] = (summary_df['ìƒì‚°ê¸¸ì´(m)'] * tons_per_meter).round(2)
-        summary_df['ê³¼ë¶€ì¡±(í†¤)'] = (summary_df['ìƒì‚°ëŸ‰(í†¤)'] - summary_df['ì£¼ë¬¸ëŸ‰(í†¤)']).round(2)
+        # ¹ÌÅÍ´ç Åæ¼ö °è»ê (Åæ ´ÜÀ§ º¯È¯¿ë)
+        tons_per_meter = (summary_df['ÁÖ¹®·®(Åæ)'] / summary_df['ÇÊ¿ä±æÀÌ(m)']).replace([float('inf'), -float('inf')], 0).fillna(0)
+        summary_df['»ı»ê·®(Åæ)'] = (summary_df['»ı»ê±æÀÌ(m)'] * tons_per_meter).round(2)
+        summary_df['°úºÎÁ·(Åæ)'] = (summary_df['»ı»ê·®(Åæ)'] - summary_df['ÁÖ¹®·®(Åæ)']).round(2)
 
-        # ì¶œë ¥ ì»¤ëŸ¼ ìˆœì„œ ì •ì˜
+        # Ãâ·Â Ä¿·³ ¼ø¼­ Á¤ÀÇ
         final_cols = [
-            'group_order_no', 'ê°€ë¡œ', 'ì„¸ë¡œ', 'ìˆ˜ì¶œë‚´ìˆ˜', 'ë“±ê¸‰', 
-            'ì£¼ë¬¸ëŸ‰(í†¤)', 'ìƒì‚°ëŸ‰(í†¤)', 'ê³¼ë¶€ì¡±(í†¤)',
-            'í•„ìš”ê¸¸ì´(m)', 'ìƒì‚°ê¸¸ì´(m)', 'ê³¼ë¶€ì¡±(m)'
+            'group_order_no', '°¡·Î', '¼¼·Î', '¼öÃâ³»¼ö', 'µî±Ş', 
+            'ÁÖ¹®·®(Åæ)', '»ı»ê·®(Åæ)', '°úºÎÁ·(Åæ)',
+            'ÇÊ¿ä±æÀÌ(m)', '»ı»ê±æÀÌ(m)', '°úºÎÁ·(m)'
         ]
         
-        # ì†Œìˆ˜ì  ì •ë¦¬
-        for col in ['í•„ìš”ê¸¸ì´(m)', 'ìƒì‚°ê¸¸ì´(m)', 'ê³¼ë¶€ì¡±(m)']:
+        # ¼Ò¼öÁ¡ Á¤¸®
+        for col in ['ÇÊ¿ä±æÀÌ(m)', '»ı»ê±æÀÌ(m)', '°úºÎÁ·(m)']:
             summary_df[col] = summary_df[col].round(2)
 
         return summary_df[final_cols]

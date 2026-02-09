@@ -1891,7 +1891,7 @@ def main():
                         time_limit, sheet_length_re, std_roll_cnt,
                         min_sc_width, max_sc_width, sheet_trim_size, 
                         min_cm_width, max_cm_width, max_sl_count, ww_trim_size, ww_trim_size_sheet,
-                        double_cutter='Y',
+                        double_cutter='N',
                         start_prod_seq=prod_seq_counter, start_group_order_no=group_order_no_counter
                     )
                 else:
