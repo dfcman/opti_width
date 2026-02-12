@@ -44,6 +44,7 @@ class VersionGetters:
                 --and a.lot_no = '3260200110' and a.version = '03'
                 and LENGTH(a.version_id) > 0
                 and nvl(a.eng_chk, '0') = '1'
+                and a.version not in ('98', '99')
                 ORDER BY a.plant, a.version_id, a.schedule_unit, a.lot_no, a.version DESC
                 FETCH FIRST 1 ROWS ONLY
             """
@@ -119,7 +120,8 @@ class VersionGetters:
                 where a.calc_successful = '9'
                 -- 5260109085  5260106006  5260104276 5260200180 5260200182  5260200528
                 --where lot_no = '5260200180' and version = '01'
-                and version not in ('98', '99')
+                and nvl(a.eng_chk , '0') = '1'
+                and a.version not in ('98', '99')
                 ORDER BY a.plant, a.version_id, a.schedule_unit, a.lot_no, a.version
                 FETCH FIRST 1 ROWS ONLY
             """
@@ -261,7 +263,8 @@ class VersionGetters:
                     a.min_width, a.roll_max_width, a.min_re_count, a.max_re_count, 
                     d.std_length as sheet_length_re, d.std_roll_cnt, 
                     a.min_sc_width, a.max_sc_width, a.sheet_trim_size,                     
-                    a.min_cm_width, a.max_cm_width, a.max_sl_count, a.ww_trim_size, a.ww_trim_size_sheet
+                    a.min_cm_width, a.max_cm_width, a.max_sl_count, a.ww_trim_size, a.ww_trim_size_sheet,
+                    'Y' as double_cutter
                 FROM th_versions_manager a, th_tar_std_length_ca d 
                 where a.plant = d.plant(+) 
                 and a.paper_type = d.paper_type 
@@ -307,7 +310,7 @@ class VersionGetters:
                     a.paper_type, a.b_wgt, a.color, 
                     a.p_type, a.p_wgt, a.p_color, a.p_machine,
                     a.min_width, a.roll_max_width, a.min_re_count, a.max_re_count,
-                    a.min_cm_width, a.max_cm_width, a.max_sl_count, a.ww_trim_size
+                    a.min_cm_width, a.max_cm_width, a.max_sl_count, a.ww_trim_size_sheet, a.ww_trim_size
                 FROM th_versions_manager a
                 where a.lot_no = :p_lot_no
                 and a.version = :p_version

@@ -61,7 +61,7 @@ PATTERN_COUNT_PENALTY = 100000.0  # 패턴 종류 수에 대한 페널티 (생�
 DISALLOWED_SINGLE_BASE_WIDTHS = {}  # 단일 사용을 금지할 주문 폭 집합
 SINGLE_STRIP_PENALTY = 50000.0  # 패턴 내 단폭 아이템(x1) 개수에 대한 페널티 (복합폭 x2 이상 사용 유도)
 PATTERN_COMPLEXITY_PENALTY = 1.0  # 복잡도 페널티 (한 패턴에 여러 규격 섞지 않도록)
-MIXED_SHEET_LENGTH_PENALTY = 100.0  # 패턴 내 다른 세로 길이 조합에 대한 페널티 (같은 세로끼리 조합 유도)
+MIXED_SHEET_LENGTH_PENALTY = 50000.0  # 패턴 내 다른 세로 길이 조합에 대한 페널티
 
 # 알고리즘 파라미터
 MIN_PIECES_PER_PATTERN = 1      # 패턴에 포함될 수 있는 최소 폭(piece)의 수
@@ -304,56 +304,48 @@ class SheetOptimizeCa:
         # ============================================================
         # Step 2: 혼합 지폭 복합 아이템 생성 (다른 지폭 조합)
         # 예: 710mm + 850mm = 1560mm
-        # [Mod] double_cutter='Y'일 때만 허용, 단 같은 세로 길이인 경우만 조합 가능
+        # [Mod] double_cutter='Y'일 때만 허용
+        # [Mod] 세로 길이가 달라도 조합 가능하도록 수정
         # ============================================================
         if self.double_cutter == 'Y':
-            # 세로 길이별로 그룹핑
-            from collections import defaultdict
-            length_groups = defaultdict(list)
-            for key in self.order_widths:
-                if isinstance(key, tuple):
-                    width, sheet_length = key
-                    length_groups[sheet_length].append(key)
-                else:
-                    length_groups[0].append(key)
+            # 모든 지폭(order_widths) 키를 대상으로 혼합 조합 생성
+            all_keys = list(self.order_widths)
             
-            # 같은 세로 길이 내에서만 혼합 지폭 조합 생성
-            for sheet_length, keys_in_group in length_groups.items():
-                for i in range(2, max_pieces_in_composite + 1):
-                    # 중복 조합(combinations_with_replacement) 생성
-                    for combo in combinations_with_replacement(keys_in_group, i):
-                        # 단일 지폭만으로 구성된 조합은 Step 1에서 이미 처리됨
-                        if len(set(combo)) == 1:
+            for i in range(2, max_pieces_in_composite + 1):
+                # 중복 조합(combinations_with_replacement) 생성
+                for combo in combinations_with_replacement(all_keys, i):
+                    # 단일 지폭만으로 구성된 조합은 Step 1에서 이미 처리됨
+                    if len(set(combo)) == 1:
+                        continue
+
+                    # 복합폭 계산: 모든 지폭 합계 + 트림 손실
+                    # [Mod] 키가 튜플이면 첫 번째 요소(지폭)만 합산
+                    combo_widths = [k[0] if isinstance(k, tuple) else k for k in combo]
+                    base_width = sum(combo_widths) + effective_trim
+                    
+                    # [New] CM (Composite) 폭 제약 확인
+                    if self.min_cm_width is not None and self.max_cm_width is not None:
+                        if not (self.min_cm_width <= base_width <= self.max_cm_width):
                             continue
 
-                        # 복합폭 계산: 모든 지폭 합계 + 트림 손실
-                        # [Mod] 키가 튜플이면 첫 번째 요소(지폭)만 합산
-                        combo_widths = [k[0] if isinstance(k, tuple) else k for k in combo]
-                        base_width = sum(combo_widths) + effective_trim
-                        
-                        # [New] CM (Composite) 폭 제약 확인
-                        if self.min_cm_width is not None and self.max_cm_width is not None:
-                            if not (self.min_cm_width <= base_width <= self.max_cm_width):
-                                continue
+                    # 슬리터 칼 제약조건 체크
+                    if not (min_sc_width <= base_width <= max_sc_width):
+                        continue
 
-                        # 슬리터 칼 제약조건 체크
-                        if not (min_sc_width <= base_width <= max_sc_width):
-                            continue
+                    if base_width <= self.original_max_width:
+                        # 조합 구성 카운팅 (예: ((710,545), (710,545), (850,545)) → {(710,545): 2, (850,545): 1})
+                        comp_counts = Counter(combo)
+                        # 아이템 명명: 지폭 내림차순 정렬된 "지폭_세로x개수" 조합
+                        if isinstance(combo[0], tuple):
+                            # 튜플 키: 지폭_세로x개수+지폭_세로x개수 형식
+                            item_name = "+".join([f"{k[0]}_{k[1]}x{c}" for k, c in sorted(comp_counts.items(), key=lambda x: x[0][0] if isinstance(x[0], tuple) else x[0], reverse=True)])
+                        else:
+                            item_name = "+".join([f"{w}x{c}" for w, c in sorted(comp_counts.items(), key=lambda x: x[0], reverse=True)])
 
-                        if base_width <= self.original_max_width:
-                            # 조합 구성 카운팅 (예: ((710,545), (710,545), (850,545)) → {(710,545): 2, (850,545): 1})
-                            comp_counts = Counter(combo)
-                            # 아이템 명명: 지폭 내림차순 정렬된 "지폭_세로x개수" 조합
-                            if isinstance(combo[0], tuple):
-                                # 튜플 키: 지폭_세로x개수+지폭_세로x개수 형식
-                                item_name = "+".join([f"{k[0]}_{k[1]}x{c}" for k, c in sorted(comp_counts.items(), key=lambda x: x[0][0] if isinstance(x[0], tuple) else x[0], reverse=True)])
-                            else:
-                                item_name = "+".join([f"{w}x{c}" for w, c in sorted(comp_counts.items(), key=lambda x: x[0], reverse=True)])
-
-                            if item_name not in items:
-                                items.append(item_name)
-                                item_info[item_name] = base_width
-                                item_composition[item_name] = dict(comp_counts)
+                        if item_name not in items:
+                            items.append(item_name)
+                            item_info[item_name] = base_width
+                            item_composition[item_name] = dict(comp_counts)
 
         return items, item_info, item_composition
 
@@ -806,18 +798,19 @@ class SheetOptimizeCa:
                 
                 # [New] 단폭(x1) 아이템 사용 페널티
                 # 패턴 내 단폭(x1) 아이템 개수를 세어 페널티 부여
-                # 예: "656(636*1) + 656(636*1) + 656(636*1)" -> 단폭 3개 -> 페널티 3 * SINGLE_STRIP_PENALTY
-                # 예: "1292(636*2) + 1292(636*2)" -> 단폭 0개 -> 페널티 없음
+                # 예: "636x1" -> 단폭 1개 -> 페널티 1 * SINGLE_STRIP_PENALTY
+                # 예: "636x2" -> 단폭 0개 -> 페널티 없음
+                # 예: "1031_670x1+530_780x1" -> 혼합 복합롤 -> 페널티 제외
                 def count_single_strips(pattern_composition):
-                    """패턴 내 단폭(x1) 아이템의 총 개수를 반환"""
+                    """패턴 내 단폭(x1) 아이템의 총 개수를 반환 (혼합 복합롤 제외)"""
                     single_count = 0
                     for item_name, item_count in pattern_composition.items():
-                        # item_name 예: "636x1", "636x2", "636x1+710x1"
-                        # '+' 로 분리하여 각 서브 아이템이 x1인지 확인
-                        sub_items = item_name.split('+')
-                        for sub in sub_items:
-                            if sub.endswith('x1'):
-                                single_count += item_count
+                        # '+' 가 포함되어 있으면 혼합 복합롤이므로 단폭 페널티 제외
+                        if '+' in item_name:
+                            continue
+                        # 단일 아이템이 x1으로 끝나면 단폭으로 카운트
+                        if item_name.endswith('x1'):
+                            single_count += item_count
                     return single_count
                 
                 total_single_strip_penalty = gp.quicksum(
@@ -1019,13 +1012,15 @@ class SheetOptimizeCa:
 
         # [New] 단폭(x1) 아이템 사용 페널티 (OR-Tools용)
         def count_single_strips_ortools(pattern_composition):
-            """패턴 내 단폭(x1) 아이템의 총 개수를 반환"""
+            """패턴 내 단폭(x1) 아이템의 총 개수를 반환 (혼합 복합롤 제외)"""
             single_count = 0
             for item_name, item_count in pattern_composition.items():
-                sub_items = item_name.split('+')
-                for sub in sub_items:
-                    if sub.endswith('x1'):
-                        single_count += item_count
+                # '+' 가 포함되어 있으면 혼합 복합롤이므로 단폭 페널티 제외
+                if '+' in item_name:
+                    continue
+                # 단일 아이템이 x1으로 끝나면 단폭으로 카운트
+                if item_name.endswith('x1'):
+                    single_count += item_count
             return single_count
         
         total_single_strip_penalty = solver.Sum(
@@ -1641,6 +1636,7 @@ class SheetOptimizeCa:
                         'rollwidth': composite_width,
                         'pattern_length': pattern_length,
                         'widths': (base_widths_for_item + [0] * 7)[:7],  # 최대 7개 지폭
+                        'roll_widths': ([0] * 7)[:7],  # 최대 7개 지폭
                         'group_nos': (base_group_nos_for_item + [''] * 7)[:7],
                         'rs_gubuns': (base_rs_gubuns_for_item + [''] * 7)[:7],
                         'count': roll_count,

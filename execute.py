@@ -456,7 +456,7 @@ def process_sheet_lot_ca(
         time_limit, sheet_length_re, std_roll_cnt,
         min_sc_width, max_sc_width, sheet_trim_size, 
         min_cm_width, max_cm_width, max_sl_count, ww_trim_size, ww_trim_size_sheet,
-        double_cutter='N', # [New]
+        double_cutter, # [New]
         start_prod_seq=0, start_group_order_no=0
 ):
     """쉬트지 lot에 대한 전체 최적화 프로세스를 처리하고 결과를 반환합니다."""
@@ -517,6 +517,17 @@ def process_sheet_lot_ca(
         
         if df_subset.empty:
             continue
+        
+        # 가로, 세로 기준 고유 규격 건수 체크
+        unique_specs = df_subset[['가로', '세로']].drop_duplicates()
+        unique_spec_count = len(unique_specs)
+        logging.info(f"[규격 체크] 가로x세로 고유 규격 수: {unique_spec_count}건")
+        logging.info(f"[규격 목록] {unique_specs.values.tolist()}")
+
+        if unique_spec_count > 3:
+            double_cutter = 'N'
+        else:
+            double_cutter = 'Y'
 
         optimizer = SheetOptimizeCa(
             db=db,
@@ -626,7 +637,7 @@ def process_roll_lot_ca(
     df_orders['version'] = version
 
     # 1. 개별 오더 그룹핑 (DB 저장용) - order_no 포함
-    group_cols = ['지폭', '롤길이', '등급']
+    group_cols = ['지폭', '롤길이', '등급', 'order_pattern']
     for col in ['지폭', '롤길이']:
         df_orders[col] = pd.to_numeric(df_orders[col])
     df_orders['등급'] = df_orders['등급'].astype(str)
@@ -649,7 +660,7 @@ def process_roll_lot_ca(
     # 엔진 효율을 위해 동일 규격은 하나로 묶음
     # 2. 지폭 그룹핑 (엔진 최적화용) - order_no 제외
     # 엔진 효율을 위해 동일 규격은 하나로 묶음
-    width_group_cols = ['지폭', '롤길이', '등급']
+    width_group_cols = ['지폭', '롤길이', '등급', 'order_pattern']
     df_width_groups = df_orders.groupby(width_group_cols).agg(
         total_qty=('주문수량', 'sum')
     ).reset_index()
@@ -670,7 +681,7 @@ def process_roll_lot_ca(
     }
     
     # 엔진 수행 그룹핑 기준 컬럼 설정
-    grouping_cols = ['롤길이', '등급']
+    grouping_cols = ['롤길이', '등급', 'order_pattern']
     unique_groups = df_orders[grouping_cols].drop_duplicates()
     prod_seq_counter = start_prod_seq
 
@@ -681,12 +692,14 @@ def process_roll_lot_ca(
     for _, row in unique_groups.iterrows():
         roll_length = row['롤길이']
         quality_grade = row['등급']
-        logging.info(f"\n--- 롤길이 그룹 {roll_length}, 등급 {quality_grade}에 대한 최적화 시작 ---")
+        order_pattern = row['order_pattern']
+        logging.info(f"\n--- 롤길이 그룹 {roll_length}, 등급 {quality_grade}, order_pattern {order_pattern}에 대한 최적화 시작 ---")
         
         # 엔진에는 지폭 그룹 데이터를 전달 (width_group_no를 group_order_no로 위장)
         df_subset_engine = df_width_groups[
             (df_width_groups['롤길이'] == roll_length) & 
-            (df_width_groups['등급'] == quality_grade)
+            (df_width_groups['등급'] == quality_grade) & 
+            (df_width_groups['order_pattern'] == row['order_pattern'])
         ].copy()
 
         if df_subset_engine.empty:
@@ -698,7 +711,7 @@ def process_roll_lot_ca(
         # 컬럼명 변경 (엔진 호환성)
         df_subset_engine = df_subset_engine.rename(columns={'width_group_no': 'group_order_no', 'total_qty': '주문수량'})
 
-        logging.info(f"--- 롤길이 그룹 {roll_length}, 등급 {quality_grade}에 대한 주문 정보 (지폭 그룹핑) ---")
+        logging.info(f"--- 롤길이 그룹 {roll_length}, 등급 {quality_grade}, order_pattern {order_pattern}에 대한 주문 정보 (지폭 그룹핑) ---")
         logging.info(df_subset_engine.to_string())
         
         optimizer = RollOptimize(
@@ -790,12 +803,15 @@ def process_roll_lot_ca(
                         'rollwidth': width,
                         'pattern_length': entry.get('pattern_length', 0),
                         'widths': [width] + [0]*7,
+                        'roll_widths': ([0] * 7)[:7],
                         'group_nos': [group_no] + ['']*7,
                         'rs_gubuns': ['R'] + ['']*7,
                         'count': count,
                         'prod_seq': prod_seq_counter,
                         'roll_seq': roll_seq_counter,
                         'rs_gubun': 'R',
+                        'sc_trim': 0,
+                        'sl_trim': 0,
                         'p_lot': entry.get('p_lot'),
                         'diameter': entry.get('diameter'),
                         'core': entry.get('core'),
@@ -882,7 +898,7 @@ def process_coating_roll_lot_ca(
         paper_type, b_wgt, color,
         p_type, p_wgt, p_color, p_machine,
         min_width, max_width, max_pieces, 
-        min_cm_width, max_cm_width, max_sl_count, ww_trim_size, 
+        min_cm_width, max_cm_width, max_sl_count, ww_trim_size_sheet, ww_trim_size, 
         start_prod_seq=0, start_group_order_no=0
 ):
     """롤지 lot에 대한 전체 최적화 프로세스를 처리하고 결과를 반환합니다."""
@@ -968,6 +984,7 @@ def process_coating_roll_lot_ca(
             min_cm_width=min_cm_width,
             max_cm_width=max_cm_width,
             max_sl_count=max_sl_count,
+            ww_trim_size_sheet=ww_trim_size_sheet,
             ww_trim_size=ww_trim_size,
             num_threads=NUM_THREADS
         )
@@ -1817,7 +1834,7 @@ def main():
                         paper_type, b_wgt, color, 
                         p_type, p_wgt, p_color, p_machine,
                         min_width, max_width, min_pieces, max_pieces,
-                        min_cm_width, max_cm_width, max_sl_count, ww_trim_size
+                        min_cm_width, max_cm_width, max_sl_count, ww_trim_size_sheet, ww_trim_size
                     ) = db.get_lot_param_roll_ca(lot_no=lot_no, version=version)
                     
                     if coating_yn == 'Y':
@@ -1826,7 +1843,7 @@ def main():
                             paper_type, b_wgt, color,
                             p_type, p_wgt, p_color, p_machine,
                             min_width, max_width, max_pieces,
-                            min_cm_width, max_cm_width, max_sl_count, ww_trim_size,
+                            min_cm_width, max_cm_width, max_sl_count, ww_trim_size_sheet, ww_trim_size,
                             start_prod_seq=prod_seq_counter, start_group_order_no=group_order_no_counter
                         )
                     else:
@@ -1877,7 +1894,8 @@ def main():
                         p_type, p_wgt, p_color, p_machine,
                         min_width, max_width, min_piece, max_piece, sheet_length_re, std_roll_cnt,
                         min_sc_width, max_sc_width, sheet_trim_size, 
-                        min_cm_width, max_cm_width, max_sl_count, ww_trim_size, ww_trim_size_sheet
+                        min_cm_width, max_cm_width, max_sl_count, ww_trim_size, ww_trim_size_sheet,
+                        double_cutter
                     ) = db.get_lot_param_sheet_ca(lot_no=lot_no, version=version)
                     
                     # [DEBUG] p_type, p_wgt, p_color, p_machine 값 확인
@@ -1891,7 +1909,7 @@ def main():
                         time_limit, sheet_length_re, std_roll_cnt,
                         min_sc_width, max_sc_width, sheet_trim_size, 
                         min_cm_width, max_cm_width, max_sl_count, ww_trim_size, ww_trim_size_sheet,
-                        double_cutter='N',
+                        double_cutter,
                         start_prod_seq=prod_seq_counter, start_group_order_no=group_order_no_counter
                     )
                 else:

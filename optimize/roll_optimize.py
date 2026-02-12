@@ -1108,6 +1108,7 @@ class RollOptimize:
                         'rollwidth': roll_width,
                         'pattern_length': roll_length,
                         'widths': new_widths,
+                        'roll_widths': ([0] * 7)[:7],
                         'group_nos': new_group_nos,
                         'rs_gubuns': new_rs_gubuns,
                         'count': int(round(count)),

@@ -105,7 +105,8 @@ class RollOptimizeCa:
         max_pieces=8,
         min_cm_width=0,
         max_cm_width=0,
-        max_sl_count=4,
+        max_sl_count=5,
+        ww_trim_size_sheet=0,
         ww_trim_size=0,
         num_threads=4
     ):
@@ -134,6 +135,7 @@ class RollOptimizeCa:
             min_cm_width: 복합폭 최소 폭 (mm)
             max_cm_width: 복합폭 최대 폭 (mm)
             max_sl_count: 복합폭당 최대 슬리터 수
+            ww_trim_size_sheet: 
             ww_trim_size: 슬리터 트림 사이즈 (mm)
             num_threads: 솔버 스레드 수
         
@@ -167,7 +169,8 @@ class RollOptimizeCa:
         # 복합폭(CM) 제약 - ww_trim_size를 sl_trim으로 사용
         self.min_cm_width = int(min_cm_width) if min_cm_width else 0
         self.max_cm_width = int(max_cm_width) if max_cm_width else 0
-        self.max_sl_count = int(max_sl_count) if max_sl_count else 4
+        self.max_sl_count = int(max_sl_count) if max_sl_count else 5
+        self.ww_trim_size_sheet = int(ww_trim_size_sheet) if ww_trim_size_sheet else 0
         self.sl_trim = int(ww_trim_size) if ww_trim_size else 0
         self.min_sl_width = self.min_cm_width
         self.max_sl_width = self.max_cm_width
@@ -1695,7 +1698,7 @@ class RollOptimizeCa:
                             base_width = item_width / max(1, self.item_piece_count[item_name])
                         expanded_widths.extend([base_width] * qty)
                         expanded_groups.extend([base_item] * qty)
-                        expanded_rs_gubuns.extend('R')
+                        expanded_rs_gubuns.extend('R' * qty)
 
                     # roll별 trim_loss 계산 (rollwidth - sum(widths))
                     roll_widths_list = (expanded_widths + [0] * 7)[:7]
@@ -1703,6 +1706,7 @@ class RollOptimizeCa:
                     
                     pattern_roll_details_for_db.append({
                         'rollwidth': item_width,
+                        'roll_widths': roll_widths_list,
                         'widths': roll_widths_list,
                         'group_nos': (expanded_groups + [''] * 7)[:7],
                         'rs_gubuns': (expanded_rs_gubuns + [''] * 7)[:7],
@@ -1712,6 +1716,8 @@ class RollOptimizeCa:
                         'pattern_length': self.pattern_length,
                         'loss_per_roll': roll_trim_loss,  # rollwidth - sum(widths)
                         'rs_gubun': 'W',
+                        'sc_trim': self.ww_trim_size_sheet,
+                        'sl_trim': self.sl_trim if self.coating_yn == 'Y' else 0, 
                         **common_props
                     })
 

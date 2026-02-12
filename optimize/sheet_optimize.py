@@ -139,7 +139,11 @@ class SheetOptimize:
         # 과생산 페널티(OVER_PROD_PENALTY)로 초과 생산을 최소화함
         self.exact_match_widths = set()
 
-        self.items, self.item_info, self.item_composition = self._prepare_items(min_sc_width, max_sc_width)
+        self.items, self.item_info, self.item_composition, available_multipliers = self._prepare_items(min_sc_width, max_sc_width)
+
+        # 2폭/4폭만 가능한 오더에 대해 필요롤수를 짝수로 조정
+        # (홀수 필요롤수는 솔버가 부족/초과 없이 정확히 맞출 수 없음)
+        self._adjust_demands_for_even_multipliers(available_multipliers)
 
         self.max_width = max_width
         self.min_width = min_width
@@ -171,15 +175,67 @@ class SheetOptimize:
         else:  # length >= 600
             return 2874
     
+    def _adjust_demands_for_even_multipliers(self, available_multipliers):
+        """2폭/4폭만 가능한 오더의 필요롤수를 짝수로 조정합니다.
+        
+        2폭이나 4폭만 가능한 오더는 한 패턴에서 항상 짝수 개의 롤을 생산합니다.
+        따라서 필요롤수가 홀수이면 솔버가 부족이나 초과 없이 정확히 맞출 수 없습니다.
+        이런 경우 필요롤수를 짝수로 올림하여 솔버가 해를 찾기 쉽게 합니다.
+        
+        Args:
+            available_multipliers: 그룹오더별 가능한 배수 집합 {g_no: set(1,2,3,4)}
+        """
+        adjusted_orders = []
+        
+        for g_no, multipliers in available_multipliers.items():
+            # 1폭이나 3폭이 가능하면 홀수 롤수도 맞출 수 있음
+            if 1 in multipliers or 3 in multipliers:
+                continue
+            
+            # 2폭과 4폭만 가능한 경우
+            if multipliers and all(m in [2, 4] for m in multipliers):
+                current_rolls = self.demands_in_rolls.get(g_no, 0)
+                
+                # 홀수인 경우 짝수로 올림
+                if current_rolls % 2 == 1:
+                    new_rolls = current_rolls + 1
+                    self.demands_in_rolls[g_no] = new_rolls
+                    
+                    # df_orders에서도 해당 그룹의 롤수 업데이트
+                    self.df_orders.loc[self.df_orders['group_order_no'] == g_no, 'rolls'] = new_rolls
+                    
+                    info = self.group_order_info.get(g_no, {})
+                    adjusted_orders.append({
+                        'g_no': g_no,
+                        'width': info.get('width', '?'),
+                        'length': info.get('length', '?'),
+                        'original': current_rolls,
+                        'adjusted': new_rolls,
+                        'multipliers': sorted(multipliers)
+                    })
+        
+        if adjusted_orders:
+            logging.info(f"\n--- 2폭/4폭만 가능한 오더의 필요롤수 짝수 조정 ({len(adjusted_orders)}건) ---")
+            for order in adjusted_orders:
+                logging.info(f"  {order['g_no']} ({order['width']}x{order['length']}mm): "
+                           f"{order['original']}롤 → {order['adjusted']}롤 (가능배수: {order['multipliers']})")
+            logging.info("----------------------------------------------\n")
 
     def _prepare_items(self, min_sc_width, max_sc_width):
         """복합폭 아이템(패턴의 구성요소)을 생성합니다.
         group_order_no 기준으로 아이템을 생성하며, 각 그룹오더별로 허용된 max_allowed_width 내에서만 생성합니다.
         item_composition에는 group_order_no를 저장하여 해당 그룹오더 수요에만 기여하도록 합니다.
+        
+        Returns:
+            items: 아이템 이름 리스트
+            item_info: 아이템별 폭 정보
+            item_composition: 아이템별 구성 정보 (그룹오더번호: 배수)
+            available_multipliers: 그룹오더별 가능한 배수 집합 {g_no: set(1,2,3,4)}
         """
         items = []
         item_info = {}  # item_name -> width
         item_composition = {}  # composite_item_name -> {원본 지폭: count}
+        available_multipliers = {}  # g_no -> set of available multipliers (1,2,3,4)
 
         for g_no in self.order_widths:
             info = self.group_order_info[g_no]
@@ -194,6 +250,9 @@ class SheetOptimize:
             skid_yn = info.get('skid_yn', 'N')
             export_yn = info.get('export_yn', 'N')
             pte_gubun = info.get('pte_gubun', '1')
+            
+            # 이 그룹오더에 대해 가능한 배수를 추적
+            available_multipliers[g_no] = set()
 
             for i in range(1, 5):  # 1, 2, 3, 4폭까지 고려
                 base_width = orig_width * i + self.sheet_trim
@@ -241,6 +300,8 @@ class SheetOptimize:
                         item_info[item_name] = composite_width
                         # group_order_no를 저장하여 해당 그룹오더 수요에만 기여하도록 함
                         item_composition[item_name] = {g_no: i}
+                        # 가능한 배수 추가
+                        available_multipliers[g_no].add(i)
         
         logging.info(f"\n--- 생성된 복합폭 아이템 ({len(items)}개) ---")
         for item in items:
@@ -250,7 +311,7 @@ class SheetOptimize:
         # if len(items) > 20:
         #     logging.info(f"  ... 외 {len(items) - 20}개")
         
-        return items, item_info, item_composition
+        return items, item_info, item_composition, available_multipliers
 
     def _calculate_demand_rolls(self, df_orders):
         """주문량을 바탕으로 그룹오더별 필요 롤 수를 계산합니다.
