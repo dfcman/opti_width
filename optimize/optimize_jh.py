@@ -75,7 +75,7 @@ class OptimizeJh:
             min_sc_width=None, max_sc_width=None,
             # 공통 제약
             min_width=0, max_width=1000, max_pieces=8,
-            min_cm_width=0, max_cm_width=0, max_sl_count=5,
+            min_sl_width=0, max_sl_width=0, max_sl_count=5,
             ww_trim_size_sheet=0, ww_trim_size=0,
             num_threads=4, time_limit=180000
     ):
@@ -102,13 +102,11 @@ class OptimizeJh:
         self.min_pieces = MIN_PIECES_PER_PATTERN
 
         # 복합폭(CM) 제약
-        self.min_cm_width = int(min_cm_width) if min_cm_width else 0
-        self.max_cm_width = int(max_cm_width) if max_cm_width else 0
+        self.min_sl_width = int(min_sl_width) if min_sl_width else 0
+        self.max_sl_width = int(max_sl_width) if max_sl_width else 0
         self.max_sl_count = int(max_sl_count) if max_sl_count else 5
         self.ww_trim_size_sheet = int(ww_trim_size_sheet) if ww_trim_size_sheet else 0
         self.sl_trim = int(ww_trim_size) if ww_trim_size else 0
-        self.min_sl_width = self.min_cm_width
-        self.max_sl_width = self.max_cm_width
 
         # 쉬트지 전용
         self.min_sheet_roll_length = min_sheet_roll_length

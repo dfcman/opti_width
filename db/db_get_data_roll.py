@@ -65,7 +65,7 @@ class RollGetters:
             print(f"Successfully fetched {len(raw_orders)} roll orders for lot {paper_prod_seq}")
             return raw_orders
         except oracledb.Error as error:
-            print(f"Error while getting roll orders from DB: {error}")
+            print(f"Error while get_roll_orders_from_db roll orders from DB: {error}")
             return None
         finally:
             if connection:
@@ -348,7 +348,7 @@ class RollGetters:
             return raw_orders
             
         except oracledb.Error as error:
-            print(f"Error while getting roll orders from DB: {error}")
+            print(f"Error while getting get_roll_orders_from_db_ca orders from DB: {error}")
             return None
         finally:
             if connection:
@@ -412,11 +412,182 @@ class RollGetters:
             print(f"Successfully fetched {len(raw_orders)} roll orders for lot {paper_prod_seq}")
             return raw_orders
         except oracledb.Error as error:
-            print(f"Error while getting roll orders from DB: {error}")
+            print(f"Error while getting get_roll_orders_from_db_ca orders from DB: {error}")
             return None
         finally:
             if connection:
                 self.pool.release(connection)
+
+
+
+    def get_roll_sl_orders_from_db_jh(self, in_lot_no, in_version):
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+            #
+            sql_query = """
+                select plant, pm_no, schedule_unit, paper_prod_seq,
+                    width                as width, 
+                    min(height)          as height, 
+                    roll_length          as roll_length, 
+                    rs_gubun             as rs_gubun, 
+                    quality_grade        as quality_grade,
+                    min(regular_type)    as regular_type,
+                    sum(order_roll_cnt) as order_roll_cnt,
+                    case when rs_gubun = 'R' 
+                            then round(sum(order_ton_cnt * loss_rate_roll), 4)
+                            when rs_gubun = 'S'
+                            then round(sum(order_ton_cnt * loss_rate_sheet), 4)
+                    end                  as order_ton_cnt,
+                    doublepack           as doublepack, 
+                    digital_yn           as digital, 
+                    semi                 as semi, 
+                    dia                  as dia, 
+                    core                 as core,
+                    short_sheet          as short_sheet,
+                    min(loss_rate_roll)  as loss_rate_roll,
+                    min(loss_rate_sheet) as loss_rate_sheet
+                from (
+                        select plant, pm_no, schedule_unit, paper_prod_seq,
+                            order_no,
+                            quality_grade,
+                            width,
+                            height,  
+                            roll_length, 
+                            rs_gubun, 
+                            regular_type,
+                            loss_rate_roll, 
+                            loss_rate_sheet,
+                            order_roll_cnt,
+                            order_ton_cnt,
+                            doublepack,
+                            (case when nvl(digital_yn, 'N') = 'N'
+                                    then 'N'
+                                    when sum(digital_cut_ton) over (partition by paper_prod_seq, width, short_sheet, nvl(roll_length,0), semi)  
+                                        > sum(digital_ton)     over (partition by paper_prod_seq, width, short_sheet, nvl(roll_length,0), semi)
+                                    then 'D' 
+                                    else 'Y'
+                                end ) as digital_yn,
+                            semi,
+                            dia, 
+                            core,
+                            short_sheet
+                        from (
+                                select p.plant, p.pm_no, p.schedule_unit, p.paper_prod_seq,
+                                    p.order_no,
+                                    p.quality_grade,
+                                    j.adj_width as width,
+                                    (
+                                        select min(p2.length) as length
+                                        from h3t_production_order p2,
+                                            th_versions_manager v2
+                                        where p2.paper_prod_seq = v2.lot_no
+                                        and v2.lot_no = :in_lot_no
+                                        and v2.version = :in_version
+                                        and p2.width = j.adj_width
+                                        and p2.rs_gubun = p.rs_gubun
+                                        and (case when (p2.width<=700 or p2.width >810) and p2.length < nvl(v2.short_sheet, 545) and p2.rs_gubun='S' then 'S' else 'L' end) = 
+                                            (case when (p.width<=700 or p.width >810) and p.length < nvl(v.short_sheet, 545) and p.rs_gubun='S' then 'S' else 'L' end)
+                                        group by p2.width
+                                    ) as height,  
+                                    p.roll_length, 
+                                    p.rs_gubun, 
+                                    case when o.regular_gubun = '3' then '1' else o.regular_gubun end regular_type,
+                                    p.order_roll_cnt,
+                                    p.order_ton_cnt,
+                                    nvl(1+0.01*r.loss_rate_roll,1.001) loss_rate_roll,
+                                    nvl(1+0.01*(r.loss_rate_sheet + case when fn_get_digi_yn(p.order_no) = 'Y' then nvl(r.loss_rate_digi, 0) else 0 end),1.065) loss_rate_sheet,
+                                    (case when p.skid_yn = 'Y' and p.pt_gubun =2 then 'Y' else 'N' end) doublepack,
+                                    (case when p.rs_gubun = 'S' and ( o.pack_type in ('5', '6', '7') or o.hogi in ('498','499','541','599') or p.width < 400 or p.length < 400 ) then 'Y' else 'N' end) digital_yn,
+                                    (case when o2.dir_gubun = 'ZARL' then 'Y' else 'N' end) semi,
+                                    p.dia, 
+                                    p.core,
+                                    (case when (p.width<=700 or p.width >810) and p.length < nvl(v.short_sheet, 545) and p.rs_gubun='S' then 'S' else 'L' end) as short_sheet,
+                                    (case when p.rs_gubun = 'S' and o.pack_type in ('5', '7') and ( o.hogi in ('498','499','541','599') or p.width < 400 or p.length < 400 ) 
+                                                                and (    ( ( p.width  between 210 and 360)  and ( p.length between 279 and 520) )
+                                                                        or ( ( p.length between 210 and 360)  and ( p.width  between 279 and 520) )
+                                                                    )
+                                            then 'Y' else 'N' end) digital_cut_yn,
+                                    (case when p.rs_gubun = 'S' and o.pack_type in ('6')      and ( o.hogi in ('498','499','541','599') or p.width < 400 or p.length < 400 ) then p.order_ton_cnt else 0 end) digital_ton,
+                                    (case when p.rs_gubun = 'S' and o.pack_type in ('5', '7') and ( o.hogi in ('498','499','541','599') or p.width < 400 or p.length < 400 ) 
+                                                                and (    ( ( p.width  between 210 and 360) and ( p.length between 279 and 520) )
+                                                                        or ( ( p.length between 210 and 360) and ( p.width  between 279 and 520) )
+                                                                    )
+                                            then p.order_ton_cnt else 0 end) digital_cut_ton
+                                from h3t_production_order p,
+                                    th_tar_loss_rate r,
+                                    sapd12t_tmp o, 
+                                    sapd11t_tmp o2,
+                                    th_order_adj j,
+                                    th_versions_manager v 
+                                where p.paper_prod_seq = v.lot_no 
+                                and p.paper_type = r.paper_type(+)
+                                and p.b_wgt = r.cp_b_wgt(+)
+                                and p.pm_no = r.resource_code(+)
+                                and o.lot_no = v.lot_no 
+                                and o2.req_no = o.req_no
+                                and p.order_no = o.order_no 
+                                and j.order_no = p.order_no
+                                and j.lot_no = v.lot_no
+                                and j.version = v.version
+                                and v.lot_no = :in_lot_no
+                                and v.version = :in_version
+                            ) t     
+                        )
+                        group by plant, pm_no, schedule_unit, paper_prod_seq,
+                                width,
+                                roll_length,
+                                rs_gubun, 
+                                quality_grade,
+                                doublepack,
+                                digital_yn,
+                                semi,
+                                dia, 
+                                core,
+                                short_sheet   
+                order by rs_gubun, width, height, regular_type
+            """
+            cursor.execute(sql_query, in_lot_no=in_lot_no, in_version=in_version)
+            rows = cursor.fetchall()
+            raw_orders = []
+            for row in rows:
+                (r_plant, r_pm_no, r_schedule_unit, r_paper_prod_seq,
+                 r_width, r_height, r_roll_length, r_rs_gubun, r_quality_grade,
+                 r_regular_type, r_order_roll_cnt, r_order_ton_cnt,
+                 r_doublepack, r_digital, r_semi, r_dia, r_core,
+                 r_short_sheet, r_loss_rate_roll, r_loss_rate_sheet) = row
+                raw_orders.append({
+                    'plant': r_plant,
+                    'pm_no': r_pm_no,
+                    'schedule_unit': r_schedule_unit,
+                    'paper_prod_seq': r_paper_prod_seq,
+                    '지폭': int(r_width),
+                    '가로': int(r_height) if r_height else 0,
+                    '롤길이': int(r_roll_length) if r_roll_length else 0,
+                    'rs_gubun': r_rs_gubun,
+                    '등급': r_quality_grade,
+                    'regular_type': r_regular_type,
+                    '주문수량': int(r_order_roll_cnt) if r_order_roll_cnt else 0,
+                    '주문톤': float(r_order_ton_cnt) if r_order_ton_cnt else 0,
+                    'doublepack': r_doublepack,
+                    'digital': r_digital,
+                    'semi': r_semi,
+                    'dia': r_dia,
+                    'core': r_core,
+                    'short_sheet': r_short_sheet,
+                    'loss_rate_roll': r_loss_rate_roll,
+                    'loss_rate_sheet': r_loss_rate_sheet,
+                })
+            print(f"Successfully fetched {len(raw_orders)} roll orders for lot {in_lot_no}")
+            return raw_orders
+        except oracledb.Error as error:
+            print(f"Error while getting get_roll_sl_orders_from_db orders_jh from DB: {error}")
+            return None
+        finally:
+            if connection:
+                self.pool.release(connection)
+
 
     def get_roll_sl_orders_from_db(self, paper_prod_seq):
         connection = None
@@ -464,8 +635,59 @@ class RollGetters:
             print(f"Successfully fetched {len(raw_orders)} roll orders for lot {paper_prod_seq}")
             return raw_orders
         except oracledb.Error as error:
-            print(f"Error while getting roll orders from DB: {error}")
+            print(f"Error while getting get_roll_sl_orders_from_db orders from DB: {error}")
             return None
         finally:
             if connection:
                 self.pool.release(connection)
+
+
+    def get_roll_orders_from_db_st(self, paper_prod_seq):
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+            #
+            sql_query = """
+                SELECT
+                    plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no,
+                    core, dia, nvl(pattern, ' ') as pattern, luster, color
+                FROM
+                    h3t_production_order
+                WHERE paper_prod_seq = :p_paper_prod_seq
+                  AND rs_gubun = 'R'
+                ORDER BY roll_length, width, dia, core
+            """
+            cursor.execute(sql_query, p_paper_prod_seq=paper_prod_seq)
+            rows = cursor.fetchall()
+            raw_orders = []
+            for row in rows:
+                plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no, core, dia, pattern, luster, color = row
+                export_type = '수출' if export_yn == 'Y' else '내수'
+                raw_orders.append({
+                    'plant': plant,
+                    'pm_no': pm_no,
+                    'schedule_unit': schedule_unit,
+                    'order_no': order_no,
+                    '지폭': int(width),
+                    '가로': int(length),
+                    '롤길이': int(roll_length),
+                    '주문수량': int(order_roll_cnt),
+                    '주문톤': float(order_ton_cnt),
+                    '등급': quality_grade,
+                    '수출내수': export_type,
+                    'core': core,
+                    'dia': dia,
+                    'luster': luster,
+                    'color': color,
+                    'order_pattern': pattern
+                })
+            print(f"Successfully fetched {len(raw_orders)} roll orders for lot {paper_prod_seq}")
+            return raw_orders
+        except oracledb.Error as error:
+            print(f"Error while getting get_roll_orders_from_db orders from DB: {error}")
+            return None
+        finally:
+            if connection:
+                self.pool.release(connection)
+
