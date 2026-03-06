@@ -3,11 +3,14 @@ import sys
 from .db_get_data_csv import CsvGetters
 from .db_get_data_roll import RollGetters
 from .db_get_data_sheet import SheetGetters
-from .db_get_data_version import VersionGetters
+from .db_get_data_version_dj import VersionGettersDj
+from .db_get_data_version_ca import VersionGettersCa
+from .db_get_data_version_st import VersionGettersSt
+from .db_get_data_version_jh import VersionGettersJh
 from .db_insert_data import DataInserters
 from .db_get_data_pattern import PatternGetters
 
-class Database(CsvGetters, RollGetters, SheetGetters, VersionGetters, DataInserters, PatternGetters):
+class Database(CsvGetters, RollGetters, SheetGetters, VersionGettersDj, VersionGettersCa, VersionGettersSt, VersionGettersJh, DataInserters, PatternGetters):
     def __init__(self, user, password, dsn, min_pool=1, max_pool=5, increment=1):
         self.user = user
         self.password = password

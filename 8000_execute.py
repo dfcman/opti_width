@@ -47,54 +47,91 @@ def process_roll_lot_st(
         대표오더번호=('order_no', 'first')
     ).reset_index()
     df_groups = df_groups.sort_values(by=group_cols).reset_index(drop=True)
-    df_groups['group_order_no'] = [f"50{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
+    df_groups['group_order_no'] = [f"80{lot_no}{start_group_order_no + i + 1:03d}" for i in df_groups.index]
     last_group_order_no = start_group_order_no + len(df_groups)
 
     df_orders = pd.merge(df_orders, df_groups, on=group_cols, how='left')
 
     df_orders['color'] = color
-    
-    optimizer = RollOptimizeSt(
-        df_spec_pre=df_orders,
-        max_width=int(re_max_width),
-        min_width=int(re_min_width),
-        max_pieces=int(re_max_pieces),
-        b_wgt=float(b_wgt),
-        ww_trim_size=sl_trim_size,
-        min_sl_width=min_sl_width,
-        max_sl_width=max_sl_width,
-        lot_no=lot_no
-    )
-    try:
-        results = optimizer.run_optimize(start_prod_seq=start_prod_seq)
-        prod_seq_counter = results.get('last_prod_seq', start_prod_seq)
-    except Exception as e:
-        import traceback
-        logging.error(traceback.format_exc())
-        raise e
 
-    if not results or "error" in results:
-        error_msg = results['error'] if results and 'error' in results else "No solution found"
-        logging.error(f"[에러] Lot {lot_no} 롤-슬리터 최적화 실패: {error_msg}.")
-        return None, None, start_prod_seq, start_group_order_no
-    
-    if results and "pattern_details_for_db" in results:
-        for detail in results["pattern_details_for_db"]:
-            detail['max_width'] = int(re_max_width)
-    
-    # --- [New] Sheet Sequence Data Generation for Roll-SL Orders ---
-    pattern_sheet_details_for_db = generate_allocated_sheet_details(df_orders, results["pattern_roll_cut_details_for_db"], b_wgt)
-
-    final_results = {
-        "pattern_result": results["pattern_result"],
-        "pattern_details_for_db": results["pattern_details_for_db"],
-        "pattern_roll_details_for_db": results.get("pattern_roll_details_for_db", []),
-        "pattern_roll_cut_details_for_db": results.get("pattern_roll_cut_details_for_db", []),
-        "pattern_sheet_details_for_db": pattern_sheet_details_for_db,
-        "fulfillment_summary": results["fulfillment_summary"]
+    # --- 롤길이/core/dia/등급별 그룹 분리 최적화 ---
+    all_results = {
+        "pattern_result": [],
+        "pattern_details_for_db": [],
+        "pattern_roll_details_for_db": [],
+        "pattern_roll_cut_details_for_db": [],
+        "fulfillment_summary": []
     }
 
-    logging.info("롤-슬리터 최적화 성공.")
+    grouping_cols = ['롤길이']
+    unique_groups = df_orders[grouping_cols].drop_duplicates()
+    prod_seq_counter = start_prod_seq
+
+    for _, row in unique_groups.iterrows():
+        roll_length = row['롤길이']
+        logging.info(f"\n--- 롤길이 그룹 {roll_length}에 대한 최적화 시작 ---")
+
+        df_subset = df_orders[
+            (df_orders['롤길이'] == roll_length)
+        ].copy()
+
+        if df_subset.empty:
+            continue
+    
+        optimizer = RollOptimizeSt(
+            df_spec_pre=df_subset,
+            max_width=int(re_max_width),
+            min_width=int(re_min_width),
+            max_pieces=int(re_max_pieces),
+            b_wgt=float(b_wgt),
+            ww_trim_size=sl_trim_size,
+            min_sl_width=min_sl_width,
+            max_sl_width=max_sl_width,
+            lot_no=lot_no
+        )
+        try:
+            results = optimizer.run_optimize(start_prod_seq=prod_seq_counter)
+            prod_seq_counter = results.get('last_prod_seq', prod_seq_counter)
+        except Exception as e:
+            import traceback
+            logging.error(f"[에러] 롤길이 {roll_length} 최적화 중 예외 발생")
+            logging.error(traceback.format_exc())
+            continue
+
+        if not results or "error" in results:
+            error_msg = results['error'] if results and 'error' in results else "No solution found"
+            logging.error(f"[에러] Lot {lot_no}, 롤길이 {roll_length} 최적화 실패: {error_msg}")
+            continue
+    
+        if results and "pattern_details_for_db" in results:
+            for detail in results["pattern_details_for_db"]:
+                detail['max_width'] = int(re_max_width)
+
+        all_results["pattern_result"].append(results["pattern_result"])
+        all_results["pattern_details_for_db"].extend(results["pattern_details_for_db"])
+        all_results["pattern_roll_details_for_db"].extend(results.get("pattern_roll_details_for_db", []))
+        all_results["pattern_roll_cut_details_for_db"].extend(results.get("pattern_roll_cut_details_for_db", []))
+        all_results["fulfillment_summary"].append(results["fulfillment_summary"])
+
+        logging.info(f"--- 롤길이 그룹 {roll_length} 최적화 성공 ---")
+
+    if not all_results["pattern_details_for_db"]:
+        logging.error(f"[에러] Lot {lot_no} 롤-슬리터 최적화 결과가 없습니다 (모든 그룹 실패).")
+        return None, None, start_prod_seq, start_group_order_no
+    
+    # --- [New] Sheet Sequence Data Generation for Roll-SL Orders ---
+    pattern_sheet_details_for_db = generate_allocated_sheet_details(df_orders, all_results["pattern_roll_cut_details_for_db"], b_wgt)
+
+    final_results = {
+        "pattern_result": pd.concat(all_results["pattern_result"], ignore_index=True) if all_results["pattern_result"] else pd.DataFrame(),
+        "pattern_details_for_db": all_results["pattern_details_for_db"],
+        "pattern_roll_details_for_db": all_results["pattern_roll_details_for_db"],
+        "pattern_roll_cut_details_for_db": all_results["pattern_roll_cut_details_for_db"],
+        "pattern_sheet_details_for_db": pattern_sheet_details_for_db,
+        "fulfillment_summary": pd.concat(all_results["fulfillment_summary"], ignore_index=True) if all_results["fulfillment_summary"] else pd.DataFrame()
+    }
+
+    logging.info("롤-슬리터 최적화 성공 (전체 그룹 완료).")
     return final_results, df_orders, prod_seq_counter, last_group_order_no
 
 

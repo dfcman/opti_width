@@ -58,6 +58,7 @@ MAX_SMALL_WIDTH_PER_PATTERN = 2  # 한 패턴에서 허용되는 소폭 롤 수
 # --- 기타 페널티 ---
 OVER_PROD_WEIGHT_CAP = 6.0  # 소량 주문에 대한 초과 페널티 가중치 상한
 MIXED_COMPOSITE_PENALTY = 50.0  # 서로 다른 규격 조합 복합롤에 대한 추가 페널티
+PATTERN_PIECES_PENALTY = 2000.0  # 패턴 내 총 아이템 수 페널티 (아이템 수가 적을수록 선호)
 
 # --- 복합롤 롤길이 제약 ---
 ALLOW_DIFF_LENGTH_COMPOSITE = 'N'  # 'Y': 롤길이가 달라도 복합롤 생성 가능, 'N': 같은 롤길이끼리만 복합롤 생성
@@ -281,7 +282,13 @@ class RollOptimizeSt:
 
         # Add pure composite items (동일 규격 반복)
         # 순수 복합폭은 동일 규격 반복이므로 롤길이 체크 불필요
+        # 단, 이미 단폭(base_items)으로 등록된 아이템은 복합폭 생성 건너뜀
+        # (단폭 가능 아이템은 SL 후공정 불필요하므로 단폭 사용이 유리)
         for base_item, base_width in all_base_for_composite.items():
+            # 단폭으로 이미 등록된 아이템은 복합폭 생성 건너뜀
+            if base_item in self.base_items:
+                logging.info(f"  [복합폭 생성 건너뜀] {base_item}({base_width}mm)은 단폭 사용 가능 → 복합폭 미생성")
+                continue
             for num_repeats in range(self.composite_min, self.composite_max + 1):
                 composite_width = base_width * num_repeats
                 # 2폭 이상이면 sl_trim 적용, 1폭이면 미적용
@@ -345,6 +352,9 @@ class RollOptimizeSt:
 
             for idx in range(start_idx, len(base_candidates)):
                 base_item = base_candidates[idx]
+                # 단폭으로 이미 등록된 아이템은 혼합 복합폭에서도 건너뜀
+                if base_item in self.base_items:
+                    continue
                 # 복합폭 생성용 후보에서 원본 지폭 사용 (trim 미포함)
                 width = all_base_for_composite.get(base_item, 0)
                 if width <= 0:
@@ -553,18 +563,19 @@ class RollOptimizeSt:
 
     def _count_pattern_item_count(self, pattern):
         """
-        패턴 내 복합롤(아이템) 개수를 계산합니다.
+        패턴 내 총 아이템(복합롤) 수를 계산합니다.
         
-        패턴에 포함된 아이템의 종류 수 (한 패턴에 복합롤이 몇 개 들어가는지)
-        예: {A: 2, B: 1} -> 2개 (아이템 종류가 2개)
+        패턴에 포함된 아이템의 총 개수 (count의 합)
+        예: {A: 2, B: 1} -> 3개 (총 아이템 3개)
+        패턴 내 아이템 수가 적을수록 작업 효율이 높으므로 페널티 부여에 사용.
         
         Args:
             pattern: {아이템명: 개수} 딕셔너리
         
         Returns:
-            int: 패턴 내 아이템(복합롤) 종류 수
+            int: 패턴 내 총 아이템 수
         """
-        return len(pattern)
+        return sum(pattern.values())
 
     def _format_width(self, value):
         """
@@ -1081,14 +1092,15 @@ class RollOptimizeSt:
             MIXED_COMPOSITE_PENALTY * pattern_mixed_counts[j] * x[j] for j in range(len(self.patterns))
         )
         
-        # # 패턴 내 복합롤 개수가 기준(MAX_COMPOSITE_WITHOUT_PENALTY) 초과 시 페널티
-        # total_extra_composite_penalty = solver.Sum(
-        #     EXTRA_COMPOSITE_PENALTY * max(0, pattern_item_counts[j] - MAX_COMPOSITE_WITHOUT_PENALTY) * x[j]
-        #     for j in range(len(self.patterns))
-        # )
+        # 패턴 내 총 아이템 수 페널티 (아이템 수가 적을수록 선호 → 큰 복합폭 유도)
+        total_pieces_penalty = solver.Sum(
+            PATTERN_PIECES_PENALTY * pattern_item_counts[j] * x[j]
+            for j in range(len(self.patterns))
+        )
 
         solver.Minimize(total_trim_loss + total_over_penalty + total_under_penalty +
-                        total_pattern_count_penalty + total_composite_penalty + total_mixed_penalty)
+                        total_pattern_count_penalty + total_composite_penalty + total_mixed_penalty +
+                        total_pieces_penalty)
 
         status = solver.Solve()
         if status not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
@@ -1234,8 +1246,18 @@ class RollOptimizeSt:
                 for j in range(len(self.patterns))
             )
             
+            # 패턴 내 총 아이템 수 페널티 계산
+            pattern_item_counts = {
+                j: self._count_pattern_item_count(pattern)
+                for j, pattern in enumerate(self.patterns)
+            }
+            total_pieces_penalty = gp.quicksum(
+                PATTERN_PIECES_PENALTY * pattern_item_counts[j] * x[j]
+                for j in range(len(self.patterns))
+            )
+            
             # Stage 1 목적함수: Over/Under Penalty만
-            stage1_objective = total_over_penalty + total_under_penalty + total_trim_loss + total_composite_penalty + total_mixed_penalty
+            stage1_objective = total_over_penalty + total_under_penalty + total_trim_loss + total_composite_penalty + total_mixed_penalty + total_pieces_penalty
             
             model.setObjective(stage1_objective, GRB.MINIMIZE)
             model.optimize()
@@ -1669,6 +1691,11 @@ class RollOptimizeSt:
             composite_meta_for_db = []
             roll_seq_counter = 0
 
+            # 패턴 내 첫 번째 아이템의 롤길이를 가져옴 (같은 롤길이 그룹이므로 동일)
+            first_base_item = next(iter(sorted_items))[0]
+            first_base_key = next(iter(self.item_composition.get(first_base_item, {first_base_item: 1})))
+            pattern_roll_length = self.item_roll_lengths.get(first_base_key, 0)
+
             for item_name, num in sorted_items:
                 item_width = self.item_info[item_name]
                 composition = self.item_composition[item_name]
@@ -1720,7 +1747,7 @@ class RollOptimizeSt:
                         'count': roll_count,
                         'prod_seq': prod_seq,
                         'roll_seq': roll_seq_counter,
-                        'pattern_length': self.pattern_length,
+                        'pattern_length': pattern_roll_length,
                         'loss_per_roll': roll_trim_loss,  # rollwidth - sum(widths)
                         'rs_gubun': 'W',
                         'sc_trim': self.ww_trim_size_sheet,
@@ -1736,6 +1763,7 @@ class RollOptimizeSt:
                 'loss_per_roll': loss,
                 'count': roll_count,
                 'prod_seq': prod_seq,
+                'pattern_length': pattern_roll_length,
                 'rs_gubun': 'W',
                 **common_props
             })
@@ -1746,13 +1774,13 @@ class RollOptimizeSt:
                 'count': roll_count,
                 'prod_seq': prod_seq,
                 'composite_map': composite_meta_for_db,
-                'pattern_length': self.pattern_length,  # [New] 롤 길이 추가
+                'pattern_length': pattern_roll_length,
                 'rs_gubun': 'W',
                 **common_props
             })
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
-            df_patterns['std_length'] = self.std_length
+            df_patterns['std_length'] = df_patterns['pattern_length']
             df_patterns = df_patterns[['pattern', 'pattern_width', 'count', 'loss_per_roll', 'std_length']]
 
         df_demand = pd.DataFrame.from_dict(self.demands, orient='index', columns=['주문수량'])
