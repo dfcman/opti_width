@@ -14,6 +14,81 @@ from execute_common import (
 )
 
 
+def group_compatible_roll_lengths(roll_lengths):
+    """
+    호환 가능한 롤길이끼리 그룹핑합니다.
+    
+    규칙:
+    1. 100 단위 절사값이 같으면 같은 그룹 (예: 14000, 14080 → 둘 다 14000으로 절사)
+    2. 절사값이 배수 관계이면 같은 그룹 (예: 6000, 12000 → 12000/6000=2)
+    
+    Args:
+        roll_lengths: 고유 롤길이 배열
+        
+    Returns:
+        dict: {롤길이: 그룹ID} 매핑
+    """
+    lengths = sorted(set(int(l) for l in roll_lengths))
+    if not lengths:
+        return {}
+    
+    # 1단계: 100 단위 절사값 계산
+    truncated = {l: (l // 100) * 100 for l in lengths}
+    
+    # 2단계: Union-Find로 그룹 병합
+    parent = {l: l for l in lengths}
+    
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            # 큰 값을 루트로 (그룹 대표 = 최대 롤길이)
+            if ra < rb:
+                parent[ra] = rb
+            else:
+                parent[rb] = ra
+    
+    # 2-1: 절사값이 같은 롤길이 병합
+    by_truncated = {}
+    for l in lengths:
+        t = truncated[l]
+        if t not in by_truncated:
+            by_truncated[t] = []
+        by_truncated[t].append(l)
+    
+    for group in by_truncated.values():
+        for i in range(1, len(group)):
+            union(group[0], group[i])
+    
+    # 2-2: 절사값이 배수 관계인 그룹 병합
+    truncated_keys = sorted(by_truncated.keys())
+    for i in range(len(truncated_keys)):
+        for j in range(i + 1, len(truncated_keys)):
+            small, big = truncated_keys[i], truncated_keys[j]
+            if small > 0 and big % small == 0:
+                # 각 그룹의 대표 아이템으로 union
+                union(by_truncated[small][0], by_truncated[big][0])
+    
+    # 결과: {롤길이: 그룹ID}
+    result = {l: find(l) for l in lengths}
+    
+    # 로깅
+    groups_summary = {}
+    for l, gid in result.items():
+        if gid not in groups_summary:
+            groups_summary[gid] = []
+        groups_summary[gid].append(l)
+    for gid, members in groups_summary.items():
+        if len(members) > 1:
+            logging.info(f"[롤길이 그룹핑] {members} → 그룹 (std_length={max(members)})")
+    
+    return result
+
 def process_roll_lot_st(
         db, plant, pm_no, schedule_unit, lot_no, version, 
         paper_type, b_wgt, color, time_limit,
@@ -54,7 +129,7 @@ def process_roll_lot_st(
 
     df_orders['color'] = color
 
-    # --- 롤길이/core/dia/등급별 그룹 분리 최적화 ---
+    # --- 호환 롤길이 그룹핑 (배수/유사 길이) ---
     all_results = {
         "pattern_result": [],
         "pattern_details_for_db": [],
@@ -63,17 +138,20 @@ def process_roll_lot_st(
         "fulfillment_summary": []
     }
 
-    grouping_cols = ['롤길이']
-    unique_groups = df_orders[grouping_cols].drop_duplicates()
+    # 호환 롤길이 그룹 생성
+    roll_length_groups = group_compatible_roll_lengths(df_orders['롤길이'].unique())
+    df_orders['롤길이그룹'] = df_orders['롤길이'].map(roll_length_groups)
+    
+    unique_group_ids = df_orders['롤길이그룹'].unique()
     prod_seq_counter = start_prod_seq
 
-    for _, row in unique_groups.iterrows():
-        roll_length = row['롤길이']
-        logging.info(f"\n--- 롤길이 그룹 {roll_length}에 대한 최적화 시작 ---")
+    for group_id in sorted(unique_group_ids):
+        group_roll_lengths = df_orders[df_orders['롤길이그룹'] == group_id]['롤길이'].unique()
+        group_std_length = int(max(group_roll_lengths))
+        logging.info(f"\n--- 롤길이 그룹 {sorted(group_roll_lengths)} (std_length={group_std_length})에 대한 최적화 시작 ---")
 
-        df_subset = df_orders[
-            (df_orders['롤길이'] == roll_length)
-        ].copy()
+        df_subset = df_orders[df_orders['롤길이그룹'] == group_id].copy()
+        df_subset['std_length'] = group_std_length
 
         if df_subset.empty:
             continue
@@ -94,13 +172,13 @@ def process_roll_lot_st(
             prod_seq_counter = results.get('last_prod_seq', prod_seq_counter)
         except Exception as e:
             import traceback
-            logging.error(f"[에러] 롤길이 {roll_length} 최적화 중 예외 발생")
+            logging.error(f"[에러] 롤길이 그룹 {sorted(group_roll_lengths)} 최적화 중 예외 발생")
             logging.error(traceback.format_exc())
             continue
 
         if not results or "error" in results:
             error_msg = results['error'] if results and 'error' in results else "No solution found"
-            logging.error(f"[에러] Lot {lot_no}, 롤길이 {roll_length} 최적화 실패: {error_msg}")
+            logging.error(f"[에러] Lot {lot_no}, 롤길이 그룹 {sorted(group_roll_lengths)} 최적화 실패: {error_msg}")
             continue
     
         if results and "pattern_details_for_db" in results:
@@ -113,7 +191,7 @@ def process_roll_lot_st(
         all_results["pattern_roll_cut_details_for_db"].extend(results.get("pattern_roll_cut_details_for_db", []))
         all_results["fulfillment_summary"].append(results["fulfillment_summary"])
 
-        logging.info(f"--- 롤길이 그룹 {roll_length} 최적화 성공 ---")
+        logging.info(f"--- 롤길이 그룹 {sorted(group_roll_lengths)} 최적화 성공 ---")
 
     if not all_results["pattern_details_for_db"]:
         logging.error(f"[에러] Lot {lot_no} 롤-슬리터 최적화 결과가 없습니다 (모든 그룹 실패).")

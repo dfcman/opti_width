@@ -28,7 +28,7 @@ class VersionGettersSt:
 				       FROM TH_VERSIONS_MANAGER T1
 					  WHERE 1=1
 					    --AND CALC_SUCCESSFUL = '9'		
-                        AND T1.LOT_NO = '8260100262' AND T1.VERSION = '01'    -- 8241202223  8241202161  8241200998  8260100259 8260100262
+                        AND T1.LOT_NO = '8260100259' AND T1.VERSION = '01'    -- 8241202223  8241202161  8241200998  8260100259 8260100262
                         AND T1.VERSION NOT IN ('98', '99')
 				   ) T
 			 WHERE SEQ = 1
@@ -268,6 +268,106 @@ class VersionGettersSt:
         except oracledb.Error as error:
             print(f"Error while fetching target lot: {error}")
             return (None,) * 53
+        finally:
+            if connection:
+                self.pool.release(connection)
+
+    def get_roll_orders_from_db_st(self, paper_prod_seq):
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+            #
+            sql_query = """
+                SELECT
+                    plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no,
+                    core, dia, nvl(pattern, ' ') as pattern, luster, color
+                FROM
+                    h3t_production_order
+                WHERE paper_prod_seq = :p_paper_prod_seq
+                  AND rs_gubun = 'R'
+                  --AND WIDTH NOT IN ('797', '1020')
+                ORDER BY roll_length, width, dia, core
+            """
+            cursor.execute(sql_query, p_paper_prod_seq=paper_prod_seq)
+            rows = cursor.fetchall()
+            raw_orders = []
+            for row in rows:
+                plant, pm_no, schedule_unit, width, length, roll_length, quality_grade, order_roll_cnt, order_ton_cnt, export_yn, order_no, core, dia, pattern, luster, color = row
+                export_type = '수출' if export_yn == 'Y' else '내수'
+                raw_orders.append({
+                    'plant': plant,
+                    'pm_no': pm_no,
+                    'schedule_unit': schedule_unit,
+                    'order_no': order_no,
+                    '지폭': int(width),
+                    '가로': int(length),
+                    '롤길이': int(roll_length),
+                    '주문수량': int(order_roll_cnt),
+                    '주문톤': float(order_ton_cnt),
+                    '등급': quality_grade,
+                    '수출내수': export_type,
+                    'core': core,
+                    'dia': dia,
+                    'luster': luster,
+                    'color': color,
+                    'order_pattern': pattern
+                })
+            print(f"Successfully fetched {len(raw_orders)} roll orders for lot {paper_prod_seq}")
+            return raw_orders
+        except oracledb.Error as error:
+            print(f"Error while getting get_roll_orders_from_db orders from DB: {error}")
+            return None
+        finally:
+            if connection:
+                self.pool.release(connection)
+
+    def get_sheet_orders_from_db_st(self, paper_prod_seq):
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+
+            sql_query = """
+                SELECT
+                    a.plant, a.pm_no, a.schedule_unit, a.width, a.length, a.quality_grade, 
+                    a.order_ton_cnt, a.export_yn, a.order_no, a.color, a.order_gubun, a.pt_gubun, b.pack_type, nvl(a.pattern, ' ') as pattern
+                FROM
+                    h3t_production_order a, sapd12t_tmp b
+                WHERE a.paper_prod_seq = :p_paper_prod_seq
+                  AND a.rs_gubun = 'S'
+                  and a.order_no = b.order_no
+                ORDER BY width, length
+            """
+
+            # print(f"Executing query to fetch sheet orders:\n{sql_query}")
+            cursor.execute(sql_query, p_paper_prod_seq=paper_prod_seq)
+            rows = cursor.fetchall()
+            raw_orders = []
+            for row in rows:
+                plant, pm_no, schedule_unit, width, length, quality_grade, order_ton_cnt, export_yn, order_no, color, order_gubun, pt_gubun, pack_type, order_pattern = row
+                export_type = '수출' if export_yn == 'Y' else '내수'
+                raw_orders.append({
+                    'plant': plant,
+                    'pm_no': pm_no,
+                    'schedule_unit': schedule_unit,
+                    'order_no': order_no,
+                    '가로': int(width),
+                    '세로': int(length),
+                    '주문톤': float(order_ton_cnt),
+                    '등급': quality_grade,
+                    '수출내수': export_type,
+                    'color': color,
+                    'order_gubun': order_gubun,
+                    'pt_gubun': pt_gubun,
+                    'pack_type': pack_type,
+                    'order_pattern': order_pattern
+                })
+            print(f"Successfully fetched {len(raw_orders)} sheet orders for lot {paper_prod_seq}")
+            return raw_orders
+        except oracledb.Error as error:
+            print(f"Error while getting sheet get_sheet_orders_from_db_st from DB: {error}")
+            return None
         finally:
             if connection:
                 self.pool.release(connection)

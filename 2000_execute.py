@@ -274,7 +274,7 @@ def process_lot_jh(db, lot_params, start_prod_seq=0, start_group_order_no=0):
 
     # --- 1. 롤지 오더 가져오기 ---
     df_roll_orders = None
-    raw_roll_orders = db.get_roll_sl_orders_from_db_jh(in_lot_no=lot_no, in_version=version)
+    raw_roll_orders = db.get_roll_orders_from_db_jh(in_lot_no=lot_no, in_version=version)
     if raw_roll_orders:
         df_roll_orders = pd.DataFrame(raw_roll_orders)
         df_roll_orders['lot_no'] = lot_no

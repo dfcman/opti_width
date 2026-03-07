@@ -505,10 +505,10 @@ def save_results(db, lot_no, version, plant, pm_no, schedule_unit, re_max_width,
                 (final_fulfillment_summary['롤길이'] == 0)
             ]  # 소수점 오차 고려
             if not under_production_sheets.empty:
-                final_status = 0  # 일부 오더 초과(부족)
+                final_status = 1  # 일부 오더 초과(부족)
                 logging.warning(f"[경고] 부족 생산된 쉬트 오더가 있습니다:\n{under_production_sheets.to_string()}")
             if not over_production_sheets.empty:
-                final_status = 0  # 일부 오더 초과(부족)
+                final_status = 1  # 일부 오더 초과(부족)
                 logging.warning(f"[경고] 초과 생산된 쉬트 오더가 있습니다:\n{over_production_sheets.to_string()}")
         
         return final_status

@@ -235,7 +235,7 @@ class SheetOptimizeSt:
             logging.info("--- DB 정보가 없어 기존 패턴을 불러올 수 없습니다. ---")
             return
         logging.info("\n--- DB(th_pattern_tot_sheet)에서 사용자 편집 패턴을 불러옵니다. ---")
-        db_patterns_list = self.db.get_sheet_ca_patterns_from_db(self.lot_no)
+        db_patterns_list = self.db.get_sheet_patterns_from_db_st(self.lot_no)
         if not db_patterns_list:
             logging.info("--- DB에 저장된 사용자 편집 패턴이 없습니다. ---")
             return

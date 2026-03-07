@@ -656,6 +656,7 @@ class RollGetters:
                     h3t_production_order
                 WHERE paper_prod_seq = :p_paper_prod_seq
                   AND rs_gubun = 'R'
+                  --AND WIDTH NOT IN ('797', '1020')
                 ORDER BY roll_length, width, dia, core
             """
             cursor.execute(sql_query, p_paper_prod_seq=paper_prod_seq)
