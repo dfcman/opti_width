@@ -15,3 +15,5 @@ results/*/*.txt
 
 # python virtual environment
 venv/
+check_patterns.py
+pattern_widths_dump.json

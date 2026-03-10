@@ -263,6 +263,8 @@ def process_lot_jh(db, lot_params, start_prod_seq=0, start_group_order_no=0):
 
     min_sc_width = lot_params['sc_minwidth']
     max_sc_width = lot_params['sc_maxwidth']
+    sc_minsheet = lot_params['sc_minsheet']
+    sc_maxsheet = lot_params['sc_maxsheet']
     sheet_trim_size = lot_params['sc_basetrim']
     min_sheet_length_re = lot_params['min_re_stdlength']
     max_sheet_length_re = lot_params['max_re_stdlength']    
@@ -307,6 +309,7 @@ def process_lot_jh(db, lot_params, start_prod_seq=0, start_group_order_no=0):
     logging.info(f"\n{'='*60}")
     logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Lot (JH 통합): {lot_no} (Version: {version}) 처리 시작")
     logging.info(f"적용 파라미터: min_width={min_width}, max_width={max_width}, max_pieces={max_pieces}")
+    logging.info(f"re_sheet_min_pieces={re_sheet_min_pieces}, re_sheet_max_pieces={re_sheet_max_pieces}")
     logging.info(f"min_sc_width={min_sc_width}, max_sc_width={max_sc_width}, sheet_trim_size={sheet_trim_size}")
     logging.info(f"sl_minwidth={sl_minwidth}, sl_maxwidth={sl_maxwidth}, sl_trim={sl_trim}, max_sl_count={max_sl_count}")
     logging.info(f"min_sheet_length_re={min_sheet_length_re}, max_sheet_length_re={max_sheet_length_re}")
@@ -409,6 +412,8 @@ def process_lot_jh(db, lot_params, start_prod_seq=0, start_group_order_no=0):
         sheet_trim=sheet_trim_size,
         min_sc_width=min_sc_width,
         max_sc_width=max_sc_width,
+        sc_minsheet=sc_minsheet,
+        sc_maxsheet=sc_maxsheet,
 
 
         yn_stdlength=yn_stdlength,
