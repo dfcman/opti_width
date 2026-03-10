@@ -215,7 +215,7 @@ def apply_sheet_grouping_jh(df_orders, start_group_order_no, lot_no, adj_cnt, ad
         df_orders = df_non_digital.copy()
 
     # --- 5. 그룹오더 생성 (가로 + 등급 기준) ---
-    group_cols = ['가로', '등급']
+    group_cols = ['rs_gubun','가로', 'roll_length', '등급', 'short_sheet', 'semi']
 
     df_groups = df_orders.groupby(group_cols).agg(
         대표오더번호=('order_no', 'first')
@@ -258,16 +258,57 @@ def process_lot_jh(db, lot_params, start_prod_seq=0, start_group_order_no=0):
     min_width = int(lot_params['re_minwidth'])
     max_width = int(lot_params['re_maxwidth'])
     max_pieces = int(lot_params['re_max_pieces'])
+    re_sheet_min_pieces = int(lot_params['re_sheet_min_pieces'])
+    re_sheet_max_pieces = int(lot_params['re_sheet_max_pieces'])
+
     min_sc_width = lot_params['sc_minwidth']
     max_sc_width = lot_params['sc_maxwidth']
     sheet_trim_size = lot_params['sc_basetrim']
     min_sheet_length_re = lot_params['min_re_stdlength']
-    max_sheet_length_re = lot_params['max_re_stdlength']
+    max_sheet_length_re = lot_params['max_re_stdlength']    
+    yn_stdlength = lot_params['yn_stdlength']      # 표준길이 적용여부
+    rs_mix_flag = str(lot_params['yn_rstypemix'])  # 롤/시트 혼합여부
+
+    mx_maxsheetroll = lot_params['mx_maxsheetroll']
+    mx_maxsheetwidth = lot_params['mx_maxsheetwidth']
+    mx_rsmixwidth = lot_params['mx_rsmixwidth']
+    
+    # 롤지(SL) 파라미터
+    sl_rollmixtype = lot_params['sl_rollmixtype']
+    sl_trim = int(lot_params['sl_trim'])
+    sl_minwidth = int(lot_params['sl_minwidth'])
+    sl_maxwidth = int(lot_params['sl_maxwidth'])
+    min_sl_count = int(lot_params['min_sl_count'])
+    max_sl_count = int(lot_params['max_sl_count'])
+
+    # 2026-03-09 추가: 디지털 오더 파라미터
+    sc_digital_trim = lot_params['sc_digital_trim']
+    sc_digital_minwidth = lot_params['sc_digital_minwidth']
+    sc_digital_maxwidth = lot_params['sc_digital_maxwidth']
+    sc_digital_minsheet = lot_params['sc_digital_minsheet']
+    sc_digital_maxsheet = lot_params['sc_digital_maxsheet']
+
+    re_minton = lot_params['re_minton']
+    sc_minton = lot_params['sc_minton']
+    sheet_order_moq = lot_params['sheet_order_moq']
+    moq_yn = lot_params['moq_yn']
+    moq_ton = lot_params['moq_ton']
+    moq_sc_width = lot_params['moq_sc_width']
+
+    adj_yn = 'Y' if int(lot_params['adj_width']) > 0 else 'N'  # 인접그룹 조합여부
+    adj_width = lot_params['adj_width']   # 인접그룹시 가로 규격 차이
+    adj_min_wgt = lot_params['adj_min_wgt']     # 인접그룹시 최소오더톤
+    adj_max_wgt = lot_params['adj_max_wgt']     # 인접그룹시 최대오더톤
+
+    
+    
+    
 
     logging.info(f"\n{'='*60}")
     logging.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Lot (JH 통합): {lot_no} (Version: {version}) 처리 시작")
     logging.info(f"적용 파라미터: min_width={min_width}, max_width={max_width}, max_pieces={max_pieces}")
     logging.info(f"min_sc_width={min_sc_width}, max_sc_width={max_sc_width}, sheet_trim_size={sheet_trim_size}")
+    logging.info(f"sl_minwidth={sl_minwidth}, sl_maxwidth={sl_maxwidth}, sl_trim={sl_trim}, max_sl_count={max_sl_count}")
     logging.info(f"min_sheet_length_re={min_sheet_length_re}, max_sheet_length_re={max_sheet_length_re}")
     logging.info(f"시작 시퀀스 번호: prod_seq={start_prod_seq}, group_order_no={start_group_order_no}")
     logging.info(f"{'='*60}")
@@ -282,6 +323,27 @@ def process_lot_jh(db, lot_params, start_prod_seq=0, start_group_order_no=0):
         df_roll_orders['지폭'] = pd.to_numeric(df_roll_orders['지폭'])
         df_roll_orders['롤길이'] = pd.to_numeric(df_roll_orders['롤길이'])
         df_roll_orders['등급'] = df_roll_orders['등급'].astype(str)
+
+        configured_roll_std_length = 0
+        if str(yn_stdlength).upper() == 'Y':
+            configured_roll_std_length = int(pd.to_numeric(max_sheet_length_re, errors='coerce') or 0)
+            if configured_roll_std_length <= 0:
+                configured_roll_std_length = int(pd.to_numeric(min_sheet_length_re, errors='coerce') or 0)
+
+        if 'std_length' in df_roll_orders.columns:
+            std_length_series = pd.to_numeric(df_roll_orders['std_length'], errors='coerce').fillna(0)
+        else:
+            std_length_series = pd.Series(0, index=df_roll_orders.index, dtype='float64')
+
+        if configured_roll_std_length > 0:
+            std_length_series = std_length_series.where(std_length_series > 0, configured_roll_std_length)
+        std_length_series = std_length_series.where(std_length_series > 0, df_roll_orders['롤길이'])
+        df_roll_orders['std_length'] = np.maximum(std_length_series, df_roll_orders['롤길이']).astype(int)
+
+        logging.info(
+            "롤지 std_length 보정 완료: %s",
+            df_roll_orders[['롤길이', 'std_length']].drop_duplicates().sort_values(['std_length', '롤길이']).to_dict('records')
+        )
 
         # 롤지 그룹오더 생성
         roll_group_cols = ['지폭', '롤길이', '등급', 'core', 'dia', 'rs_gubun', 'semi']
@@ -299,7 +361,7 @@ def process_lot_jh(db, lot_params, start_prod_seq=0, start_group_order_no=0):
 
     # --- 2. 쉬트지 오더 가져오기 ---
     df_sheet_orders = None
-    raw_sheet_orders = db.get_sheet_orders_from_db_jh(paper_prod_seq=lot_no)
+    raw_sheet_orders = db.get_sheet_orders_from_db_jh(in_lot_no=lot_no, in_version=version)
     if raw_sheet_orders:
         df_sheet_orders = pd.DataFrame(raw_sheet_orders)
         df_sheet_orders['lot_no'] = lot_no
@@ -347,12 +409,43 @@ def process_lot_jh(db, lot_params, start_prod_seq=0, start_group_order_no=0):
         sheet_trim=sheet_trim_size,
         min_sc_width=min_sc_width,
         max_sc_width=max_sc_width,
+
+
+        yn_stdlength=yn_stdlength,
+
+        # 롤지(SL) 제약
+        min_sl_width=sl_minwidth,
+        max_sl_width=sl_maxwidth,
+        max_sl_count=max_sl_count,
+        ww_trim_size=sl_trim,
+        rs_mix_flag=rs_mix_flag,
         # 공통 제약
         min_width=min_width,
         max_width=max_width,
         max_pieces=max_pieces,
+        re_sheet_min_pieces=re_sheet_min_pieces,
+        re_sheet_max_pieces=re_sheet_max_pieces,
+
+        sc_digital_trim=sc_digital_trim,
+        sc_digital_minwidth=sc_digital_minwidth,
+        sc_digital_maxwidth=sc_digital_maxwidth,
+        sc_digital_minsheet=sc_digital_minsheet,
+        sc_digital_maxsheet=sc_digital_maxsheet,
+        
+        re_minton=re_minton,
+        sc_minton=sc_minton,
+        sheet_order_moq=sheet_order_moq,
+        moq_yn=moq_yn,
+        moq_ton=moq_ton,
+        moq_sc_width=moq_sc_width,
+
+        adj_yn=adj_yn,
+        adj_width=adj_width,
+        adj_min_wgt=adj_min_wgt,
+        adj_max_wgt=adj_max_wgt,
+
         num_threads=NUM_THREADS,
-        time_limit=lot_params.get('time_order', -300) * -1000  # time_order는 음수로 저장됨
+        time_limit=lot_params['time_order'] * -1000  # time_order는 음수로 저장됨
     )
 
     try:

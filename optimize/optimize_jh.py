@@ -41,7 +41,7 @@ OVER_PROD_WEIGHT_CAP = 6.0
 # === 알고리즘 파라미터 ===
 MIN_PIECES_PER_PATTERN = 1
 SMALL_PROBLEM_THRESHOLD = 10
-SOLVER_TIME_LIMIT_MS = 180000
+SOLVER_TIME_LIMIT_MS = 60000
 CG_MAX_ITERATIONS = 200
 CG_NO_IMPROVEMENT_LIMIT = 25
 CG_SUBPROBLEM_TOP_N = 1
@@ -65,18 +65,26 @@ class OptimizeJh:
             lot_no=None, version=None,
             paper_type=None, b_wgt=0, color=None,
             p_type=None, p_wgt=0, p_color=None, p_machine=None,
-            # 롤지 전용
+            # 롤지 오더
             df_roll_orders=None,
             coating_yn='N',
-            # 쉬트지 전용
+            # 쉬트지 오더
             df_sheet_orders=None,
-            min_sheet_roll_length=None, max_sheet_roll_length=None,
-            std_roll_cnt=None, sheet_trim=None,
-            min_sc_width=None, max_sc_width=None,
             # 공통 제약
+            min_sheet_roll_length=None, max_sheet_roll_length=None, std_roll_cnt=None, 
             min_width=0, max_width=1000, max_pieces=8,
-            min_sl_width=0, max_sl_width=0, max_sl_count=5,
-            ww_trim_size_sheet=0, ww_trim_size=0,
+            re_sheet_min_pieces=0, re_sheet_max_pieces=4,
+            # 쉬트지 제약
+            sheet_trim=None, min_sc_width=None, max_sc_width=None, yn_stdlength=None,
+            #슬리터 제약
+            min_sl_width=0, max_sl_width=0, max_sl_count=5, ww_trim_size_sheet=0, ww_trim_size=0, rs_mix_flag='N',
+            # 디지털 페이퍼 제약
+            sc_digital_trim=0, sc_digital_minwidth=0, sc_digital_maxwidth=0, sc_digital_minsheet=0, sc_digital_maxsheet=0,
+            # moq 제약
+            re_minton=0, sc_minton=0, sheet_order_moq=0,
+            moq_yn='N', moq_ton=0, moq_sc_width=0,
+            #인접그룹
+            adj_yn='N', adj_width=2, adj_min_wgt=0, adj_max_wgt=0,
             num_threads=4, time_limit=180000
     ):
         self.db = db
@@ -94,19 +102,48 @@ class OptimizeJh:
         self.p_machine = p_machine
         self.coating_yn = coating_yn
         self.num_threads = num_threads
+        self.time_limit = time_limit
         self.solver_time_limit_ms = time_limit
-
+        self.rs_mix_flag = rs_mix_flag
+        self.df_roll_orders = df_roll_orders.copy() if df_roll_orders is not None and not df_roll_orders.empty else None
+        self.df_sheet_orders = df_sheet_orders.copy() if df_sheet_orders is not None and not df_sheet_orders.empty else None
+        self.re_sheet_min_pieces = re_sheet_min_pieces
+        self.re_sheet_max_pieces = re_sheet_max_pieces
         self.max_width = int(max_width) if max_width else 0
         self.min_width = int(min_width) if min_width else 0
         self.max_pieces = int(max_pieces) if max_pieces else 8
         self.min_pieces = MIN_PIECES_PER_PATTERN
+        self.yn_stdlength = yn_stdlength
 
-        # 복합폭(CM) 제약
+        # 디지털 페이퍼 제약
+        self.sc_digital_trim = sc_digital_trim
+        self.sc_digital_minwidth = sc_digital_minwidth
+        self.sc_digital_maxwidth = sc_digital_maxwidth
+        self.sc_digital_minsheet = sc_digital_minsheet
+        self.sc_digital_maxsheet = sc_digital_maxsheet
+
+        # moq 제약
+        self.re_minton = re_minton
+        self.sc_minton = sc_minton
+        self.sheet_order_moq = sheet_order_moq
+        self.moq_yn = moq_yn
+        self.moq_ton = moq_ton
+        self.moq_sc_width = moq_sc_width
+
+        # 인접그룹 제약
+        self.adj_yn = adj_yn
+        self.adj_width = adj_width
+        self.adj_min_wgt = adj_min_wgt
+        self.adj_max_wgt = adj_max_wgt
+
+
+        # 복합폭(SL) 제약
         self.min_sl_width = int(min_sl_width) if min_sl_width else 0
         self.max_sl_width = int(max_sl_width) if max_sl_width else 0
         self.max_sl_count = int(max_sl_count) if max_sl_count else 5
         self.ww_trim_size_sheet = int(ww_trim_size_sheet) if ww_trim_size_sheet else 0
-        self.sl_trim = int(ww_trim_size) if ww_trim_size else 0
+        self.ww_trim_size = int(ww_trim_size) if ww_trim_size else 0
+        self.sl_trim = self.ww_trim_size
 
         # 쉬트지 전용
         self.min_sheet_roll_length = min_sheet_roll_length
@@ -140,6 +177,7 @@ class OptimizeJh:
         self.roll_base_item_widths = {}
         self.roll_item_rolls_per_pattern = {}
         self.roll_item_roll_lengths = {}
+        self.roll_item_std_lengths = {}
         self.roll_std_length = 0
         self.roll_pattern_length = 0
         self.has_roll_orders = False
@@ -149,10 +187,8 @@ class OptimizeJh:
         self.sheet_order_sheet_lengths = {}
         self.sheet_demands_in_rolls = {}
         self.sheet_order_widths = []
+        self.sheet_demand_key_to_group_no = {}
         self.has_sheet_orders = False
-
-        self.df_roll_orders = None
-        self.df_sheet_orders = None
 
         # === 롤지 데이터 준비 ===
         if df_roll_orders is not None and not df_roll_orders.empty:
@@ -195,19 +231,33 @@ class OptimizeJh:
         df[demand_col] = pd.to_numeric(df[demand_col], errors='coerce').fillna(0)
         df[width_col] = pd.to_numeric(df[width_col], errors='coerce').fillna(0)
 
+        roll_length_series = pd.to_numeric(df.get('롤길이', 0), errors='coerce').fillna(0)
+        if 'std_length' in df.columns:
+            std_length_series = pd.to_numeric(df['std_length'], errors='coerce').fillna(0)
+        else:
+            std_length_series = pd.Series(0, index=df.index, dtype='float64')
+
+        effective_std_length_series = std_length_series.where(std_length_series > 0, roll_length_series)
+        df['std_length'] = effective_std_length_series.astype(int)
+
         self.roll_demands = df.groupby('group_order_no')[demand_col].sum().to_dict()
         self.roll_base_item_widths = df.set_index('group_order_no')[width_col].to_dict()
 
-        if 'std_length' in df.columns:
-            self.roll_std_length = int(pd.to_numeric(df['std_length'].iloc[0], errors='coerce') or 0)
+        if not effective_std_length_series.empty:
+            self.roll_std_length = int(effective_std_length_series.max())
         self.roll_pattern_length = self.roll_std_length if self.roll_std_length > 0 else 0
 
         for _, row in df.drop_duplicates(subset=['group_order_no']).iterrows():
             gno = row['group_order_no']
             std_len = int(pd.to_numeric(row.get('std_length', 0), errors='coerce') or 0)
             roll_len = int(pd.to_numeric(row.get('롤길이', 0), errors='coerce') or 0)
+            if std_len <= 0:
+                std_len = roll_len if roll_len > 0 else self.roll_pattern_length
+            if roll_len > std_len:
+                std_len = roll_len
+            self.roll_item_std_lengths[gno] = std_len
             self.roll_item_roll_lengths[gno] = roll_len
-            self.roll_item_rolls_per_pattern[gno] = std_len // roll_len if std_len > 0 and roll_len > 0 else 1
+            self.roll_item_rolls_per_pattern[gno] = max(1, std_len // roll_len) if std_len > 0 and roll_len > 0 else 1
 
         self.roll_width_col = width_col
         self.roll_demand_col = demand_col
@@ -215,11 +265,12 @@ class OptimizeJh:
     def _prepare_sheet_data(self):
         """쉬트지 주문 데이터를 준비합니다."""
         df = self.df_sheet_orders.copy()
-        df['지폭'] = df['가로'] if '가로' in df.columns else df.get('지폭', df.get('width', 0))
+        if '지폭' not in df.columns and '가로' in df.columns:
+            df = df.rename(columns={'가로': '지폭'})
 
         df.columns = [c.lower() for c in df.columns]
-        rename_map = {'width': '지폭', 'length': '세로', 'order_ton_cnt': '주문톤', '가로': '지폭'}
-        df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+        rename_map = {'width': '지폭', 'length': '세로', 'order_ton_cnt': '주문톤'}
+        df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns and v not in df.columns})
 
         def calc_meters(row):
             w = row.get('지폭', 0)
@@ -238,6 +289,12 @@ class OptimizeJh:
         self.sheet_demands_in_meters = df.groupby('demand_key')['meters'].sum().to_dict()
         self.sheet_order_sheet_lengths = df.groupby('demand_key')['세로'].first().to_dict()
         self.sheet_order_widths = list(self.sheet_demands_in_meters.keys())
+
+        # demand_key → group_order_no 매핑 (충족현황 표시용)
+        if 'group_order_no' in df.columns:
+            self.sheet_demand_key_to_group_no = df.groupby('demand_key')['group_order_no'].first().to_dict()
+        else:
+            self.sheet_demand_key_to_group_no = {}
 
         std_len = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
         self.sheet_demands_in_rolls = {k: m / std_len for k, m in self.sheet_demands_in_meters.items()}
@@ -441,6 +498,28 @@ class OptimizeJh:
             parts.append(f"{self._format_width(bw)}*{qty}")
         return f"{self._format_width(iw)}({'+'.join(parts)})"
 
+    def _resolve_roll_pattern_length(self, pattern):
+        std_lengths = []
+        for item_name in pattern:
+            composition = self.item_composition.get(item_name, {})
+            for base_item in composition:
+                std_len = int(pd.to_numeric(self.roll_item_std_lengths.get(base_item, 0), errors='coerce') or 0)
+                if std_len > 0:
+                    std_lengths.append(std_len)
+
+        if std_lengths:
+            return max(std_lengths)
+        if self.roll_pattern_length > 0:
+            return self.roll_pattern_length
+
+        positive_roll_lengths = [int(v) for v in self.roll_item_roll_lengths.values() if int(v) > 0]
+        return max(positive_roll_lengths) if positive_roll_lengths else 0
+
+    def _resolve_db_group_no(self, base_item):
+        if isinstance(base_item, tuple):
+            return self.sheet_demand_key_to_group_no.get(base_item, str(base_item))
+        return base_item
+
     def _add_pattern(self, pattern):
         key = frozenset(pattern.items())
         if key in self.pattern_keys:
@@ -503,14 +582,16 @@ class OptimizeJh:
             sheet_count = len(self.patterns) - roll_only_count
             logging.info(f"[패턴 생성] 쉬트지 전용: {sheet_count}개")
 
-        # 3) 혼합 패턴 (엄격 조건)
-        if self.has_roll_orders and self.has_sheet_orders:
+        # 3) 혼합 패턴 (엄격 조건) — rs_mix_flag='Y'일 때만 허용
+        if self.has_roll_orders and self.has_sheet_orders and self.rs_mix_flag == 'Y':
             mixed_candidates = self._build_mixed_patterns()
             if self._should_add_mixed_patterns(roll_only_patterns, mixed_candidates):
                 for pat in mixed_candidates:
                     self._add_pattern(pat)
                 mixed_count = len(self.patterns) - roll_only_count - sheet_count
             logging.info(f"[패턴 생성] 혼합: {mixed_count}개")
+        elif self.has_roll_orders and self.has_sheet_orders:
+            logging.info(f"[패턴 생성] 혼합 금지 (rs_mix_flag={self.rs_mix_flag})")
 
         logging.info(f"[패턴 생성 완료] 총 {len(self.patterns)}개 패턴")
 
@@ -526,7 +607,8 @@ class OptimizeJh:
             self._generate_patterns_heuristic(items)
 
     def _generate_sheet_patterns(self):
-        """쉬트지 아이템만으로 패턴을 생성합니다. 동일 세로끼리만 조합."""
+        """쉬트지 아이템만으로 패턴을 생성합니다. 동일 세로 + 세로 혼합."""
+        # --- Phase 1: 동일 세로끼리 조합 (기존 로직) ---
         by_length = {}
         for item in self.sheet_items:
             comp = self.item_composition[item]
@@ -542,6 +624,189 @@ class OptimizeJh:
                 self._generate_patterns_bf(items)
             else:
                 self._generate_patterns_heuristic(items)
+
+        same_len_count = len(self.patterns)
+        logging.info(f"[쉬트 패턴] Phase 1 - 동일 세로 조합: {same_len_count}개")
+
+        # --- Phase 2: 세로 혼합 패턴 (sheet_optimize.py 참조) ---
+        all_sheet_items = list(self.sheet_items)
+        if len(all_sheet_items) < 2:
+            return
+
+        # 수요 기반 정렬 헬퍼
+        def _demand_of(item):
+            comp = self.item_composition[item]
+            key = next(iter(comp.keys()))
+            return self.sheet_demands_in_rolls.get(key, 0)
+
+        sorted_by_demand_desc = sorted(all_sheet_items, key=_demand_of, reverse=True)
+        sorted_by_demand_asc = sorted(all_sheet_items, key=_demand_of, reverse=False)
+        sorted_by_width_desc = sorted(all_sheet_items, key=lambda i: self.item_info[i], reverse=True)
+        sorted_by_width_asc = sorted(all_sheet_items, key=lambda i: self.item_info[i], reverse=False)
+
+        # 2-1. 소량 주문 우선 패턴
+        for primary_item in sorted_by_demand_asc[:30]:
+            primary_width = self.item_info[primary_item]
+            if _demand_of(primary_item) > 15:
+                continue
+            for secondary_item in sorted_by_width_desc:
+                if secondary_item == primary_item:
+                    continue
+                secondary_width = self.item_info[secondary_item]
+                for pc in range(1, self.max_pieces + 1):
+                    rem_w = self.max_width - primary_width * pc
+                    rem_p = self.max_pieces - pc
+                    if rem_w <= 0 or rem_p <= 0:
+                        continue
+                    sc = min(int(rem_w / secondary_width), rem_p)
+                    if sc <= 0:
+                        continue
+                    tw = primary_width * pc + secondary_width * sc
+                    if self.min_width <= tw <= self.max_width:
+                        self._add_pattern({primary_item: pc, secondary_item: sc})
+
+        logging.info(f"[쉬트 패턴] Phase 2-1 - 소량주문 우선: {len(self.patterns) - same_len_count}개 추가")
+        phase2_1_count = len(self.patterns)
+
+        # 2-2. First-Fit 휴리스틱 (다양한 정렬 + 랜덤 셔플)
+        import random
+        random.seed(42)
+        heuristics = [sorted_by_demand_desc, sorted_by_demand_asc, sorted_by_width_desc, sorted_by_width_asc]
+        for _ in range(100):
+            items_copy = list(all_sheet_items)
+            random.shuffle(items_copy)
+            heuristics.append(items_copy)
+
+        for sorted_items in heuristics:
+            for start_item in sorted_items:
+                pat = {}
+                tw = 0
+                tp = 0
+                for item in sorted_items:
+                    w = self.item_info[item]
+                    while tw + w <= self.max_width and tp < self.max_pieces:
+                        pat[item] = pat.get(item, 0) + 1
+                        tw += w
+                        tp += 1
+                # min_width 보정
+                while tw < self.min_width and tp < self.max_pieces:
+                    fit_item = next((i for i in sorted_by_width_desc if tw + self.item_info[i] <= self.max_width), None)
+                    if fit_item:
+                        pat[fit_item] = pat.get(fit_item, 0) + 1
+                        tw += self.item_info[fit_item]
+                        tp += 1
+                    else:
+                        break
+                if pat and self.min_width <= tw <= self.max_width:
+                    self._add_pattern(pat)
+
+        logging.info(f"[쉬트 패턴] Phase 2-2 - First-Fit: {len(self.patterns) - phase2_1_count}개 추가")
+        phase2_2_count = len(self.patterns)
+
+        # 2-3. Best-Fit 휴리스틱
+        for start_item in sorted_by_demand_asc:
+            pat = {start_item: 1}
+            tw = self.item_info[start_item]
+            tp = 1
+            while tp < self.max_pieces:
+                rem = self.max_width - tw
+                best_item = None
+                min_waste = float('inf')
+                for cand in all_sheet_items:
+                    cw = self.item_info[cand]
+                    if cw <= rem and rem - cw < min_waste:
+                        min_waste = rem - cw
+                        best_item = cand
+                if not best_item:
+                    break
+                pat[best_item] = pat.get(best_item, 0) + 1
+                tw += self.item_info[best_item]
+                tp += 1
+            if pat and self.min_width <= tw <= self.max_width:
+                self._add_pattern(pat)
+
+        logging.info(f"[쉬트 패턴] Phase 2-3 - Best-Fit: {len(self.patterns) - phase2_2_count}개 추가")
+        phase2_3_count = len(self.patterns)
+
+        # 2-4. 2폭 조합 패턴 체계적 생성
+        for i, item1 in enumerate(all_sheet_items):
+            w1 = self.item_info[item1]
+            for item2 in all_sheet_items[i:]:
+                w2 = self.item_info[item2]
+                for c1 in range(1, self.max_pieces):
+                    for c2 in range(1, self.max_pieces - c1 + 1):
+                        tw = w1 * c1 + w2 * c2
+                        tp = c1 + c2
+                        if self.min_width <= tw <= self.max_width and tp <= self.max_pieces:
+                            p = {item1: c1}
+                            if item1 != item2:
+                                p[item2] = c2
+                            else:
+                                p[item1] += c2
+                            self._add_pattern(p)
+
+        logging.info(f"[쉬트 패턴] Phase 2-4 - 2폭 조합: {len(self.patterns) - phase2_3_count}개 추가")
+        phase2_4_count = len(self.patterns)
+
+        # 2-5. 순수 품목 패턴 (단일 아이템 최대 채움)
+        for item in all_sheet_items:
+            w = self.item_info[item]
+            if w <= 0:
+                continue
+            mc = min(self.max_pieces, int(self.max_width / w))
+            while mc > 0:
+                tw = w * mc
+                if self.min_width <= tw <= self.max_width:
+                    self._add_pattern({item: mc})
+                    break
+                mc -= 1
+
+        logging.info(f"[쉬트 패턴] Phase 2-5 - 순수 품목: {len(self.patterns) - phase2_4_count}개 추가")
+        phase2_5_count = len(self.patterns)
+
+        # 2-6. 폴백: 커버되지 않는 수요 키 확인
+        covered_keys = set()
+        for p in self.patterns:
+            for item_name in p:
+                comp = self.item_composition.get(item_name, {})
+                covered_keys.update(comp.keys())
+
+        all_demand_keys = set(self.sheet_demands_in_meters.keys())
+        uncovered = all_demand_keys - covered_keys
+
+        if uncovered:
+            logging.info(f"[쉬트 패턴] 폴백 - 미커버 수요: {uncovered}")
+            for dk in uncovered:
+                # dk에 해당하는 아이템 찾기
+                candidates = [item for item in all_sheet_items
+                              if dk in self.item_composition.get(item, {})]
+                if not candidates:
+                    continue
+                candidates.sort(key=lambda i: self.item_info[i], reverse=True)
+                for primary in candidates:
+                    pw = self.item_info[primary]
+                    # 단독 패턴
+                    mc = min(self.max_pieces, int(self.max_width / pw)) if pw > 0 else 0
+                    while mc > 0:
+                        if self.min_width <= pw * mc:
+                            self._add_pattern({primary: mc})
+                            break
+                        mc -= 1
+                    # 다른 아이템과 조합
+                    for filler in sorted_by_width_desc:
+                        if filler == primary:
+                            continue
+                        fw = self.item_info[filler]
+                        rem_w = self.max_width - pw
+                        fc = min(int(rem_w / fw), self.max_pieces - 1)
+                        if fc > 0:
+                            tw = pw + fw * fc
+                            if self.min_width <= tw <= self.max_width:
+                                self._add_pattern({primary: 1, filler: fc})
+                                break
+
+        logging.info(f"[쉬트 패턴] Phase 2-6 - 폴백: {len(self.patterns) - phase2_5_count}개 추가")
+        logging.info(f"[쉬트 패턴] 세로 혼합 총 추가: {len(self.patterns) - same_len_count}개 (총: {len(self.patterns)}개)")
 
     def _build_mixed_patterns(self):
         """쉬트지 복합롤 1개 + 롤지 아이템 조합의 혼합 패턴 후보를 만듭니다."""
@@ -1080,6 +1345,7 @@ class OptimizeJh:
             roll_count = int(round(count))
             prod_seq += 1
             pat_type = self._get_pattern_rs_type(pattern_dict)
+            roll_pattern_length = self._resolve_roll_pattern_length(pattern_dict)
 
             sorted_items = sorted(pattern_dict.items(), key=lambda item: self.item_info[item[0]], reverse=True)
 
@@ -1099,7 +1365,8 @@ class OptimizeJh:
                 pattern_labels.extend([self._format_item_label(item_name)] * num)
                 widths_for_db.extend([item_width] * num)
                 primary_group = next(iter(composition.keys()))
-                group_nos_for_db.extend([primary_group] * num)
+                primary_group_str = self._resolve_db_group_no(primary_group)
+                group_nos_for_db.extend([primary_group_str] * num)
                 composite_meta_for_db.extend([dict(composition)] * num)
 
                 # 복합폭 사용 추적
@@ -1134,13 +1401,14 @@ class OptimizeJh:
                         if bw <= 0:
                             bw = item_width / max(1, self.item_piece_count[item_name])
                         expanded_widths.extend([bw] * qty)
-                        expanded_groups.extend([base_item] * qty)
+                        group_str = self._resolve_db_group_no(base_item)
+                        expanded_groups.extend([group_str] * qty)
                         expanded_rs_gubuns.extend([rs] * qty)
 
                     roll_widths_list = (expanded_widths + [0] * 7)[:7]
                     roll_trim = item_width - sum(roll_widths_list)
 
-                    pattern_length = self.roll_pattern_length
+                    pattern_length = roll_pattern_length
                     if rs == 'S' and self.min_sheet_roll_length:
                         pattern_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
 
@@ -1162,20 +1430,20 @@ class OptimizeJh:
                     })
 
             loss = self.max_width - total_width
+            pattern_length = roll_pattern_length
+            if pat_type == 'S' and self.min_sheet_roll_length:
+                pattern_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
 
             result_patterns.append({
                 'pattern': ', '.join(pattern_labels),
                 'pattern_width': total_width,
                 'loss_per_roll': loss,
+                'pattern_length': pattern_length,
                 'count': roll_count,
                 'prod_seq': prod_seq,
                 'rs_gubun': 'W' if pat_type == 'R' else ('S' if pat_type == 'S' else 'M'),
                 **common_props
             })
-
-            pattern_length = self.roll_pattern_length
-            if pat_type == 'S' and self.min_sheet_roll_length:
-                pattern_length = (self.min_sheet_roll_length + self.max_sheet_roll_length) / 2
 
             pattern_details_for_db.append({
                 'widths': (widths_for_db + [0] * 8)[:8],
@@ -1223,13 +1491,17 @@ class OptimizeJh:
         # 패턴 결과 DataFrame
         df_patterns = pd.DataFrame(result_patterns)
         if not df_patterns.empty:
-            df_patterns = df_patterns[['pattern', 'pattern_width', 'count', 'loss_per_roll']]
+            df_patterns = df_patterns[['pattern', 'pattern_width', 'count', 'loss_per_roll', 'pattern_length', 'rs_gubun']]
+            # 롤지(W) 패턴이 먼저 오도록 정렬: rs_gubun 오름차순(M→S→W → W가 뒤), 역으로 정렬
+            rs_order = {'W': 0, 'M': 1, 'S': 2}
+            df_patterns['_rs_order'] = df_patterns['rs_gubun'].map(rs_order).fillna(3)
+            df_patterns = df_patterns.sort_values(['_rs_order', 'count'], ascending=[True, False]).drop('_rs_order', axis=1)
 
         # Fulfillment Summary 생성
         fulfillment_summary = self._build_fulfillment_summary(roll_production, sheet_production)
 
         return {
-            "pattern_result": df_patterns.sort_values('count', ascending=False) if not df_patterns.empty else df_patterns,
+            "pattern_result": df_patterns if not df_patterns.empty else df_patterns,
             "pattern_details_for_db": pattern_details_for_db,
             "pattern_roll_details_for_db": pattern_roll_details_for_db,
             "pattern_roll_cut_details_for_db": pattern_roll_cut_details_for_db,
@@ -1265,8 +1537,8 @@ class OptimizeJh:
         """주문 충족 현황을 생성합니다."""
         rows = []
 
-        # 롤지
-        if self.has_roll_orders and self.df_roll_orders is not None:
+        # 롤지 (롤 아이템이 있을 때만)
+        if self.has_roll_orders and self.df_roll_orders is not None and self.roll_items:
             for gno, demand in self.roll_demands.items():
                 produced = roll_production.get(gno, 0)
                 width = self.roll_base_item_widths.get(gno, 0)
@@ -1285,7 +1557,7 @@ class OptimizeJh:
                 width = key[0] if isinstance(key, tuple) else key
                 length = key[1] if isinstance(key, tuple) else 0
                 rows.append({
-                    'group_order_no': str(key), '지폭': width, '롤길이': length,
+                    'group_order_no': self.sheet_demand_key_to_group_no.get(key, str(key)), '지폭': width, '롤길이': length,
                     '주문수량': demand_rolls, '생산롤수': produced,
                     '과부족(롤)': produced - demand_rolls, 'rs_gubun': 'S'
                 })

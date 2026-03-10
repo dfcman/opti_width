@@ -233,3 +233,139 @@ class VersionGettersDj:
         finally:
             if connection:
                 self.pool.release(connection)
+
+    def get_roll_patterns_from_db(self, lot_no, version):
+        """지정된 lot_no와 version에 대해 th_pattern_sequence에서 롤 패턴(rollwidth)을 가져옵니다."""
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+
+            query = """
+
+                WITH Target_Info AS (
+                    /* 1. 기준이 되는 paper_type과 b_wgt를 사전에 추출 (1번만 수행) */
+                    SELECT paper_type, b_wgt
+                    FROM h3t_production_order
+                    WHERE paper_prod_seq = :lot_no 
+                    AND rownum = 1
+                ),
+                Allowed_Widths AS (
+                    /* 2. 허용되는 지폭(width) 목록을 인덱스 스캔이 가능하도록 구성 */
+                    SELECT DISTINCT width 
+                    FROM h3t_production_order
+                    WHERE paper_prod_seq = :lot_no
+                    AND rs_gubun = 'R'
+                )
+                SELECT 
+                    rollwidth1, rollwidth2, rollwidth3, rollwidth4, 
+                    rollwidth5, rollwidth6, rollwidth7, rollwidth8
+                FROM (
+                    SELECT 
+                        row_number() over(order by rn desc) as r_num,
+                        p.*
+                    FROM th_pattern_tot p
+                    INNER JOIN Target_Info t 
+                        ON p.paper_type = t.paper_type 
+                    AND p.b_wgt = t.b_wgt
+                    WHERE NOT EXISTS (
+                        /* 3. 패턴의 지폭 중, 허용 목록(Allowed_Widths)에 없는 것이 하나라도 있으면 제외 */
+                        SELECT 1
+                        FROM (
+                            SELECT p.rollwidth1 as w FROM dual UNION ALL
+                            SELECT p.rollwidth2 FROM dual UNION ALL
+                            SELECT p.rollwidth3 FROM dual UNION ALL
+                            SELECT p.rollwidth4 FROM dual UNION ALL
+                            SELECT p.rollwidth5 FROM dual UNION ALL
+                            SELECT p.rollwidth6 FROM dual UNION ALL
+                            SELECT p.rollwidth7 FROM dual UNION ALL
+                            SELECT p.rollwidth8 FROM dual
+                        ) v
+                        WHERE v.w > 0 
+                        AND v.w NOT IN (SELECT width FROM Allowed_Widths)
+                    )
+                ) a
+
+            """
+            cursor.execute(query, lot_no=lot_no)
+            rows = cursor.fetchall()
+            
+            db_patterns = []
+            for row in rows:
+                # None이나 0이 아닌 유효한 rollwidth만 필터링합니다.
+                pattern_widths = [int(w) for w in row if w and w > 0]
+                if pattern_widths:
+                    db_patterns.append(pattern_widths)
+            
+            print(f"Successfully fetched {len(db_patterns)} roll patterns from DB for lot {lot_no} version {version}")
+            return db_patterns
+        except oracledb.Error as error:
+            print(f"Error while fetching roll patterns from DB: {error}")
+            return []
+        finally:
+            if connection:
+                self.pool.release(connection)
+
+    def get_sheet_patterns_from_db(self, lot_no):
+        """th_pattern_tot_sheet 테이블에서 현재 오더에 해당하는 지폭이 있는 쉬트 패턴만 가져옵니다.
+        
+        - width1~8 컬럼에는 아이템명 형식(예: "710x4", "1000x2")으로 저장되어 있습니다.
+        - 현재 lot의 지종/평량과 일치하고, 모든 아이템의 지폭이 현재 오더에 존재하는 패턴만 반환합니다.
+        """
+        connection = None
+        try:
+            connection = self.pool.acquire()
+            cursor = connection.cursor()
+            
+            query = """
+                SELECT DISTINCT
+                    width1, width2, width3, width4, 
+                    width5, width6, width7, width8
+                FROM th_pattern_tot_sheet A
+                WHERE (a.rn) IN (
+                    SELECT rn
+                    FROM (
+                        -- 1. UNPIVOT: width 컬럼들을 행으로 변환
+                        SELECT rn, item_name
+                        FROM th_pattern_tot_sheet
+                        UNPIVOT (
+                            item_name FOR col_name IN (
+                                width1, width2, width3, width4, 
+                                width5, width6, width7, width8
+                            )
+                        )
+                    ) P
+                    -- 2. 오더 테이블과 조인 (지폭 추출: "710x4" → 710)
+                    LEFT JOIN (
+                        SELECT DISTINCT width 
+                        FROM h3t_production_order
+                        WHERE paper_prod_seq = :lot_no
+                        AND rs_gubun = 'S'
+                    ) O ON TO_NUMBER(SUBSTR(P.item_name, 1, INSTR(P.item_name, 'x') - 1)) = O.width
+                    
+                    -- 3. 유효 아이템만 있는 패턴 필터링
+                    WHERE P.item_name IS NOT NULL
+                    GROUP BY rn
+                    HAVING 
+                        -- 모든 유효 아이템이 오더 목록에 있는지 확인
+                        COUNT(P.item_name) = COUNT(O.width)
+                )
+            """
+            cursor.execute(query, lot_no=lot_no)
+            rows = cursor.fetchall()
+            
+            db_patterns = []
+            for row in rows:
+                # None이나 빈 문자열이 아닌 유효한 아이템명만 필터링합니다.
+                pattern_items = [item for item in row if item]
+                if pattern_items:
+                    db_patterns.append(pattern_items)
+            
+            print(f"Successfully fetched {len(db_patterns)} sheet patterns from th_pattern_tot_sheet for lot {lot_no}")
+            return db_patterns
+        except oracledb.Error as error:
+            print(f"Error while fetching sheet patterns from DB: {error}")
+            return []
+        finally:
+            if connection:
+                self.pool.release(connection)

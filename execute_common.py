@@ -57,21 +57,16 @@ def init_db(plant_arg):
     db = Database(user=db_config['user'], password=db_config['password'], dsn=db_config['dsn'])
 
     # Dynamic Patching of DataInserters based on Plant
-    from db import db_insert_data as db_common_module
-    
     if plant_arg == '5000':
         from db import db_insert_data_ca as db_module
     elif plant_arg == '8000':
         from db import db_insert_data_st as db_module
     elif plant_arg == '2000':
         from db import db_insert_data_jh as db_module
-    else:  # 3000, 2000 or default
+    else:  # 3000 or default
         from db import db_insert_data_dj as db_module
 
-    # update_lot_status는 공통 모듈에서 바인딩 (3개 공장 공통)
-    db.update_lot_status = db_common_module.DataInserters.update_lot_status.__get__(db, Database)
-    
-    # 나머지 insert 함수들은 공장별 모듈에서 바인딩
+    # insert 함수들은 공장별 모듈에서 바인딩
     db.insert_pattern_sequence = db_module.DataInserters.insert_pattern_sequence.__get__(db, Database)
     db.insert_roll_sequence = db_module.DataInserters.insert_roll_sequence.__get__(db, Database)
     db.insert_cut_sequence = db_module.DataInserters.insert_cut_sequence.__get__(db, Database)
@@ -79,7 +74,6 @@ def init_db(plant_arg):
     db.insert_order_group = db_module.DataInserters.insert_order_group.__get__(db, Database)
     db.insert_group_master = db_module.DataInserters.insert_group_master.__get__(db, Database)
 
-    print(f"Applied common DataInserters from {db_common_module.__name__}")
     print(f"Applied plant-specific DataInserters from {db_module.__name__}")
 
     return db
